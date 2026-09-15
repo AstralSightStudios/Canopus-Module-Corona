@@ -127,6 +127,68 @@ int rh_platform_rebuild_active_page(void) {
     page = *(volatile uint32_t *)(uintptr_t)(page + 48u);
     return page && page != previous ? 0 : -1;
 }
+/* The font manager hangs off the uikit global at *0x200bd1e8 + 28. Its
+ * registered-path list has the payload size at +24, the head at +28 and each
+ * node laid out {name, path, prev, next} with next at node + payload + 4.
+ * font_manager_generate_def_path (0x0c490edc) returns the first entry whose name
+ * matches, else builds "<base>/<name>.ttf" — so fonts never reach the hooked
+ * LVGL POSIX open at all; they are resolved to a native path and opened through
+ * access()/FreeType. Retargeting this registry is therefore the only way a theme
+ * can replace a font. */
+static uint32_t font_manager(void) {
+    uint32_t uikit = *(volatile uint32_t *)(uintptr_t)0x200bd1e8u;
+    return uikit ? *(volatile uint32_t *)(uintptr_t)(uikit + 28u) : 0u;
+}
+static uint32_t font_path_node(uint32_t manager, uint32_t index) {
+    uint32_t next = *(volatile uint32_t *)(uintptr_t)(manager + 24u) + 4u;
+    uint32_t node = *(volatile uint32_t *)(uintptr_t)(manager + 28u);
+    while (node && index--) node = *(volatile uint32_t *)(uintptr_t)(node + next);
+    return node;
+}
+static int copy_string(char *out, uint32_t source) {
+    uint32_t i;
+    if (!source) return 0;
+    for (i = 0; i < RH_PATH; i++) {
+        out[i] = (char)*(volatile unsigned char *)(uintptr_t)(source + i);
+        if (!out[i]) return 1;
+    }
+    return 0;
+}
+static int same_string(uint32_t source, const char *text) {
+    uint32_t i;
+    if (!source) return 0;
+    for (i = 0; i < RH_PATH; i++) {
+        char value = (char)*(volatile unsigned char *)(uintptr_t)(source + i);
+        if (value != text[i]) return 0;
+        if (!value) return 1;
+    }
+    return 0;
+}
+int rh_platform_font_path_get(uint32_t index, char *name, char *path) {
+    uint32_t manager = font_manager(), node;
+    if (!manager || !name || !path) return -1;
+    node = font_path_node(manager, index);
+    if (!node) return -1;
+    if (!copy_string(name, *(volatile uint32_t *)(uintptr_t)node)) return -1;
+    return copy_string(path, *(volatile uint32_t *)(uintptr_t)(node + 4u)) ? 0 : -1;
+}
+/* Replace one registry entry's path. add_path appends at the tail while lookup
+ * takes the first name match, so an already-registered family cannot be
+ * overridden by adding alone — the old entry has to be removed first. The old
+ * name string is freed by the removal, so it is copied out beforehand. The
+ * result is confirmed by asking the manager to resolve the family again. */
+int rh_platform_font_retarget(uint32_t index, const char *path) {
+    char name[RH_PATH];
+    uint32_t manager = font_manager(), node, resolved;
+    if (!manager || !path) return -1;
+    node = font_path_node(manager, index);
+    if (!node) return -1;
+    if (!copy_string(name, *(volatile uint32_t *)(uintptr_t)node)) return -1;
+    ((void (*)(uint32_t))(uintptr_t)0x0c904cfdu)(node);
+    ((uint32_t (*)(const char *, const char *))(uintptr_t)0x0c4924e1u)(name, path);
+    resolved = ((uint32_t (*)(uint32_t, const char *))(uintptr_t)0x0c490eddu)(manager, name);
+    return same_string(resolved, path) ? 0 : -1;
+}
 void *rh_platform_refresh_timer_create(void (*callback)(void *)) {
     return ((void *(*)(void (*)(void *), uint32_t, void *))(uintptr_t)0x0c3abd21u)
         (callback, 50u, 0);

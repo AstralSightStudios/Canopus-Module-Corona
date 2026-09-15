@@ -28,6 +28,16 @@ int rh_platform_request_full_redraw(void);
  * fails leaves that page torn down. One page only; the rest of the stack is
  * untouched. */
 int rh_platform_rebuild_active_page(void);
+/* The font manager's registered-path registry, which is how a font family name
+ * becomes a native file path. Fonts never pass through the hooked LVGL POSIX
+ * open, so retargeting this registry is the only way a theme replaces a font.
+ * Both take an index into the registry; get() fills RH_PATH-sized buffers and
+ * returns -1 past the end. retarget() removes and re-adds the entry, so it moves
+ * to the end of the registry and every index at or after it shifts down; it
+ * confirms the manager resolves the family to `path` before reporting success.
+ * Only new font wrappers are affected: live ones must be rebuilt with their page. */
+int rh_platform_font_path_get(uint32_t index, char *name, char *path);
+int rh_platform_font_retarget(uint32_t index, const char *path);
 void *rh_platform_refresh_timer_create(void (*callback)(void *));
 void rh_platform_refresh_timer_delete(void *);
 #endif

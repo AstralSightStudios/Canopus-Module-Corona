@@ -433,3 +433,51 @@ decoding inline), and any animation or canvas-style widget that owns a decoded
 buffer rather than re-opening a source. Those may still show the old image and need
 the page-rebuild lifecycle. This section is static recovery from the exact .139
 decompilation; it is not emulation-executed.
+
+## Fonts: the hook cannot reach them; the registry can (2026-09-16)
+
+Earlier sections said fonts "additionally use native access/FreeType operations" and
+left it there. Traced properly, the situation is stronger than that: the module's
+redirect cannot theme a font at all, not even a newly created one.
+
+`font_manager_create_font_warpper` (0x0c494380) resolves a family with
+`font_manager_generate_def_path` (0x0c490edc), checks the result with the **native**
+`access()` (0x0c34f8ec, via stat 0x0c33e92c) and hands the pathname to
+`lv_freetype_font_create`. `lv_fs_open` is never called, so the '/' LVGL POSIX driver
+whose open slot the module hooks never sees a font file.
+
+What *is* reachable is the manager's registered-path registry, which is what turns a
+family name into that native path. `generate_def_path` returns the path of the first
+registry entry whose name matches, else builds `<base>/<name>.ttf` from the base
+directory at manager+36. The manager itself is `*(0x200bd1e8 + 28)`; the registry
+keeps its node payload size at +24 and its head at +28, with each node
+`{name, path}` and the next pointer at `node + payload + 4`.
+
+**The trap.** `font_manager_add_path` (0x0c4924e0) appends via the generic list
+append 0x0c3a46a2, which links after the tail. Lookup takes the *first* match. So
+calling add_path for a family that is already registered logs "add success" and
+appends a node that can never be reached — and the startup path registers exactly
+the families a theme cares about (MiSans-Regular/Demibold/Medium to /tmp copies).
+A naive implementation would look like it worked and change nothing.
+`firmware_font_retarget.py:test_add_path_alone_cannot_override_a_registered_family`
+executes this against the real functions.
+
+**What the module does.** It walks the registry, and for every entry whose path
+resolves through a mapping rule it calls `font_manager_remove_path` (0x0c904cfc)
+and then `font_manager_add_path` with the themed path. The removal frees the old
+name string, so the name is copied out first. Afterwards it calls
+`generate_def_path` again for that family and only counts the retarget when the
+manager really resolves to the themed file. A retargeted entry lands at the tail, so
+the walk re-examines the same index; a themed path no longer matches a rule, which
+ends it, and a bounded loop counter stops a rule set that maps a theme directory
+back onto itself.
+
+Retargeting runs before the page rebuild, because it only affects font wrappers
+created afterwards — a live page keeps its old face until it is rebuilt.
+
+Limits: there is a window between the remove and the add where the family resolves
+to the default path; if the add fails to allocate, the entry is lost and the family
+falls back to the default permanently (reported by not counting, not recoverable);
+only `access()` is checked, so a themed file that opens but is not a valid face is
+not handled; and pages other than the stack-top keep their old faces. Symbols are
+allowlisted under EVID-RESOURCE-4139-006. Nothing has run on hardware.

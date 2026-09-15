@@ -107,9 +107,9 @@ class Rebind(unittest.TestCase):
 
     def status_words(self):
         m, writer, output = self.m, 0x3c730000, 0x3c731000
-        m.uc.mem_write(writer, struct.pack('<6I', output, 36, 0, 0, 1, 1))
+        m.uc.mem_write(writer, struct.pack('<6I', output, 40, 0, 0, 1, 1))
         self.assertEqual(m.call(m.word(self.descriptor + 140), writer), 0)
-        return struct.unpack('<9I', m.uc.mem_read(output, 36))
+        return struct.unpack('<10I', m.uc.mem_read(output, 40))
 
     def restore(self):
         return self.command(0x4351000a)
@@ -192,21 +192,21 @@ class Rebind(unittest.TestCase):
         self.assertIsNotNone(self.descriptor)
         callback = m.word(self.descriptor + 140)
         writer, output = 0x3c730000, 0x3c731000
-        m.uc.mem_write(writer, struct.pack('<6I', output, 36, 0, 0, 1, 1))
+        m.uc.mem_write(writer, struct.pack('<6I', output, 40, 0, 0, 1, 1))
         self.assertEqual(m.call(callback, writer), 0)
-        # 9 u32: magic, status version 4, installed, rule count, redirected,
-        # fallback, image-cache retirements, full-screen redraws, page rebuilds
-        # (the last three 0 here: this boot fixture has no image cache, no
-        # display and no page stack).
-        self.assertEqual(struct.unpack('<9I', m.uc.mem_read(output, 36)),
-                         (0x31514852, 4, 1, 1, 0, 0, 0, 0, 0))
-        self.assertEqual(m.word(writer + 8), 36)
+        # 10 u32: magic, status version 5, installed, rule count, redirected,
+        # fallback, image-cache retirements, full-screen redraws, page rebuilds,
+        # font retargets (the last four 0 here: this boot fixture has no image
+        # cache, no display, no page stack and no font manager).
+        self.assertEqual(struct.unpack('<10I', m.uc.mem_read(output, 40)),
+                         (0x31514852, 5, 1, 1, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(m.word(writer + 8), 40)
         self.assertEqual(m.word(writer + 16), 2)
         self.assertEqual(m.word(writer + 20), 2)
-        m.uc.mem_write(output, b'x' * 36)
-        m.uc.mem_write(writer, struct.pack('<6I', output, 35, 0, 0, 1, 1))
+        m.uc.mem_write(output, b'x' * 40)
+        m.uc.mem_write(writer, struct.pack('<6I', output, 39, 0, 0, 1, 1))
         self.assertEqual(m.call(callback, writer), 0xffffffff)
-        self.assertEqual(bytes(m.uc.mem_read(output, 36)), b'x' * 36)
+        self.assertEqual(bytes(m.uc.mem_read(output, 40)), b'x' * 40)
         self.assertEqual(m.word(writer + 8), 0)
 
     def test_activate_drops_present_image_cache(self):

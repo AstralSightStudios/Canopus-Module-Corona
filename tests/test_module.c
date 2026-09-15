@@ -9,7 +9,8 @@
 static const char config[] = "/resource/\t/data/canopus/themes/current/\n";
 static const char *input = config;
 static unsigned position, config_opens, closes, allocations, frees, registrations;
-static unsigned image_drops, redraws, rebuilds, timers_created, timers_deleted;
+static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
+static int font_retargeted;
 static void (*timer_callback)(void *);
 static int timer_token, fail_timer, reject_redraw, reject_rebuild;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
@@ -81,6 +82,29 @@ void rh_platform_refresh_timer_delete(void *timer) {
     timer_callback = NULL;
     timers_deleted++;
 }
+/* Two registered families: one whose file falls under a mapping rule, one that
+ * does not. Once retargeted the first resolves to the themed file, so it stops
+ * matching and the walk terminates. */
+#define THEMED_FONT "/data/canopus/themes/current/font/MiSans-Regular.ttf"
+int rh_platform_font_path_get(uint32_t index, char *name, char *path) {
+    assert(!locked && name && path);
+    if (index >= 2u) return -1;
+    if (index) {
+        strcpy(name, "Other");
+        strcpy(path, "/system/fonts/Other.ttf");
+    } else {
+        strcpy(name, "MiSans-Regular");
+        strcpy(path, font_retargeted ? THEMED_FONT : "/resource/font/MiSans-Regular.ttf");
+    }
+    return 0;
+}
+int rh_platform_font_retarget(uint32_t index, const char *path) {
+    assert(!locked && path && index == 0u && !font_retargeted);
+    assert(!strcmp(path, THEMED_FONT));
+    font_retargeted = 1;
+    retargets++;
+    return 0;
+}
 int rh_platform_rebuild_active_page(void) {
     assert(!locked);  /* the page rebuild must also run outside the lock */
     if (reject_rebuild) return -1;
@@ -101,7 +125,7 @@ extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
 int main(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
-    unsigned char status[40];
+    unsigned char status[48];
     unsigned before;
     assert(registrations == 1 && closes == 1);
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
@@ -112,11 +136,11 @@ int main(void) {
     assert(d->query(NULL) == -1);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w));
-    assert(w.used == 36 && u32(status) == 0x31514852u && u32(status + 4) == 4);
+    assert(w.used == 40 && u32(status) == 0x31514852u && u32(status + 4) == 5);
     assert(u32(status + 8) == 0 && u32(status + 12) == 0 && u32(status + 24) == 0 &&
-           u32(status + 28) == 0 && u32(status + 32) == 0);
+           u32(status + 28) == 0 && u32(status + 32) == 0 && u32(status + 36) == 0);
     assert(d->query(&w) == -1);
-    assert(!canopus_status_writer_init(&w, status, 35));
+    assert(!canopus_status_writer_init(&w, status, 39));
     memset(status, 0xab, sizeof(status));
     assert(d->query(&w) == -1 && w.used == 0 && status[0] == 0xab);
 
@@ -168,6 +192,7 @@ int main(void) {
     assert(u32(status + 24) == image_drops && image_drops == 3);
     assert(u32(status + 28) == redraws && redraws == 3);
     assert(u32(status + 32) == rebuilds && rebuilds == 3);
+    assert(u32(status + 36) == retargets && retargets == 1);
     /* Busy UI: requests coalesce and the cache isn't touched mid-render. */
     redraw_ready = 0;
     before = timers_created;

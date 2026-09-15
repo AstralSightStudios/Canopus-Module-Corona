@@ -10,8 +10,28 @@ static int configured;
 static uint32_t images_dropped;
 static uint32_t redraws;
 static uint32_t rebuilds;
+static uint32_t fonts_retargeted;
 static void *refresh_timer;
-static unsigned refresh_pending, cache_dropped, rebuild_tried, refreshing;
+static unsigned refresh_pending, cache_dropped, fonts_done, rebuild_tried, refreshing;
+
+/* Point every registered font family whose file falls under a mapping rule at
+ * the themed file. A retargeted entry is re-added at the end of the registry, so
+ * the same index is re-examined; a themed path normally no longer matches a
+ * rule, which ends the walk. The bound stops a pathological rule set that maps a
+ * theme directory back onto itself from looping. */
+static void retarget_fonts(void) {
+    char name[RH_PATH], path[RH_PATH], mapped[RH_PATH];
+    uint32_t index = 0, guard = 0;
+    while (guard++ < RH_RULES * 8u) {
+        if (rh_platform_font_path_get(index, name, path)) return;
+        if (rh_resolve(&S, path, mapped) == 1 &&
+            rh_platform_font_retarget(index, mapped) == 0) {
+            if (fonts_retargeted != UINT32_MAX) fonts_retargeted++;
+            continue;
+        }
+        index++;
+    }
+}
 
 /* One request, coalesced across activations. The temporary UI timer retries only
  * until the cache drop and dirty-area request succeed, then deletes itself. */
@@ -22,6 +42,12 @@ static void refresh_step(void *timer) {
     if (!cache_dropped && rh_platform_image_cache_drop_all() == 0) {
         cache_dropped = 1;
         if (images_dropped != UINT32_MAX) images_dropped++;
+    }
+    /* Retarget font families before the rebuild, so the page recreates its font
+     * wrappers from the themed files rather than the startup-registered ones. */
+    if (cache_dropped && !fonts_done) {
+        fonts_done = 1;
+        retarget_fonts();
     }
     /* Once the stale entries are gone, rebuild the page on top so widgets that
      * hold a resource are recreated rather than repainted; a repaint alone
@@ -43,6 +69,7 @@ static void refresh_step(void *timer) {
 static int request_refresh(void) {
     if (!refresh_pending) {
         cache_dropped = 0;
+        fonts_done = 0;
         rebuild_tried = 0;
         refresh_pending = 1;
     }
@@ -112,9 +139,9 @@ static int32_t stop(const struct canopus_context_v1 *c) {
     return S.installed ? CANOPUS_RESULT_REBOOT_REQUIRED : 0;
 }
 static int32_t query(struct canopus_status_writer_v1 *writer) {
-    uint32_t irq, installed, count, redirected, fallback, dropped, redrawn, rebuilt;
+    uint32_t irq, installed, count, redirected, fallback, dropped, redrawn, rebuilt, fonts;
     if (!writer || !writer->buf || writer->state != CANOPUS_STATUS_WRITER_WRITING ||
-        writer->used > writer->capacity || writer->capacity - writer->used < 36u)
+        writer->used > writer->capacity || writer->capacity - writer->used < 40u)
         return -1;
     irq = rh_platform_lock();
     installed = (uint32_t)S.installed;
@@ -124,16 +151,18 @@ static int32_t query(struct canopus_status_writer_v1 *writer) {
     dropped = images_dropped;
     redrawn = redraws;
     rebuilt = rebuilds;
+    fonts = fonts_retargeted;
     rh_platform_unlock(irq);
     if (canopus_status_put_u32(writer, 0x31514852u) ||
-        canopus_status_put_u32(writer, 4u) ||
+        canopus_status_put_u32(writer, 5u) ||
         canopus_status_put_u32(writer, installed) ||
         canopus_status_put_u32(writer, count) ||
         canopus_status_put_u32(writer, redirected) ||
         canopus_status_put_u32(writer, fallback) ||
         canopus_status_put_u32(writer, dropped) ||
         canopus_status_put_u32(writer, redrawn) ||
-        canopus_status_put_u32(writer, rebuilt)) return -1;
+        canopus_status_put_u32(writer, rebuilt) ||
+        canopus_status_put_u32(writer, fonts)) return -1;
     return canopus_status_writer_publish(writer);
 }
 __attribute__((used)) struct canopus_module_descriptor_v1 canopus_module_descriptor;

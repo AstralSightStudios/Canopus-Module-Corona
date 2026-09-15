@@ -51,7 +51,7 @@ shasum -a 256 -c SHA256SUMS
 8. 查看详情是否为“启动时常驻”，且没有激活错误。只有之后发生的、经过
    LVGL POSIX driver 的新 open 才会被映射。
 
-## 图片重载（已实现）与字体（未实现）
+## 资源重载：图片、页面重建与字体
 
 **图片：** 每次 activate 成功安装重定向后，模块会在 UI 所属线程**逐项退休**
 图片缓存和图片头缓存（`lv_cache_drop`，.139 地址 0x0c8b8cae）。LVGL 图片缓存以
@@ -100,12 +100,26 @@ create/start/resume，通过页面自己的 on_create 回调重建全部控件�
 - **只重建栈顶页**；栈内其他页面仍持有旧资源，直到它们各自被重建。
 - 重建一旦开始却没能拉起来，该页面会停留在已拆除状态。
 
-**字体：** 页面重建会释放该页持有的字体 wrapper 并重新创建，但**字体文件不会变**：
-`font_manager_generate_def_path`（0x0c490edc）仍解析到启动时注册的原路径，
-而且字体走原生 `access()`/FreeType，**根本不经过本模块 hook 的 LVGL POSIX open**。
-要换字体必须先替换字体管理器的注册路径（`font_manager_remove_path` 0x0c904cfc +
-`font_manager_add_path` 0x0c4924e0），这部分**尚未实现**。注意直接 add_path 对
-启动时已注册的名字是**无效**的：它尾插，而解析按名字取第一个匹配。见
+**字体（已实现）：** 字体**不经过**本模块 hook 的 LVGL POSIX open——
+`font_manager_create_font_warpper` 用 `font_manager_generate_def_path`（0x0c490edc）
+把字体名解析成**原生路径**，再用原生 `access()` 检查并交给 FreeType。所以光有
+路径重定向对字体完全无效。
+
+模块改为直接改写**字体管理器的注册表**：遍历已注册的 {字体名, 路径} 条目，
+把路径命中映射规则的那些指向主题文件。注意**直接 add_path 是无效的**：它尾插，
+而解析按名字取第一个匹配，启动时注册的 MiSans 条目会一直胜出（日志还会打印
+"add success"）。因此必须先 `font_manager_remove_path`（0x0c904cfc）摘掉旧条目，
+再 `font_manager_add_path`（0x0c4924e0）加新的；旧的名字字符串会被 remove 释放，
+所以要先复制出来。替换后模块会**再解析一次**确认真的指向主题文件才计数。
+
+边界：
+- 只影响**之后新建**的字体 wrapper。页面已持有的旧 face 要等该页重建才会换，
+  所以字体替换排在页面重建之前执行。
+- remove 与 add 之间有一个短窗口，此时该字体名解析回默认 `<base>/<名字>.ttf`。
+- 若 add 分配失败，该条目丢失、永久回落到默认路径；模块以不计数体现，但**无法恢复**。
+- 只检查 `access()`，**不检查**主题字体文件能否被 FreeType 正确解析。
+- query 的 `fonts_retargeted` 每成功替换一个字体名加一。
+见
 `targets/xiaomi-band-11-4.100.139/lifecycle-recovery.json` 与 `ui-reload-audit.md`。
 
 当前 Manager 没有主题选择器、资源上传页面，也没有展示模块 RHQ1 计数器
@@ -172,12 +186,12 @@ image 的再次激活只重绑回调，不重新读取配置。更换规则需�
 
 ## 状态与错误
 
-query 返回 36 字节，小端序的九个 uint32：
+query 返回 40 字节，小端序的十个 uint32：
 
 | 偏移 | 字段 |
 |---|---|
 | 0 | `RHQ1` magic（0x31514852） |
-| 4 | 状态格式版本，4 |
+| 4 | 状态格式版本，5 |
 | 8 | installed，0/1 |
 | 12 | rule_count |
 | 16 | redirected，替代资源打开成功次数 |
@@ -185,11 +199,13 @@ query 返回 36 字节，小端序的九个 uint32：
 | 24 | images_dropped，成功清空图片缓存的次数 |
 | 28 | redraws，成功请求整屏失效（强制重绘）的次数 |
 | 32 | rebuilds，成功重建栈顶页面的次数 |
+| 36 | fonts_retargeted，成功改写字体注册路径的条目数 |
 
 计数器到 UINT32_MAX 后饱和；未命中规则和非法路径不计入 fallback。
-query 需要至少 36 字节可写剩余空间，成功后发布 writer。状态格式版本
+query 需要至少 40 字节可写剩余空间，成功后发布 writer。状态格式版本
 从 1 升到 2 时新增偏移 24 的 `images_dropped`，从 2 升到 3 时新增偏移 28 的
-`redraws`，从 3 升到 4 时新增偏移 32 的 `rebuilds`。
+`redraws`，从 3 升到 4 时新增偏移 32 的 `rebuilds`，从 4 升到 5 时新增偏移 36 的
+`fonts_retargeted`。
 
 | 返回值 | 含义 |
 |---|---|
@@ -230,8 +246,8 @@ stop/deactivate 在安装后返回 SDK 的 `CANOPUS_RESULT_REBOOT_REQUIRED`。
 - 正常/缺失/错误格式的主题资源；字体及图片分别进行显示验证。
 - 旧缓存行为、内存余量、watchdog 与安全模式恢复。
 
-自动 miwear 重启、字体路径替换与字体重载、强制同步整屏刷新，以及重建栈顶页
-之外的页面，均不属于当前实现（模块会请求整屏失效，但实际重绘仍交给固件刷新
+自动 miwear 重启、强制同步整屏刷新、重建栈顶页之外的页面，以及主题字体的
+格式有效性检查，均不属于当前实现（模块会请求整屏失效，但实际重绘仍交给固件刷新
 定时器；页面重建只作用于栈顶页）。宿主测试与 Unicorn 固件指令测试不能替代
 上述实机验收——页面重建尤其需要实机确认：重建后页面是否可交互、导航栈是否
 正确、反复激活是否泄漏根视图或耗尽异步销毁栈。

@@ -55,7 +55,8 @@ def main():
             [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
         for name in ('firmware_paths', 'firmware_restart', 'firmware_rebind',
                      'firmware_font_lifecycle', 'firmware_image_lifecycle',
-                     'firmware_ui_redraw', 'firmware_page_rebuild'):
+                     'firmware_ui_redraw', 'firmware_page_rebuild',
+                     'firmware_font_retarget'):
             run(name, [firmware_python, str(ROOT / 'tests' / (name + '.py'))])
         run('Watchface payload and Supervisor trust-key verification', [
             sys.executable, str(canopus / 'scripts/build_module_installer_prod.py'),
