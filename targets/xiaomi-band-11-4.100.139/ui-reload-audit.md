@@ -339,9 +339,52 @@ without-cachepolicy path, as used by `finish_page`) deletes the root view and ma
 re-entry rebuild against the redirect.
 
 This supersedes the earlier advice in this file that navigating away and back is
-equivalent to a rebuild. Nothing here is implemented in the module yet, and none of
-it has been executed in emulation or on hardware; it is static recovery from the
-exact .139 decompilation.
+equivalent to a rebuild.
+
+### The full lifecycle ladder
+
+The create side is symmetric and equally recoverable. `page+40` is the state byte;
+the callbacks are slots on the page's handler chain.
+
+| transition | function | state | callback | event |
+|---|---|---|---|---|
+| create  | `on_create_wrapped` 0x0c696ae8 | 2/4 -> 5 | `page[19]` | 3 |
+| start   | `on_start_wrapped` 0x0c693996  | 5/9 -> 8 | `page[22]` | 4 |
+| resume  | `on_resume_wrapped` 0x0c696c18 | 8/18 -> 17 | `page[20]` | 5 |
+| pause   | 0x0c6939e4                     | 17 -> 18 | `page[23]` | 6 |
+| stop    | 0x0c693a2e                     | 8/18 -> 9 | `page[24]` | 7 |
+| destroy | `on_destroy_wrapped` 0x0c696d0c | 8/9 -> 4 | `page[25]` | 8 |
+
+`on_create_wrapped` allocates the root view (0x0c6acd04), stores it at `page+48`, and
+calls `page[19](page, root_view, arg)` — that is where a page builds all of its
+widgets, so it is the rebuild that re-opens every resource.
+
+Critically, `on_resume_wrapped` begins by calling `on_create_wrapped` and then
+`on_start_wrapped`, so it is a complete "bring this page fully up" entry point, valid
+from the destroyed state.
+
+### Rebuild recipe (recovered, NOT implemented)
+
+For a page pointer `p`, with the stack-top obtained from `sub_C697450(-1)`:
+
+1. `exec_pop_lifecycle_without_cachepolicy(p)` (0x0c696e34) — pause, stop, destroy
+   regardless of cache policy, ending in `lv_obj_delete(p+48)` and state 4.
+2. `on_resume_wrapped(p)` (0x0c696c18) — create (rebuilding the root view and every
+   widget through `page[19]`), start, resume, ending in state 17.
+
+Guards this needs, none of them yet handled:
+
+- `on_destroy_wrapped` DEFERS the view deletion onto a "ui destroy stack"
+  (`dword_200D31A0`, count `byte_200D319C`, capacity 10) when `p+36 != 0`. In that
+  case `p+48` is still set when step 2 runs, and `on_create_wrapped` takes its
+  already-has-root path and trips the activitymanager assert at line 1310. Either
+  restrict the rebuild to pages with `p+36 == 0`, or drain the destroy stack first.
+- `on_resume_wrapped` only performs the resume leg when the screen is on
+  (`byte_200C2A28 == 2`) and the page layer is active (`byte_20096085 != 0`).
+- UI owner thread only, outside the interrupt lock.
+
+Nothing here is implemented in the module, and none of it has been executed in
+emulation or on hardware; it is static recovery from the exact .139 decompilation.
 
 ## The decode path, traced (2026-09-15)
 
