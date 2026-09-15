@@ -107,9 +107,9 @@ class Rebind(unittest.TestCase):
 
     def status_words(self):
         m, writer, output = self.m, 0x3c730000, 0x3c731000
-        m.uc.mem_write(writer, struct.pack('<6I', output, 32, 0, 0, 1, 1))
+        m.uc.mem_write(writer, struct.pack('<6I', output, 36, 0, 0, 1, 1))
         self.assertEqual(m.call(m.word(self.descriptor + 140), writer), 0)
-        return struct.unpack('<8I', m.uc.mem_read(output, 32))
+        return struct.unpack('<9I', m.uc.mem_read(output, 36))
 
     def restore(self):
         return self.command(0x4351000a)
@@ -192,26 +192,27 @@ class Rebind(unittest.TestCase):
         self.assertIsNotNone(self.descriptor)
         callback = m.word(self.descriptor + 140)
         writer, output = 0x3c730000, 0x3c731000
-        m.uc.mem_write(writer, struct.pack('<6I', output, 32, 0, 0, 1, 1))
+        m.uc.mem_write(writer, struct.pack('<6I', output, 36, 0, 0, 1, 1))
         self.assertEqual(m.call(callback, writer), 0)
-        # 8 u32: magic, status version 3, installed, rule count, redirected,
-        # fallback, image-cache drops, full-screen redraws (the last two 0 here:
-        # neither an image cache nor a display exists in this boot fixture).
-        self.assertEqual(struct.unpack('<8I', m.uc.mem_read(output, 32)),
-                         (0x31514852, 3, 1, 1, 0, 0, 0, 0))
-        self.assertEqual(m.word(writer + 8), 32)
+        # 9 u32: magic, status version 4, installed, rule count, redirected,
+        # fallback, image-cache retirements, full-screen redraws, page rebuilds
+        # (the last three 0 here: this boot fixture has no image cache, no
+        # display and no page stack).
+        self.assertEqual(struct.unpack('<9I', m.uc.mem_read(output, 36)),
+                         (0x31514852, 4, 1, 1, 0, 0, 0, 0, 0))
+        self.assertEqual(m.word(writer + 8), 36)
         self.assertEqual(m.word(writer + 16), 2)
         self.assertEqual(m.word(writer + 20), 2)
-        m.uc.mem_write(output, b'x' * 32)
-        m.uc.mem_write(writer, struct.pack('<6I', output, 31, 0, 0, 1, 1))
+        m.uc.mem_write(output, b'x' * 36)
+        m.uc.mem_write(writer, struct.pack('<6I', output, 35, 0, 0, 1, 1))
         self.assertEqual(m.call(callback, writer), 0xffffffff)
-        self.assertEqual(bytes(m.uc.mem_read(output, 32)), b'x' * 32)
+        self.assertEqual(bytes(m.uc.mem_read(output, 36)), b'x' * 36)
         self.assertEqual(m.word(writer + 8), 0)
 
     def test_activate_drops_present_image_cache(self):
         self.graphics()
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (1, 1))
 
     def test_activate_requests_full_redraw(self):
         m = self.m
@@ -226,12 +227,12 @@ class Rebind(unittest.TestCase):
         disp = self.graphics()
         self.m.word(disp + 696, 0)
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.status_words()[6:], (0, 0))
+        self.assertEqual(self.status_words()[6:8], (0, 0))
         self.tick()
-        self.assertEqual(self.status_words()[6:], (0, 0))
+        self.assertEqual(self.status_words()[6:8], (0, 0))
         self.m.word(disp + 696, disp + 0x800)
         self.tick()
-        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (1, 1))
         self.assertEqual(self.timer_callback, 0)
         self.assertEqual(self.timer_deletes, 1)
 
@@ -242,26 +243,26 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(self.timer_creates, 1)
         self.tick()
-        self.assertEqual(self.status_words()[6:], (0, 0))
+        self.assertEqual(self.status_words()[6:8], (0, 0))
         m.word(disp + 56, 1 << 8)
         m.word(disp + 608, 0)
         self.tick()
-        self.assertEqual(self.status_words()[6:], (0, 0))
+        self.assertEqual(self.status_words()[6:8], (0, 0))
         m.word(disp + 608, 1)
         self.tick()
-        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (1, 1))
         self.assertEqual(self.timer_callback, 0)
 
     def test_rejected_dirty_area_is_not_counted_or_repeatedly_dropped(self):
         self.graphics()
         self.bind(0xc3809a4, lambda: 0)  # firmware event rejects invalidation
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.status_words()[6:], (1, 0))
+        self.assertEqual(self.status_words()[6:8], (1, 0))
         self.tick()
-        self.assertEqual(self.status_words()[6:], (1, 0))
+        self.assertEqual(self.status_words()[6:8], (1, 0))
         self.bind(0xc3809a4, lambda: 1)
         self.tick()
-        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (1, 1))
         self.assertEqual(self.timer_callback, 0)
 
     def test_timer_allocation_failure_is_reported_with_hook_resident(self):
@@ -317,7 +318,7 @@ class Rebind(unittest.TestCase):
         m.call(0xc8b9790, cache)
         self.assertEqual(m.word(entry + 4), 0)
         self.assertEqual(freed, [key, key])  # payload callback, allocation free
-        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (1, 1))
 
     def test_missing_config_keeps_original_driver(self):
         del self.m.disk['/data/canopus/themes/mappings.tsv']

@@ -9,8 +9,9 @@ static struct rh_state S;
 static int configured;
 static uint32_t images_dropped;
 static uint32_t redraws;
+static uint32_t rebuilds;
 static void *refresh_timer;
-static unsigned refresh_pending, cache_dropped, refreshing;
+static unsigned refresh_pending, cache_dropped, rebuild_tried, refreshing;
 
 /* One request, coalesced across activations. The temporary UI timer retries only
  * until the cache drop and dirty-area request succeed, then deletes itself. */
@@ -21,6 +22,14 @@ static void refresh_step(void *timer) {
     if (!cache_dropped && rh_platform_image_cache_drop_all() == 0) {
         cache_dropped = 1;
         if (images_dropped != UINT32_MAX) images_dropped++;
+    }
+    /* Once the stale entries are gone, rebuild the page on top so widgets that
+     * hold a resource are recreated rather than repainted; a repaint alone
+     * cannot replace a font wrapper a live page owns. Attempted at most once,
+     * and a skip is not a failure: the redraw below still runs. */
+    if (cache_dropped && !rebuild_tried) {
+        rebuild_tried = 1;
+        if (rh_platform_rebuild_active_page() == 0 && rebuilds != UINT32_MAX) rebuilds++;
     }
     if (cache_dropped && rh_platform_request_full_redraw() == 0) {
         void *done = refresh_timer;
@@ -34,6 +43,7 @@ static void refresh_step(void *timer) {
 static int request_refresh(void) {
     if (!refresh_pending) {
         cache_dropped = 0;
+        rebuild_tried = 0;
         refresh_pending = 1;
     }
     refresh_step(0);
@@ -102,9 +112,9 @@ static int32_t stop(const struct canopus_context_v1 *c) {
     return S.installed ? CANOPUS_RESULT_REBOOT_REQUIRED : 0;
 }
 static int32_t query(struct canopus_status_writer_v1 *writer) {
-    uint32_t irq, installed, count, redirected, fallback, dropped, redrawn;
+    uint32_t irq, installed, count, redirected, fallback, dropped, redrawn, rebuilt;
     if (!writer || !writer->buf || writer->state != CANOPUS_STATUS_WRITER_WRITING ||
-        writer->used > writer->capacity || writer->capacity - writer->used < 32u)
+        writer->used > writer->capacity || writer->capacity - writer->used < 36u)
         return -1;
     irq = rh_platform_lock();
     installed = (uint32_t)S.installed;
@@ -113,15 +123,17 @@ static int32_t query(struct canopus_status_writer_v1 *writer) {
     fallback = S.fallback;
     dropped = images_dropped;
     redrawn = redraws;
+    rebuilt = rebuilds;
     rh_platform_unlock(irq);
     if (canopus_status_put_u32(writer, 0x31514852u) ||
-        canopus_status_put_u32(writer, 3u) ||
+        canopus_status_put_u32(writer, 4u) ||
         canopus_status_put_u32(writer, installed) ||
         canopus_status_put_u32(writer, count) ||
         canopus_status_put_u32(writer, redirected) ||
         canopus_status_put_u32(writer, fallback) ||
         canopus_status_put_u32(writer, dropped) ||
-        canopus_status_put_u32(writer, redrawn)) return -1;
+        canopus_status_put_u32(writer, redrawn) ||
+        canopus_status_put_u32(writer, rebuilt)) return -1;
     return canopus_status_writer_publish(writer);
 }
 __attribute__((used)) struct canopus_module_descriptor_v1 canopus_module_descriptor;

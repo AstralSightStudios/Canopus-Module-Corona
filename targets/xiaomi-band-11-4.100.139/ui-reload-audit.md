@@ -324,8 +324,13 @@ finding:
   policy 1 and 4 run all three steps. Policy 2 and 7 stop after pause and dispatch
   event 10; policy 5 stops after stop; policy 6 only pauses. **The root view is NOT
   deleted for a cached page.**
-- `exec_pop_lifecycle_without_cachepolicy` (0x0c696e34) ignores the policy and always
-  runs all three steps, i.e. always deletes the root view.
+- `exec_pop_lifecycle_without_cachepolicy` (0x0c696e34) runs all three steps for
+  every policy **except 2**, which returns after the pause leg. Its name overstates
+  it: it is "ignore the policy table", not "ignore the policy". The first draft of
+  this section claimed it was fully policy-independent; executing it in emulation
+  (`firmware_page_rebuild.py:test_forced_teardown_refuses_policy_two`) disproved that,
+  and the module now refuses to rebuild a policy-2 page rather than reporting a
+  rebuild that never happened.
 
 `sub_C697804`, the page-enter path used by `goto_page_no_check_stacktop`
 (0x0c8ed780, the `page_goto` symbol), calls the **with_cachepolicy** variant on the
@@ -367,24 +372,34 @@ from the destroyed state.
 
 For a page pointer `p`, with the stack-top obtained from `sub_C697450(-1)`:
 
-1. `exec_pop_lifecycle_without_cachepolicy(p)` (0x0c696e34) — pause, stop, destroy
-   regardless of cache policy, ending in `lv_obj_delete(p+48)` and state 4.
+1. `exec_pop_lifecycle_without_cachepolicy(p)` (0x0c696e34) — pause, stop, destroy,
+   ending in `lv_obj_delete(p+48)` and state 4.
 2. `on_resume_wrapped(p)` (0x0c696c18) — create (rebuilding the root view and every
    widget through `page[19]`), start, resume, ending in state 17.
 
-Guards this needs, none of them yet handled:
+This is now implemented as `rh_platform_rebuild_active_page`, applied to the
+stack-top page only. Guards it enforces:
 
-- `on_destroy_wrapped` DEFERS the view deletion onto a "ui destroy stack"
-  (`dword_200D31A0`, count `byte_200D319C`, capacity 10) when `p+36 != 0`. In that
-  case `p+48` is still set when step 2 runs, and `on_create_wrapped` takes its
-  already-has-root path and trips the activitymanager assert at line 1310. Either
-  restrict the rebuild to pages with `p+36 == 0`, or drain the destroy stack first.
-- `on_resume_wrapped` only performs the resume leg when the screen is on
-  (`byte_200C2A28 == 2`) and the page layer is active (`byte_20096085 != 0`).
+- Skip a policy-2 page: the forced teardown returns after pause and never destroys.
+- Skip when `p+36 != 0`, because `on_destroy_wrapped` then DEFERS the view deletion
+  onto a "ui destroy stack" (`dword_200D31A0`, count `byte_200D319C`, capacity 10);
+  `p+48` would still be set when step 2 ran and `on_create_wrapped` would take its
+  already-has-root path and trip the activitymanager assert at line 1310.
+- Skip unless the screen is on (`byte_200C2A28 == 2`), the page layer is active
+  (`byte_20096085 != 0`) and the page is resumed (state 17) with a root view.
+- Step 2 runs even when the teardown stopped short, so a refused rebuild leaves the
+  page resumed rather than paused.
+- Success requires the page to have actually reached state 4 with its root view
+  released, and to come back at state 17 with a *different* root view. Judging by
+  the final state alone would have reported a rebuild for a policy-2 page that was
+  only paused and resumed.
 - UI owner thread only, outside the interrupt lock.
 
-Nothing here is implemented in the module, and none of it has been executed in
-emulation or on hardware; it is static recovery from the exact .139 decompilation.
+Remaining limits: only the stack-top page is rebuilt, so pages deeper in the stack
+keep their old resources; pages with a deferred destroy are skipped entirely; and a
+rebuild that starts and then fails to come back up leaves that page torn down. The
+ladder is executed in emulation by `firmware_page_rebuild.py`, but nothing here has
+run on hardware.
 
 ## The decode path, traced (2026-09-15)
 

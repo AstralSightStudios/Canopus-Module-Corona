@@ -9,9 +9,9 @@
 static const char config[] = "/resource/\t/data/canopus/themes/current/\n";
 static const char *input = config;
 static unsigned position, config_opens, closes, allocations, frees, registrations;
-static unsigned image_drops, redraws, timers_created, timers_deleted;
+static unsigned image_drops, redraws, rebuilds, timers_created, timers_deleted;
 static void (*timer_callback)(void *);
-static int timer_token, fail_timer, reject_redraw;
+static int timer_token, fail_timer, reject_redraw, reject_rebuild;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
            redraw_ready = 1, locked;
 static int driver;
@@ -81,6 +81,12 @@ void rh_platform_refresh_timer_delete(void *timer) {
     timer_callback = NULL;
     timers_deleted++;
 }
+int rh_platform_rebuild_active_page(void) {
+    assert(!locked);  /* the page rebuild must also run outside the lock */
+    if (reject_rebuild) return -1;
+    rebuilds++;
+    return 0;
+}
 int rh_platform_request_full_redraw(void) {
     assert(!locked && redraw_ready);
     if (reject_redraw) return -1;
@@ -95,7 +101,7 @@ extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
 int main(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
-    unsigned char status[32];
+    unsigned char status[40];
     unsigned before;
     assert(registrations == 1 && closes == 1);
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
@@ -106,11 +112,11 @@ int main(void) {
     assert(d->query(NULL) == -1);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w));
-    assert(w.used == 32 && u32(status) == 0x31514852u && u32(status + 4) == 3);
+    assert(w.used == 36 && u32(status) == 0x31514852u && u32(status + 4) == 4);
     assert(u32(status + 8) == 0 && u32(status + 12) == 0 && u32(status + 24) == 0 &&
-           u32(status + 28) == 0);
+           u32(status + 28) == 0 && u32(status + 32) == 0);
     assert(d->query(&w) == -1);
-    assert(!canopus_status_writer_init(&w, status, 31));
+    assert(!canopus_status_writer_init(&w, status, 35));
     memset(status, 0xab, sizeof(status));
     assert(d->query(&w) == -1 && w.used == 0 && status[0] == 0xab);
 
@@ -161,6 +167,7 @@ int main(void) {
     assert(u32(status + 16) == 1 && u32(status + 20) == 0);
     assert(u32(status + 24) == image_drops && image_drops == 3);
     assert(u32(status + 28) == redraws && redraws == 3);
+    assert(u32(status + 32) == rebuilds && rebuilds == 3);
     /* Busy UI: requests coalesce and the cache isn't touched mid-render. */
     redraw_ready = 0;
     before = timers_created;
@@ -177,6 +184,17 @@ int main(void) {
     reject_redraw = 0;
     timer_callback(&timer_token);
     assert(redraws == 4 && !timer_callback && timers_created == timers_deleted);
+    /* The rebuild is attempted once per request and a refusal (a policy the
+     * forced teardown declines, or a deferred destroy) must not be counted,
+     * retried, or allowed to hold up the repaint. */
+    reject_rebuild = 1;
+    before = rebuilds;
+    redraw_ready = 0;
+    assert(d->activate(NULL) == 0 && timer_callback);
+    redraw_ready = 1;
+    timer_callback(&timer_token);
+    assert(rebuilds == before && redraws == 5 && !timer_callback);
+    reject_rebuild = 0;
     /* OOM remains visible, but doesn't remove the resident redirect. */
     redraw_ready = 0;
     fail_timer = 1;
@@ -185,7 +203,7 @@ int main(void) {
     assert(d->activate(NULL) == 0 && timer_callback);
     redraw_ready = 1;
     timer_callback(&timer_token);
-    assert(redraws == 5 && !timer_callback);
+    assert(redraws == 6 && !timer_callback);
     assert(allocations == frees && !locked);
     puts("module registration, activation failures, publication, query and resident lifecycle passed");
     return 0;

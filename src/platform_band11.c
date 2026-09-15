@@ -82,6 +82,51 @@ int rh_platform_request_full_redraw(void) {
     }
     return -1;
 }
+/* Force the stack-top page to rebuild, so widgets holding a resource are
+ * destroyed and recreated instead of merely repainted. Recovered .139 ladder:
+ * a page keeps its state at +40, its cache policy at +41, its root view at +48
+ * and an async-destroy hint at +36. exec_pop_lifecycle_without_cachepolicy
+ * (0x0c696e34) runs pause, stop and destroy, ending in lv_obj_delete(page+48).
+ * Ordinary navigation uses the with-cachepolicy variant instead, which stops
+ * early for policy 2/5/6/7 and leaves a cached page's widgets alive — that is
+ * why navigating away and back does not pick up a theme. on_resume_wrapped
+ * (0x0c696c18) then runs create, start and resume, rebuilding every widget
+ * through the page's on_create callback at page[19], so each resource is
+ * re-opened through the redirect.
+ *
+ * The forced path is NOT fully policy independent: a policy-2 page returns
+ * after the pause leg and is never destroyed. Success is therefore judged by
+ * the page actually reaching the destroyed state and coming back with a
+ * different root view, never by the final state alone.
+ *
+ * on_resume_wrapped climbs from any of states 4/5/8/9/18 back to 17, so it is
+ * also the recovery path and is always called once the teardown has started.
+ * A page whose destroy would be deferred onto the pagemanager's ui-destroy
+ * stack (+36 set) is skipped: its root view would still be set when the
+ * re-create ran, which trips the activitymanager assert. */
+int rh_platform_rebuild_active_page(void) {
+    uint32_t page = ((uint32_t (*)(int))(uintptr_t)0x0c697451u)(-1);
+    uint32_t previous;
+    int torn_down;
+    if (!page) return -1;
+    if (*(volatile unsigned char *)(uintptr_t)0x200c2a28u != 2u) return -1;
+    if (!*(volatile unsigned char *)(uintptr_t)0x20096085u) return -1;
+    if (*(volatile uint32_t *)(uintptr_t)(page + 36u)) return -1;
+    if (*(volatile unsigned char *)(uintptr_t)(page + 41u) == 2u) return -1;
+    if (*(volatile unsigned char *)(uintptr_t)(page + 40u) != 17u) return -1;
+    previous = *(volatile uint32_t *)(uintptr_t)(page + 48u);
+    if (!previous) return -1;
+    ((void (*)(uint32_t))(uintptr_t)0x0c696e35u)(page);
+    torn_down = *(volatile unsigned char *)(uintptr_t)(page + 40u) == 4u &&
+                !*(volatile uint32_t *)(uintptr_t)(page + 48u);
+    /* Always bring the page back up, including when the teardown stopped short,
+     * so a refused rebuild does not leave the page paused. */
+    ((void (*)(uint32_t))(uintptr_t)0x0c696c19u)(page);
+    if (!torn_down || *(volatile unsigned char *)(uintptr_t)(page + 40u) != 17u)
+        return -1;
+    page = *(volatile uint32_t *)(uintptr_t)(page + 48u);
+    return page && page != previous ? 0 : -1;
+}
 void *rh_platform_refresh_timer_create(void (*callback)(void *)) {
     return ((void *(*)(void (*)(void *), uint32_t, void *))(uintptr_t)0x0c3abd21u)
         (callback, 50u, 0);

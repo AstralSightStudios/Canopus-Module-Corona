@@ -21,6 +21,13 @@ int rh_platform_image_cache_drop_all(void);
 int rh_platform_redraw_ready(void);
 /* 0 only when a full-display dirty area was retained; otherwise retry later. */
 int rh_platform_request_full_redraw(void);
+/* Destroy and recreate the stack-top page so widgets holding a resource are
+ * rebuilt, not just repainted. 0 on a completed rebuild; -1 if it was skipped
+ * (no page, screen off, page layer inactive, page not resumed, or its destroy
+ * would be deferred) or did not come back up. A rebuild that starts and then
+ * fails leaves that page torn down. One page only; the rest of the stack is
+ * untouched. */
+int rh_platform_rebuild_active_page(void);
 void *rh_platform_refresh_timer_create(void (*callback)(void *));
 void rh_platform_refresh_timer_delete(void *);
 #endif
