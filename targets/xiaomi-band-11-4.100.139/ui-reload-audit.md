@@ -291,7 +291,37 @@ referenced entry whose node is in the allocated tree, and shows the firmware log
 "still referenced" (correctly skipping the payload free) and then frees that node
 and its payload allocation anyway.
 
-Still unverified: whether every image widget re-opens its source on the next draw.
-A widget that caches a decoded handle across draws will keep showing the old image
-and needs the page-rebuild lifecycle. Symbols are allowlisted as lv_cache_drop.json
-(EVID-RESOURCE-4139-004).
+Symbols are allowlisted as lv_cache_drop.json (EVID-RESOURCE-4139-004).
+
+## The decode path, traced (2026-09-15)
+
+The earlier claim that on-screen entries "sit at ref 0 between draws" was retracted
+above as unevidenced. It is now traced properly, and the mechanism holds for the
+main image path:
+
+- `lv_draw_image` (0x0c381880, lv_draw_image.c) per draw calls
+  `lv_image_decoder_get_info` (0x0c38e4e4) and, on the direct branch,
+  `lv_image_decoder_open` (0x0c38ea60), then `lv_image_decoder_close` (0x0c38cf50)
+  before returning. The decoder is NOT retained across draws on this path.
+- `image_decoder_get_info` (0x0c38e394, lv_image_decoder.c:352) looks the source up
+  in the header cache (*0x200bd314). On a hit it immediately calls
+  `lv_cache_entry_release_data` (0x0c8b9790) — the reference is transient. On a miss
+  it calls `lv_fs_open` (0x0c3a7d7c), which is exactly the driver the module hooks,
+  then caches the decoded header.
+- `lv_image_decoder_open` looks the source up in the decoded-image cache
+  (*0x200bd310). On a hit it stores the entry at `dsc+68` and holds that reference
+  for the duration of the draw, released by `lv_image_decoder_close`. On a miss it
+  falls through to `get_info` and the decoder chain, i.e. to `lv_fs_open`.
+
+So the reference an on-screen image holds is per-draw, between open and close —
+not a handle kept across frames. After per-entry retirement the next lookup misses,
+`lv_fs_open` runs, and the redirect is observed. Retiring during a draw is still
+handled correctly by the deferred free, and the module skips while
+`rendering_in_progress` anyway.
+
+Still NOT established: the deferred draw-task branch of `lv_draw_image` (taken when
+the header flag 0x40 is clear — it queues a type-5 task via 0x0c380cb8 instead of
+decoding inline), and any animation or canvas-style widget that owns a decoded
+buffer rather than re-opening a source. Those may still show the old image and need
+the page-rebuild lifecycle. This section is static recovery from the exact .139
+decompilation; it is not emulation-executed.

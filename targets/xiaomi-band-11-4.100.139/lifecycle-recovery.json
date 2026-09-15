@@ -55,6 +55,9 @@
     {"address": "0x0c3a3888", "role": "lv_image_cache_drop(src): src=0 drops the decoded-image cache (*0x200bd310) and header cache (*0x200bd314); the module calls this on activate to reload redirected images", "test": "firmware_image_lifecycle.py"},
     {"address": "0x0c8b8d60", "role": "lv_cache_drop_all: dispatches cache->clz->drop_all_cb at vtable +28", "test": "firmware_image_lifecycle.py"},
     {"address": "0x0c3a7918", "role": "LRU-rb drop_all_cb: frees only unreferenced entries, logs still-referenced ones, resets the tree and count", "test": "firmware_image_lifecycle.py"},
+    {"address": "0x0c381880", "role": "lv_draw_image: per draw calls lv_image_decoder_get_info and (direct branch) lv_image_decoder_open, then lv_image_decoder_close before returning; no decoder is retained across draws. The other branch queues a type-5 draw task via 0x0c380cb8 and is NOT traced", "test": null},
+    {"address": "0x0c38e394", "role": "image_decoder_get_info: header-cache (*0x200bd314) lookup; on a hit releases the reference immediately via lv_cache_entry_release_data, on a miss calls lv_fs_open (0x0c3a7d7c) — the hooked driver — and caches the header", "test": null},
+    {"address": "0x0c38ea60", "role": "lv_image_decoder_open: decoded-image cache (*0x200bd310) lookup; on a hit stores the entry at dsc+68 and holds that reference only until lv_image_decoder_close (0x0c38cf50); on a miss falls through to get_info and the decoder chain", "test": null},
     {"address": "0x0c382428", "role": "_lv_inv_area: append an area to the display's invalidated-area list (disp+60.., count at disp+604); an oversized area is clipped to the screen, marking the whole display dirty. The module calls this after the image-cache drop to force a full repaint; the firmware's MiWearScreen wake handler (0x0c6d096c) uses it for its 'invalidate screen.' path", "test": "firmware_ui_redraw.py"},
     {"address": "0x0c3807bc", "role": "lv_display_get_screen_active: returns *(disp+24); confirms the active-screen offset the module's redraw guard reads", "test": "firmware_ui_redraw.py"},
     {"address": "0x0c380b2c", "role": "lv_display_is_invalidation_enabled: returns disp+608 > 0; _lv_inv_area no-ops when it is 0", "test": "firmware_ui_redraw.py"},
@@ -99,7 +102,7 @@
   },
   "remaining": [
     "Fonts: live font wrappers are held by page objects with reference counts; reloading them needs the page-rebuild lifecycle, not a global cache drop, so the module does NOT drop fonts blindly.",
-    "Images on screen: entries that are still referenced (mid-draw or held open by an animation) are preserved by drop-all and reload only after a page rebuild; unreferenced ones are dropped and now reload on the forced full-screen invalidation without a navigation.",
+    "Images on screen: the main lv_draw_image path re-opens per draw (traced: get_info/decoder_open/decoder_close), so per-entry retirement plus the full-screen invalidation updates them without a navigation. NOT traced: the deferred type-5 draw-task branch of lv_draw_image, and animation/canvas widgets that own a decoded buffer instead of re-opening a source; those may still need a page rebuild.",
     "Native UI owner scheduling and comprehensive live resource ownership, including persistent default styles and task callbacks.",
     "Path redirection for the native access/FreeType font path, not only LVGL POSIX open.",
     "Forcing an immediate SYNCHRONOUS full redraw: the module now marks the whole screen dirty (_lv_inv_area) but still relies on the firmware's refresh timer to actually flush the repaint; it does not call _lv_display_refr_timer itself.",
