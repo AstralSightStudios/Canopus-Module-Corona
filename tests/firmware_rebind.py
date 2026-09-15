@@ -1,0 +1,339 @@
+"""Run signed resource ELF and resident Supervisor through the .139 harness.
+
+The driver-slot reset is synthetic. This does not simulate killing or restarting
+miwear, and does not prove startup-before-resource ordering.
+"""
+import pathlib
+import struct
+import sys
+import unittest
+import os
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+CANOPUS = pathlib.Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
+sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
+from band11_arm_bootstrap import Machine
+from band11_module_load import registry
+from unicorn import UC_HOOK_CODE
+from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
+
+PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
+    ROOT / 'build/payload-0.3.0/xiaomi-band-11-4.100.139'))
+
+
+class Rebind(unittest.TestCase):
+    def setUp(self):
+        self.load_fixture(enabled=True)
+
+    def load_fixture(self, enabled):
+        elf_path, receipt_path = PAYLOAD / 'resource-hook.elf', PAYLOAD / 'receipt.bin'
+        if not elf_path.exists() or not receipt_path.exists():
+            self.fail('build the signed payload before running firmware_rebind.py')
+        elf, receipt = elf_path.read_bytes(), receipt_path.read_bytes()
+        self.assertEqual(len(receipt), 256)
+        self.assertEqual(receipt[32:64].split(b'\0')[0], b'resource_hook')
+        lifecycle, version = struct.unpack_from('<2I', receipt, 16)
+        self.m = m = Machine()
+        record = bytearray(registry('resource_hook', lifecycle, version))
+        struct.pack_into('<I', record, 60, int(enabled))
+        m.disk['/data/canopus/registry.bin'] = bytes(record)
+        m.disk['/data/canopus/inbox/resource_hook.cmi'] = receipt
+        m.disk['/data/canopus/inbox/resource_hook.ko'] = elf
+        m.disk['/data/canopus/themes/mappings.tsv'] = b'/resource/\t/data/canopus/themes/current/\n'
+        m.disk['/data/canopus/themes/current/a.bin'] = b'mapped file'
+        self.descriptor = None
+        def write():
+            ptr, count = m.reg(1), m.reg(2)
+            if count == 40 and m.word(ptr) == 0x31524d43:
+                self.descriptor = m.word(ptr + 4)
+            return m.write()
+        m.uc.hook_del(m.firmware_hooks[0xc33dc4e])
+        m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, write, 0xc33dc4e, 0xc33dc4e)
+        self.assertEqual(m.boot(), 0)
+        m.finish_access_monitor()
+        m.word(0x200bd3b8, ord('/'))
+        m.word(0x200bd3bc, 4096)
+        m.word(0x200bd3c4, 0xc3a6195)
+        # Scheduling is modeled here; the callback executes the real module code.
+        self.timer_callback, self.timer_creates, self.timer_deletes = 0, 0, 0
+        self.fail_timer = False
+        self.bind(0xc3abd20, self.create_timer)
+        self.bind(0xc3abe70, self.delete_timer)
+
+    def bind(self, addr, callback):
+        m = self.m
+        if addr in m.firmware_hooks:
+            m.uc.hook_del(m.firmware_hooks.pop(addr))
+        m.firmware_hooks[addr] = m.uc.hook_add(
+            UC_HOOK_CODE, m.firmware_call, callback, addr, addr)
+
+    def create_timer(self):
+        self.assertEqual(self.m.reg(1), 50)
+        self.assertEqual(self.m.reg(2), 0)
+        self.assertEqual(self.timer_callback, 0)
+        if self.fail_timer:
+            return 0
+        self.timer_callback = self.m.reg(0)
+        self.timer_creates += 1
+        return 0x3c7b0000
+
+    def delete_timer(self):
+        self.assertEqual(self.m.reg(0), 0x3c7b0000)
+        self.assertNotEqual(self.timer_callback, 0)
+        self.timer_callback = 0
+        self.timer_deletes += 1
+        return 0
+
+    def tick(self):
+        self.assertNotEqual(self.timer_callback, 0)
+        self.m.call(self.timer_callback, 0x3c7b0000)
+
+    def graphics(self):
+        m, disp = self.m, 0x3c790000
+        for cache, glob in ((0x3c781000, 0x200bd310), (0x3c782000, 0x200bd314)):
+            m.uc.mem_write(cache, bytes(64))
+            m.word(cache, 0x2ca168c4)  # actual recovered class; empty cache
+            m.word(glob, cache)
+        m.uc.mem_write(disp, bytes(1024))
+        m.word(disp, 192)
+        m.word(disp + 4, 490)
+        m.word(disp + 24, 130)  # DPI, deliberately nonzero
+        m.word(disp + 696, disp + 0x800)
+        m.word(disp + 56, 1 << 8)
+        m.word(disp + 608, 1)
+        m.word(0x200bd200, disp)
+        self.bind(0xc3809a4, lambda: 1)
+        self.assertEqual(m.call(0xc3807ec, disp), disp + 0x800)
+        return disp
+
+    def status_words(self):
+        m, writer, output = self.m, 0x3c730000, 0x3c731000
+        m.uc.mem_write(writer, struct.pack('<6I', output, 32, 0, 0, 1, 1))
+        self.assertEqual(m.call(m.word(self.descriptor + 140), writer), 0)
+        return struct.unpack('<8I', m.uc.mem_read(output, 32))
+
+    def restore(self):
+        return self.command(0x4351000a)
+
+    def command(self, opcode):
+        m = self.m
+        frame, status = 0x200d0000, 0x200d1000
+        m.uc.mem_write(frame, struct.pack('<4I', 0x43504331, opcode, 0, 0))
+        m.uc.reg_write(UC_ARM_REG_R1, frame)
+        m.uc.reg_write(UC_ARM_REG_R2, 16)
+        self.assertEqual(m.call(m.word(m.fops + 12)), 16)
+        m.uc.reg_write(UC_ARM_REG_R1, status)
+        m.uc.reg_write(UC_ARM_REG_R2, 384)
+        self.assertEqual(m.call(m.word(m.fops + 8)), 384)
+        self.assertEqual(m.word(status), 0x43505331)
+        return m.word(status + 24), m.word(status + 32)
+
+    def test_resident_elf_reinstalls_same_callback_without_reloading_image(self):
+        m = self.m
+        self.assertEqual(self.restore(), (5, 0))
+        hook = m.word(0x200bd3c4)
+        self.assertTrue(0x1c000000 <= hook < 0x1d000000, hex(hook))
+        resident = {p: n for p, n in m.allocations.items() if p not in m.frees}
+        # A changed on-disk file must not mutate the locked live mappings.
+        m.disk['/data/canopus/themes/mappings.tsv'] = b'bad config'
+        m.word(0x200bd3c4, 0xc3a6195)  # model the store performed by lv_init
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(m.word(0x200bd3c4), hook)
+        self.assertEqual({p: n for p, n in m.allocations.items() if p not in m.frees}, resident)
+        path = 0x3c710000
+        m.uc.mem_write(path, b'resource/a.bin\0')
+        m.uc.reg_write(UC_ARM_REG_R1, path)
+        m.uc.reg_write(UC_ARM_REG_R2, 2)
+        handle = m.call(hook, 0x200bd3b8)
+        self.assertGreater(handle, 0)
+        self.assertEqual(m.files[handle - 1][2], '/data/canopus/themes/current/a.bin')
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(m.word(0x200bd3c4), hook)
+
+    def test_enable_persists_intent_without_installing_callback(self):
+        self.load_fixture(enabled=False)
+        m = self.m
+        self.assertIsNone(self.descriptor)
+        _, error = self.command(0x43510003)
+        self.assertEqual(error, 0)
+        self.assertEqual(m.word(0x200bd3c4), 0xc3a6195)
+        self.assertIsNone(self.descriptor)
+        self.assertEqual(struct.unpack_from('<I', m.disk['/data/canopus/registry.bin'], 60)[0], 1)
+        # Restoration does not turn a same-session ENABLE into hot loading.
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertIsNone(self.descriptor)
+        self.assertEqual(m.word(0x200bd3c4), 0xc3a6195)
+        # A fresh Supervisor restores the enabled registry as an installable slot.
+        self.load_fixture(enabled=True)
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertIsNotNone(self.descriptor)
+        self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
+
+    def test_existing_open_handle_is_not_replaced_by_activation(self):
+        m = self.m
+        m.disk['/data/canopus/original/a.bin'] = b'original file'
+        m.disk['/data/canopus/themes/mappings.tsv'] = b'/data/canopus/original/\t/data/canopus/themes/current/\n'
+        path = 0x3c710000
+        m.uc.mem_write(path, b'data/canopus/original/a.bin\0')
+        m.uc.reg_write(UC_ARM_REG_R1, path)
+        m.uc.reg_write(UC_ARM_REG_R2, 2)
+        old_handle = m.call(0xc3a6195, 0x200bd3b8)
+        self.assertGreater(old_handle, 0)
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(m.files[old_handle - 1][2], '/data/canopus/original/a.bin')
+        m.uc.reg_write(UC_ARM_REG_R1, path)
+        m.uc.reg_write(UC_ARM_REG_R2, 2)
+        new_handle = m.call(m.word(0x200bd3c4), 0x200bd3b8)
+        self.assertNotEqual(old_handle, new_handle)
+        self.assertEqual(m.files[new_handle - 1][2], '/data/canopus/themes/current/a.bin')
+
+    def test_query_publishes_status_and_rejects_short_buffer(self):
+        self.assertEqual(self.restore(), (5, 0))
+        m = self.m
+        self.assertIsNotNone(self.descriptor)
+        callback = m.word(self.descriptor + 140)
+        writer, output = 0x3c730000, 0x3c731000
+        m.uc.mem_write(writer, struct.pack('<6I', output, 32, 0, 0, 1, 1))
+        self.assertEqual(m.call(callback, writer), 0)
+        # 8 u32: magic, status version 3, installed, rule count, redirected,
+        # fallback, image-cache drops, full-screen redraws (the last two 0 here:
+        # neither an image cache nor a display exists in this boot fixture).
+        self.assertEqual(struct.unpack('<8I', m.uc.mem_read(output, 32)),
+                         (0x31514852, 3, 1, 1, 0, 0, 0, 0))
+        self.assertEqual(m.word(writer + 8), 32)
+        self.assertEqual(m.word(writer + 16), 2)
+        self.assertEqual(m.word(writer + 20), 2)
+        m.uc.mem_write(output, b'x' * 32)
+        m.uc.mem_write(writer, struct.pack('<6I', output, 31, 0, 0, 1, 1))
+        self.assertEqual(m.call(callback, writer), 0xffffffff)
+        self.assertEqual(bytes(m.uc.mem_read(output, 32)), b'x' * 32)
+        self.assertEqual(m.word(writer + 8), 0)
+
+    def test_activate_drops_present_image_cache(self):
+        self.graphics()
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[6:], (1, 1))
+
+    def test_activate_requests_full_redraw(self):
+        m = self.m
+        disp = self.graphics()
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[7], 1)
+        self.assertEqual(m.word(disp + 604), 1)
+        self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + 60, 16)), (0, 0, 191, 489))
+        self.assertEqual(self.timer_creates, 0)
+
+    def test_missing_screen_not_confused_with_nonzero_dpi(self):
+        disp = self.graphics()
+        self.m.word(disp + 696, 0)
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[6:], (0, 0))
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (0, 0))
+        self.m.word(disp + 696, disp + 0x800)
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.timer_callback, 0)
+        self.assertEqual(self.timer_deletes, 1)
+
+    def test_busy_render_and_disabled_invalidation_retry_once(self):
+        m, disp = self.m, self.graphics()
+        m.word(disp + 56, (1 << 8) | (2 << 16))
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.timer_creates, 1)
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (0, 0))
+        m.word(disp + 56, 1 << 8)
+        m.word(disp + 608, 0)
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (0, 0))
+        m.word(disp + 608, 1)
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.timer_callback, 0)
+
+    def test_rejected_dirty_area_is_not_counted_or_repeatedly_dropped(self):
+        self.graphics()
+        self.bind(0xc3809a4, lambda: 0)  # firmware event rejects invalidation
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[6:], (1, 0))
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (1, 0))
+        self.bind(0xc3809a4, lambda: 1)
+        self.tick()
+        self.assertEqual(self.status_words()[6:], (1, 1))
+        self.assertEqual(self.timer_callback, 0)
+
+    def test_timer_allocation_failure_is_reported_with_hook_resident(self):
+        self.fail_timer = True
+        state, error = self.restore()
+        self.assertEqual(state, 6)
+        self.assertNotEqual(error, 0)
+        self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
+
+    def test_held_cache_entry_retired_then_freed_on_last_release(self):
+        m = self.m
+        self.graphics()
+        cache, node, rb, key = 0x3c781000, 0x3c7a0000, 0x3c7a0100, 0x3c7a0200
+        entry = key + 24
+        for addr in (node, rb, key):
+            m.uc.mem_write(addr, bytes(128))
+        m.word(cache + 4, 24)  # entry header follows the key payload
+        m.word(cache + 52, node)
+        m.word(cache + 24, 0xc3abe59)
+        m.word(node, rb)
+        m.word(rb + 16, key)
+        m.word(entry + 4, 2)  # two outstanding references
+        m.word(entry + 8, 24)
+        m.uc.mem_write(key, b'held-image-canary')
+        freed, looked_up = [], []
+        def find_entry():
+            self.assertEqual(m.reg(0), cache)
+            self.assertEqual(m.reg(1), key)
+            looked_up.append(key)
+            return entry if m.word(cache + 52) else 0
+        def unlink_entry():
+            self.assertEqual(m.reg(0), cache)
+            self.assertEqual(m.reg(1), entry)
+            m.word(cache + 52, 0)
+            return 0
+        # Model only class lookup/unlink and frees. The signed module traversal,
+        # generic lv_cache_drop and final-release instructions execute for real.
+        self.bind(0xc3a4ace, find_entry)
+        self.bind(0xc3a472c, unlink_entry)
+        self.bind(0xc3abe58, lambda: freed.append(m.reg(0)) or 0)
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(looked_up, [key])
+        self.assertEqual(m.word(cache + 52), 0)
+        self.assertEqual(m.uc.mem_read(entry + 12, 1), b'\x01')
+        self.assertEqual(m.word(entry + 4), 2)
+        self.assertEqual(freed, [])
+        self.assertEqual(m.uc.mem_read(key, 17), b'held-image-canary')
+        m.uc.reg_write(UC_ARM_REG_R1, entry)
+        m.call(0xc8b9790, cache)
+        self.assertEqual(m.word(entry + 4), 1)
+        self.assertEqual(freed, [])
+        m.uc.reg_write(UC_ARM_REG_R1, entry)
+        m.call(0xc8b9790, cache)
+        self.assertEqual(m.word(entry + 4), 0)
+        self.assertEqual(freed, [key, key])  # payload callback, allocation free
+        self.assertEqual(self.status_words()[6:], (1, 1))
+
+    def test_missing_config_keeps_original_driver(self):
+        del self.m.disk['/data/canopus/themes/mappings.tsv']
+        state, error = self.restore()
+        self.assertEqual(state, 6)
+        self.assertNotEqual(error, 0)
+        self.assertEqual(self.m.word(0x200bd3c4), 0xc3a6195)
+
+    def test_unknown_slot_is_not_overwritten(self):
+        self.assertEqual(self.restore(), (5, 0))
+        self.m.word(0x200bd3c4, 0xc3a620d)
+        state, error = self.restore()
+        self.assertEqual(state, 6)
+        self.assertNotEqual(error, 0)
+        self.assertEqual(self.m.word(0x200bd3c4), 0xc3a620d)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

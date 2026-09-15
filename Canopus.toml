@@ -1,0 +1,11 @@
+schema = 1
+[module]
+id = "org.canopus.resource-hook"
+version = "0.3.0"
+language = "c"
+lifecycle = "resident-after-activation"
+canopus_abi = "1"
+[targets]
+include = ["xiaomi-band-11-4.100.139"]
+[capabilities]
+required = ["identity-guard"]

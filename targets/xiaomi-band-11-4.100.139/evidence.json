@@ -1,0 +1,24 @@
+{
+  "target": "xiaomi-band-11-4.100.139",
+  "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
+  "status": "STATIC_HOOK_CANDIDATE_RESTART_BLOCKED",
+  "lv_fs_open": "0x0c3a7d7c",
+  "lv_fs_get_driver": "0x0c3a4360",
+  "driver_open_offset": 12,
+  "font_manager_generate_def_path": "0x0c490edc",
+  "font_manager_add_path": "0x0c4924e0",
+  "lv_image_decoder_open": "0x0c38ea60",
+  "unresolved": [
+    "native builtin-task teardown and reset contract",
+    "resident heap/device ownership on task-group exit",
+    "pre-resource owner-thread startup barrier",
+    "font face and image-cache reconstruction"
+  ],
+  "posix_driver": "0x200bd3b8",
+  "driver_letter": "/",
+  "posix_open": "0x0c3a6194",
+  "driver_node_size": 4,
+  "builtin_miwear_descriptor": "0x2ca02744",
+  "builtin_miwear_main": "0x0c7def88",
+  "restart_tests": "tests/firmware_restart.py: builtin state retention and repeated main counterexamples"
+}

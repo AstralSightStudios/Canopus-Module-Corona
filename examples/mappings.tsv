@@ -1,0 +1,3 @@
+# Literal TAB separates the source and destination directories.
+# Copy matching resource files into current/ before enabling the module.
+/resource/	/data/canopus/themes/current/

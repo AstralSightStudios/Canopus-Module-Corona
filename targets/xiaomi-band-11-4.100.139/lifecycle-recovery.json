@@ -1,0 +1,108 @@
+{
+  "target": "xiaomi-band-11-4.100.139",
+  "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
+  "status": "PARTIAL_LIFECYCLE_RECOVERED_NOT_IMPLEMENTED",
+  "font_manager": {
+    "uikit_global": "0x200bd1e8",
+    "uikit_font_manager_offset": 28,
+    "manager_size": 560,
+    "active_faces_list": {"offset": 0, "payload_size": 48},
+    "live_wrappers_list": {"offset": 12, "payload_size": 40},
+    "registered_paths_list": {"offset": 24, "payload_size": 8},
+    "cache_pointer_offset": 556,
+    "cache_list_payload_size": 44,
+    "cache_capacity_offset": 12,
+    "face_reference_count_offset": 44,
+    "wrapper_face_record_offset": 36,
+    "wrapper_fallback_offset": 28,
+    "cached_font_pointer_offset": 40
+  },
+  "image_cache": {
+    "status": "IMPLEMENTED_IN_MODULE",
+    "decoded_image_cache_ptr_global": "0x200bd310",
+    "image_header_cache_ptr_global": "0x200bd314",
+    "heap_context_global": "0x200bd3f4",
+    "lv_image_cache_drop": "0x0c3a3888",
+    "lv_cache_drop_all_wrapper": "0x0c8b8d60",
+    "lru_rb_class_vtable": "0x2ca168c4",
+    "drop_all_cb_vtable_offset": 28,
+    "drop_all_cb": "0x0c3a7918",
+    "display_refr_timer": "0x0c38956c",
+    "keying": "The cache is keyed by the decoded source path, so an already-decoded image is served before open() is called; a path redirect never reaches a cached image until it is dropped.",
+    "module_action": "activate() calls lv_image_cache_drop(0) on the UI owner thread after installing the redirect (guarded on both cache globals and their class vtable being non-null), then calls _lv_inv_area (0x0c382428) with an oversized area to mark the whole active screen dirty so the firmware's refresh timer repaints every widget and re-opens each image through the redirect on its next tick, without waiting for a navigation.",
+    "semantics": "Entries are retired ONE AT A TIME with the generic lv_cache_drop (0x0c8b8cae), never with the firmware's drop_all: drop_all frees every red-black node allocation even for still-referenced entries. Per-entry retirement marks a held entry invalid and unlinks it while leaving its payload valid for the holder (deferred free in lv_cache_entry_release_data 0x0c8b9790 on last release); a zero-reference entry is freed immediately. Either way the next lookup for that source path misses and goes through the redirect. NOT established: that every image widget re-opens its source on the next draw — a widget holding a decoded handle across draws keeps showing the old image and needs a page rebuild.",
+    "forced_redraw": {
+      "status": "IMPLEMENTED_IN_MODULE",
+      "lv_inv_area": "0x0c382428",
+      "default_display_global": "0x200bd200",
+      "active_screen_offset": 696,
+      "active_screen_accessor": "0x0c3807ec",
+      "dpi_offset_not_active_screen": 24,
+      "lv_cache_drop": "0x0c8b8cae",
+      "lv_cache_entry_release_data": "0x0c8b9790",
+      "lru_rb_class_pointer_guard": "0x2ca168c4",
+      "refresh_timer": {"create": "0x0c3abd20", "delete": "0x0c3abe70", "period_ms": 50},
+      "rendering_flag": "bit 1 of disp+58",
+      "invalidation_enabled_offset": 608,
+      "area_intersect": "0x0c3a39b4",
+      "display_refr_timer": "0x0c38956c",
+      "semantics": "Only schedules a repaint through the firmware's own refresh timer (no forced synchronous flush) and does not rebuild pages. One coalesced request is retried from a temporary LVGL timer when the UI is busy (rendering, invalidation disabled, or no active screen yet) and the timer deletes itself on success; this is not periodic polling. Success is counted only when the firmware retained a dirty area covering the whole display. Counted as RHQ1 'redraws' (status format v3, 32 bytes). Timer allocation failure returns -2011 with the redirect left resident.",
+      "tests": ["firmware_ui_redraw.py", "firmware_rebind.py:test_activate_requests_full_redraw", "firmware_rebind.py:test_missing_screen_not_confused_with_nonzero_dpi", "firmware_rebind.py:test_busy_render_and_disabled_invalidation_retry_once", "firmware_rebind.py:test_rejected_dirty_area_is_not_counted_or_repeatedly_dropped", "firmware_rebind.py:test_timer_allocation_failure_is_reported_with_hook_resident"]
+    },
+    "tests": ["firmware_image_lifecycle.py", "firmware_rebind.py:test_activate_drops_present_image_cache"]
+  },
+  "functions": [
+    {"address": "0x0c3a3888", "role": "lv_image_cache_drop(src): src=0 drops the decoded-image cache (*0x200bd310) and header cache (*0x200bd314); the module calls this on activate to reload redirected images", "test": "firmware_image_lifecycle.py"},
+    {"address": "0x0c8b8d60", "role": "lv_cache_drop_all: dispatches cache->clz->drop_all_cb at vtable +28", "test": "firmware_image_lifecycle.py"},
+    {"address": "0x0c3a7918", "role": "LRU-rb drop_all_cb: frees only unreferenced entries, logs still-referenced ones, resets the tree and count", "test": "firmware_image_lifecycle.py"},
+    {"address": "0x0c382428", "role": "_lv_inv_area: append an area to the display's invalidated-area list (disp+60.., count at disp+604); an oversized area is clipped to the screen, marking the whole display dirty. The module calls this after the image-cache drop to force a full repaint; the firmware's MiWearScreen wake handler (0x0c6d096c) uses it for its 'invalidate screen.' path", "test": "firmware_ui_redraw.py"},
+    {"address": "0x0c3807bc", "role": "lv_display_get_screen_active: returns *(disp+24); confirms the active-screen offset the module's redraw guard reads", "test": "firmware_ui_redraw.py"},
+    {"address": "0x0c380b2c", "role": "lv_display_is_invalidation_enabled: returns disp+608 > 0; _lv_inv_area no-ops when it is 0", "test": "firmware_ui_redraw.py"},
+    {"address": "0x0c494380", "role": "Create wrapper: reuse active face, then idle cache, then resolve native path and create FreeType face", "test": "firmware_font_lifecycle.py"},
+    {"address": "0x0c917394", "role": "Remove one manager wrapper; last reference moves font into idle cache rather than freeing it", "test": "firmware_font_lifecycle.py"},
+    {"address": "0x0c4940fc", "role": "Evict idle font: release FreeType cache entry, conditionally drop it, release face pathname, clear/free descriptor, unlink/free idle node", "test": "firmware_font_lifecycle.py"},
+    {"address": "0x0c49258c", "role": "Destroy wrapper and its fallback chain through the global manager", "test": null},
+    {"address": "0x0c494198", "role": "vg_deinit checks live font lists but discards global UI context even if they are nonempty; not an admissible live-UI reload entry", "test": "firmware_restart.py"},
+    {"address": "0x0c697dd0", "role": "activitymanager_destory_view: only invokes minor-type page callback at offset 100; not whole UI teardown", "test": null},
+    {"address": "0x0c69bae4", "role": "activitymanager_kill_bg_apps: background apps after home only", "test": null},
+    {"address": "0x0c47de08", "role": "miconnect workflow teardown; unrelated to native miwear GUI lifecycle", "test": null}
+  ],
+  "startup": {
+    "main_state": "0x200da910",
+    "independent_font_initialized_byte": "0x200da7f8",
+    "native_stage_counter": "0x200da864",
+    "font_setup_begin": "0x0c7e88fa",
+    "font_setup_end": "0x0c7e895a",
+    "copy_file_native": "0x0c4ffc90",
+    "registered_paths_on_successful_copy": {
+      "MiSans-Regular": "/tmp/MiSans-Regular.ttf",
+      "MiSans-Demibold": "/tmp/MiSans-Demibold.ttf",
+      "MiSans-Medium": "/tmp/MiSans-Medium.ttf",
+      "MiSans-Semibold": "/resource/font/MiSans-Semibold.ttf"
+    },
+    "copy_failure_fallback": "Regular/Demibold/Medium use /resource/font/MiSans-<weight>-All.ttf",
+    "test": "firmware_restart.py:test_font_setup_has_an_independent_one_time_guard"
+  },
+  "test_model_boundaries": [
+    "Exact firmware instructions execute in Unicorn.",
+    "Allocator, selected linked-list mutations and native I/O are modeled in font tests.",
+    "No physical GPU/display/cache behavior or whole-task shutdown is tested.",
+    "No synthetic address in a fixture is a claim about the live heap layout."
+  ],
+  "physical_probe": {
+    "transport": "macOS paired Band 11 serial endpoint",
+    "probe": "newline, then read-only uname -a in separate connection",
+    "received_bytes": 0,
+    "firmware_identity_confirmed": false,
+    "runtime_memory_observed": false,
+    "device_mutations": "none; no memory writes, file uploads, task signals or reboot commands"
+  },
+  "remaining": [
+    "Fonts: live font wrappers are held by page objects with reference counts; reloading them needs the page-rebuild lifecycle, not a global cache drop, so the module does NOT drop fonts blindly.",
+    "Images on screen: entries that are still referenced (mid-draw or held open by an animation) are preserved by drop-all and reload only after a page rebuild; unreferenced ones are dropped and now reload on the forced full-screen invalidation without a navigation.",
+    "Native UI owner scheduling and comprehensive live resource ownership, including persistent default styles and task callbacks.",
+    "Path redirection for the native access/FreeType font path, not only LVGL POSIX open.",
+    "Forcing an immediate SYNCHRONOUS full redraw: the module now marks the whole screen dirty (_lv_inv_area) but still relies on the firmware's refresh timer to actually flush the repaint; it does not call _lv_display_refr_timer itself.",
+    "Working target debug channel and exact firmware identity for live ownership and recovery validation."
+  ]
+}
