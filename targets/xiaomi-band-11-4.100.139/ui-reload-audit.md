@@ -293,6 +293,56 @@ and its payload allocation anyway.
 
 Symbols are allowlisted as lv_cache_drop.json (EVID-RESOURCE-4139-004).
 
+## The page-rebuild contract IS recoverable, and is now recovered (2026-09-15)
+
+Earlier sections of this file concluded that "a real teardown/reset contract must be
+recovered or implemented" and treated page rebuild as unavailable. That was true for
+the *builtin-task* restart, but wrong as a statement about *pages*. The page
+lifecycle contract is fully present in the firmware and is recovered here.
+
+A page object carries a lifecycle state byte at `page+40`, a handler chain whose
+event callback is at `+52` (`page[13]`), lifecycle callbacks at `page[23]`/`[24]`/`[25]`,
+its root view object at `page+48`, and its cache policy at `page+41`.
+
+Teardown is three staged steps:
+
+- `sub_C6939E4` — pause: state 17 -> 18, dispatches event 6, calls `page[23]`.
+- `sub_C693A2E` — stop: state 8/18 -> 9, dispatches event 7, calls `page[24]`.
+- `on_destroy_wrapped` (0x0c696d0c) — destroy: state 8/9 -> 4, dispatches event 8,
+  then either pushes the page onto the deferred "ui destroy stack"
+  (`dword_200D31A0`, count `byte_200D319C`, capacity 10) or calls `on_ui_destroy`
+  (0x0c696a7c) directly. `on_ui_destroy` calls `page[25]` and then
+  **`lv_obj_delete(page+48)`** (0x0c384e6c) on the root view, zeroing `page+48`.
+
+Deleting the root view destroys the whole widget subtree, which is exactly the
+reference release that image cache entries and page-owned font wrappers need.
+
+Two entry points wrap those steps, and the difference between them is the decisive
+finding:
+
+- `exec_pop_lifecycle_with_cachepolicy` (0x0c696eb8) switches on `page+41`: only
+  policy 1 and 4 run all three steps. Policy 2 and 7 stop after pause and dispatch
+  event 10; policy 5 stops after stop; policy 6 only pauses. **The root view is NOT
+  deleted for a cached page.**
+- `exec_pop_lifecycle_without_cachepolicy` (0x0c696e34) ignores the policy and always
+  runs all three steps, i.e. always deletes the root view.
+
+`sub_C697804`, the page-enter path used by `goto_page_no_check_stacktop`
+(0x0c8ed780, the `page_goto` symbol), calls the **with_cachepolicy** variant on the
+outgoing page. `finish_page` (0x0c69b518) and `insert_page_to_app` (0x0c697280) call
+the **without_cachepolicy** variant.
+
+So: **ordinary navigation does not reliably rebuild a page.** For any page whose
+cache policy is 2, 5, 6 or 7 the widgets survive navigation, so a theme change is not
+picked up by navigating away and back — only a forced teardown (the
+without-cachepolicy path, as used by `finish_page`) deletes the root view and makes
+re-entry rebuild against the redirect.
+
+This supersedes the earlier advice in this file that navigating away and back is
+equivalent to a rebuild. Nothing here is implemented in the module yet, and none of
+it has been executed in emulation or on hardware; it is static recovery from the
+exact .139 decompilation.
+
 ## The decode path, traced (2026-09-15)
 
 The earlier claim that on-screen entries "sit at ref 0 between draws" was retracted
