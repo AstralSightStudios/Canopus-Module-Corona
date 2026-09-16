@@ -218,6 +218,21 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(self.status_words()[6:8], (1, 1))
 
+    def test_full_redraw_is_recognised_on_a_rotated_display(self):
+        """Which raw field is the horizontal resolution depends on the rotation
+        bit, so a check that read disp+0/disp+4 directly would refuse a perfectly
+        good full-screen dirty area here and retry forever."""
+        m = self.m
+        disp = self.graphics()
+        m.word(disp + 756, 2)            # rotated 90/270
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(m.word(disp + 604), 1)
+        # Clipped with the accessors, so the axes are swapped in raw-field terms.
+        self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + 60, 16)),
+                         (0, 0, 489, 191))
+        self.assertEqual(self.timer_callback, 0)
+
     def test_activate_refuses_an_unexpected_cache_class(self):
         """The retirement traversal is only valid for the recovered LRU/RB
         classes, so an unfamiliar class must stop the whole refresh rather than

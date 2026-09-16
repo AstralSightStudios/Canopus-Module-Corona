@@ -514,3 +514,24 @@ Both are fixed and the fixtures now model the layout lv_init and drop_all_cb
 actually use. This is the same failure mode as the earlier disp+24 defect: when a
 test fixture is written from the same reading as the code, it confirms the reading
 rather than the behaviour.
+
+**3. The screen resolution is not a fixed pair of fields.**
+lv_display_get_horizontal_resolution (0x0c380694) returns display+4, not
+display+0, when the rotation bit (display+756 & 2) is set; the vertical accessor
+(0x0c3806b4) swaps with it. The full-redraw check read display+0 and display+4
+directly as width and height. _lv_inv_area clips with the accessors, so on a
+rotated display the retained area is {0,0,hres-1,vres-1} with the axes swapped
+relative to the raw fields — and on a 192x490 panel the comparison could not
+match. The module would then report the redraw as failed even though the firmware
+had accepted a full-screen dirty area, never complete the refresh request, and
+leave the 50 ms retry timer re-invalidating the whole screen indefinitely.
+
+The check now calls the same accessors _lv_inv_area uses, so it agrees with the
+firmware's clip at any rotation by construction rather than by assumption. The
+fixture had left display+756 zero, so the unrotated case hid it;
+firmware_ui_redraw.py now runs the real accessors instead of stubbing them and
+covers the rotated case, and firmware_rebind.py has an end-to-end rotated test.
+
+Three defects, one pattern: every one was a place where the code and its fixture
+were written from the same reading of the firmware. The fixtures now derive their
+layout from lv_init, drop_all_cb and the display accessors themselves.

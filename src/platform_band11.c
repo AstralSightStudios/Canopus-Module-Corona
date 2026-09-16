@@ -79,16 +79,22 @@ int rh_platform_redraw_ready(void) {
 int rh_platform_request_full_redraw(void) {
     int32_t area[4] = {0, 0, 0x7fff, 0x7fff};
     uint32_t disp = *(volatile uint32_t *)(uintptr_t)0x200bd200u;
+    int32_t width, height;
     uint32_t i, count;
     if (!rh_platform_redraw_ready()) return -1;
     ((void (*)(uint32_t, const void *))(uintptr_t)0x0c382429u)(disp, area);
+    /* Ask the firmware for the resolution rather than reading disp+0/disp+4:
+     * which of those two is horizontal depends on the rotation bit at disp+756,
+     * and _lv_inv_area clips with these same accessors. Using them keeps this
+     * check identical to the firmware's own clip at any rotation. */
+    width = ((int32_t (*)(uint32_t))(uintptr_t)0x0c380695u)(disp);
+    height = ((int32_t (*)(uint32_t))(uintptr_t)0x0c3806b5u)(disp);
     count = *(volatile uint32_t *)(uintptr_t)(disp + 604u);
-    if (count > 32u) return -1;
+    if (count > 32u || width <= 0 || height <= 0) return -1;
     for (i = 0; i < count; i++) {
         volatile int32_t *a = (volatile int32_t *)(uintptr_t)(disp + 60u + i * 16u);
-        if (a[0] <= 0 && a[1] <= 0 &&
-            a[2] >= *(volatile int32_t *)(uintptr_t)disp - 1 &&
-            a[3] >= *(volatile int32_t *)(uintptr_t)(disp + 4u) - 1) return 0;
+        if (a[0] <= 0 && a[1] <= 0 && a[2] >= width - 1 && a[3] >= height - 1)
+            return 0;
     }
     return -1;
 }

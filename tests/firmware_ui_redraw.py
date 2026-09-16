@@ -37,6 +37,9 @@ class InvalidateArea(unittest.TestCase):
         self.m = Machine()
         self.m.finish_access_monitor()
         self.hook(SEND_EVENT, lambda: 1)
+        # HRES/VRES are deliberately NOT stubbed: which raw field is the
+        # horizontal resolution depends on the rotation bit, and that is exactly
+        # what the module has to agree with.
 
     def hook(self, address, fn):
         m = self.m
@@ -44,7 +47,7 @@ class InvalidateArea(unittest.TestCase):
             m.uc.hook_del(m.firmware_hooks[address])
         m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, fn, address, address)
 
-    def build_display(self, addr, *, mode, rendering, enabled, count=0):
+    def build_display(self, addr, *, mode, rendering, enabled, count=0, rotated=False):
         m = self.m
         m.uc.mem_write(addr, bytes(1024))
         m.word(addr, W)
@@ -53,6 +56,7 @@ class InvalidateArea(unittest.TestCase):
         m.word(addr + ACT_SCR, addr + 0x800)   # non-null active screen
         # bytes 56..59 in one word: MODE at +57, FLAGS at +58.
         m.word(addr + 56, (mode & 0xff) << 8 | (rendering & 0xff) << 16)
+        m.word(addr + 756, 2 if rotated else 0)
         m.word(addr + INV_COUNT, count)
         m.word(addr + INV_ENABLE, enabled)
 
@@ -102,6 +106,21 @@ class InvalidateArea(unittest.TestCase):
         self.inv_area(disp, area)
         # With invalidation disabled the firmware appends nothing and does not fault.
         self.assertEqual(m.word(disp + INV_COUNT), 0)
+
+    def test_rotation_swaps_which_raw_field_is_horizontal(self):
+        """disp+0/disp+4 are not fixed axes: the rotation bit swaps them, and
+        _lv_inv_area clips with the accessors, so a full-screen dirty area is
+        {0,0,vres-1,hres-1} in raw-field terms when rotated."""
+        m = self.m
+        disp, area = 0x3c780000, 0x3c781000
+        self.build_display(disp, mode=1, rendering=0, enabled=1, rotated=True)
+        self.assertEqual(m.call(0xc380694, disp), H)   # horizontal is the +4 field
+        self.assertEqual(m.call(0xc3806b4, disp), W)   # vertical is the +0 field
+        m.uc.mem_write(area, struct.pack('<4i', 0, 0, 0x7fff, 0x7fff))
+        self.inv_area(disp, area)
+        self.assertEqual(m.word(disp + INV_COUNT), 1)
+        self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + INV_AREAS, 16)),
+                         (0, 0, H - 1, W - 1))
 
 
 if __name__ == '__main__':
