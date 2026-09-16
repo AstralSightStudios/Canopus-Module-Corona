@@ -89,9 +89,13 @@ class Rebind(unittest.TestCase):
 
     def graphics(self):
         m, disp = self.m, 0x3c790000
-        for cache, glob in ((0x3c781000, 0x200bd310), (0x3c782000, 0x200bd314)):
+        # lv_init gives the two caches DISTINCT class objects: 0x2ca168c4
+        # ("IMAGE") and 0x2ca16944 ("IMAGE_HEADER"). Using one value for both
+        # would hide a guard that rejects the real device.
+        for cache, glob, clz in ((0x3c781000, 0x200bd310, 0x2ca168c4),
+                                 (0x3c782000, 0x200bd314, 0x2ca16944)):
             m.uc.mem_write(cache, bytes(64))
-            m.word(cache, 0x2ca168c4)  # actual recovered class; empty cache
+            m.word(cache, clz)         # empty cache, real class
             m.word(glob, cache)
         m.uc.mem_write(disp, bytes(1024))
         m.word(disp, 192)
@@ -214,6 +218,20 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(self.status_words()[6:8], (1, 1))
 
+    def test_activate_refuses_an_unexpected_cache_class(self):
+        """The retirement traversal is only valid for the recovered LRU/RB
+        classes, so an unfamiliar class must stop the whole refresh rather than
+        walk an unknown layout."""
+        m = self.m
+        disp = self.graphics()
+        m.word(0x3c782000, 0x2ca168c4)   # header cache with the decoded class
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[6:8], (0, 0))
+        self.assertEqual(m.word(disp + 604), 0)   # nothing was invalidated either
+        m.word(0x3c782000, 0x2ca16944)   # restore the class lv_init really uses
+        self.tick()
+        self.assertEqual(self.status_words()[6:8], (1, 1))
+
     def test_activate_requests_full_redraw(self):
         m = self.m
         disp = self.graphics()
@@ -275,23 +293,28 @@ class Rebind(unittest.TestCase):
     def test_held_cache_entry_retired_then_freed_on_last_release(self):
         m = self.m
         self.graphics()
-        cache, node, rb, key = 0x3c781000, 0x3c7a0000, 0x3c7a0100, 0x3c7a0200
-        entry = key + 24
-        for addr in (node, rb, key):
-            m.uc.mem_write(addr, bytes(128))
-        m.word(cache + 4, 24)  # entry header follows the key payload
+        # Real LRU/RB layout: the node points at the entry's DATA, which is also
+        # the key lv_cache_drop takes (it has the same {src, type, ...} shape
+        # lv_image_cache_drop builds for a single-source drop). The word at
+        # data+16 is a pool offset, not a key: entry = *(cache+4) + offset.
+        cache, node, data, pool = 0x3c781000, 0x3c7a0000, 0x3c7a0100, 0x3c7a0200
+        offset = 0x40
+        entry = pool + offset
+        for addr in (node, data, pool):
+            m.uc.mem_write(addr, bytes(256))
+        m.word(cache + 4, pool)
         m.word(cache + 52, node)
         m.word(cache + 24, 0xc3abe59)
-        m.word(node, rb)
-        m.word(rb + 16, key)
-        m.word(entry + 4, 2)  # two outstanding references
-        m.word(entry + 8, 24)
-        m.uc.mem_write(key, b'held-image-canary')
+        m.word(node, data)
+        m.word(data + 16, offset)
+        m.word(entry + 4, 2)            # two outstanding references
+        m.word(entry + 8, entry - data)  # payload sits this far back
+        m.uc.mem_write(data, b'held-image-canary')
         freed, looked_up = [], []
         def find_entry():
             self.assertEqual(m.reg(0), cache)
-            self.assertEqual(m.reg(1), key)
-            looked_up.append(key)
+            self.assertEqual(m.reg(1), data)   # the key is the data pointer
+            looked_up.append(data)
             return entry if m.word(cache + 52) else 0
         def unlink_entry():
             self.assertEqual(m.reg(0), cache)
@@ -304,12 +327,12 @@ class Rebind(unittest.TestCase):
         self.bind(0xc3a472c, unlink_entry)
         self.bind(0xc3abe58, lambda: freed.append(m.reg(0)) or 0)
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(looked_up, [key])
+        self.assertEqual(looked_up, [data])
         self.assertEqual(m.word(cache + 52), 0)
         self.assertEqual(m.uc.mem_read(entry + 12, 1), b'\x01')
         self.assertEqual(m.word(entry + 4), 2)
         self.assertEqual(freed, [])
-        self.assertEqual(m.uc.mem_read(key, 17), b'held-image-canary')
+        self.assertEqual(m.uc.mem_read(data, 17), b'held-image-canary')
         m.uc.reg_write(UC_ARM_REG_R1, entry)
         m.call(0xc8b9790, cache)
         self.assertEqual(m.word(entry + 4), 1)
@@ -317,7 +340,7 @@ class Rebind(unittest.TestCase):
         m.uc.reg_write(UC_ARM_REG_R1, entry)
         m.call(0xc8b9790, cache)
         self.assertEqual(m.word(entry + 4), 0)
-        self.assertEqual(freed, [key, key])  # payload callback, allocation free
+        self.assertEqual(freed, [data, data])  # payload callback, allocation free
         self.assertEqual(self.status_words()[6:8], (1, 1))
 
     def test_missing_config_keeps_original_driver(self):

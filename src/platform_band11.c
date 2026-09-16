@@ -32,6 +32,12 @@ void rh_platform_unlock(uint32_t irq) {
  * unlinks them without freeing their payload until the last release. In contrast,
  * the .139 drop_all implementation also destroys tree storage for held entries.
  * This traversal is specific to the recovered LRU/RB class, never other classes. */
+/* Always retire the entry currently at the list head (cache+52) and confirm the
+ * head advanced, so the node's own next-pointer layout is never relied on. The
+ * key lv_cache_drop expects is a pointer to a {src, type, ...} record, which is
+ * exactly the layout of an entry's data — lv_image_cache_drop builds a
+ * temporary one of the same shape for a single-source drop. It is *(node); the
+ * word at data+16 is an internal pool offset, not a key. */
 static int retire_cache(uint32_t cache) {
     uint32_t n;
     for (n = 0; n < 4096u; n++) {
@@ -40,19 +46,23 @@ static int retire_cache(uint32_t cache) {
         if (!node) return 0;
         key = *(volatile uint32_t *)(uintptr_t)node;
         if (!key) return -1;
-        key = *(volatile uint32_t *)(uintptr_t)(key + 16u);
-        if (!key) return -1;
         ((void (*)(uint32_t, uint32_t))(uintptr_t)0x0c8b8cafu)(cache, key);
         if (*(volatile uint32_t *)(uintptr_t)(cache + 52u) == node) return -1;
     }
     return -1;
 }
+/* lv_init creates the two image caches with DISTINCT class objects: the decoded
+ * cache with 0x2ca168c4 ("IMAGE") and the header cache with 0x2ca16944
+ * ("IMAGE_HEADER"). They are the same LRU/RB implementation — their vtables
+ * differ only at +4, and share the +12 lookup, +20 unlink and +28 drop_all this
+ * traversal depends on — but they are not the same pointer, so each cache is
+ * checked against the class lv_init actually gave it. */
 int rh_platform_image_cache_drop_all(void) {
     uint32_t data = *(volatile uint32_t *)(uintptr_t)0x200bd310u;
     uint32_t header = *(volatile uint32_t *)(uintptr_t)0x200bd314u;
     if (!data || !header) return -1;
-    if (*(volatile uint32_t *)(uintptr_t)data != 0x2ca168c4u ||
-        *(volatile uint32_t *)(uintptr_t)header != 0x2ca168c4u) return -1;
+    if (*(volatile uint32_t *)(uintptr_t)data != 0x2ca168c4u) return -1;
+    if (*(volatile uint32_t *)(uintptr_t)header != 0x2ca16944u) return -1;
     if (retire_cache(header)) return -1;
     return retire_cache(data);
 }

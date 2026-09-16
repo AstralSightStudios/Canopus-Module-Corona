@@ -481,3 +481,36 @@ falls back to the default permanently (reported by not counting, not recoverable
 only `access()` is checked, so a themed file that opens but is not a valid face is
 not handled; and pages other than the stack-top keep their old faces. Symbols are
 allowlisted under EVID-RESOURCE-4139-006. Nothing has run on hardware.
+
+## Verification pass: two defects the fixtures were hiding (2026-09-16)
+
+Re-deriving every firmware fact baked into the module, rather than re-running the
+tests, found two defects in the image-cache retirement. Both had passed emulation
+because the fixtures asserted the same wrong assumption the code made.
+
+**1. The two image caches have different classes.** lv_init (0x0c3a9598) creates the
+decoded-image cache at *0x200bd310 with class 0x2ca168c4 (named "IMAGE") and the
+header cache at *0x200bd314 with class **0x2ca16944** (named "IMAGE_HEADER"). The
+guard required both to equal 0x2ca168c4, so on a real device the header check would
+always fail and `rh_platform_image_cache_drop_all` would return -1. Because
+`cache_dropped` gates the font retarget, the page rebuild and the repaint, the entire
+refresh chain would never have run on hardware, and the retry timer would have spun
+indefinitely. `firmware_rebind.graphics()` had set one class value for both caches,
+so the fixture encoded the bug.
+
+The two classes are the same LRU/RB implementation: their vtables differ only at +4
+and share the +12 lookup, +20 unlink and +28 drop_all this traversal depends on. Each
+cache is now checked against the class lv_init actually gives it, and
+`test_activate_refuses_an_unexpected_cache_class` exercises the guard.
+
+**2. The key passed to lv_cache_drop was over-dereferenced.** The key was taken as
+`*(*(node) + 16)`. That word is an internal pool offset — drop_all_cb uses it as
+`ref = *(cache+4) + offset + 4` — not a key. lv_cache_drop expects a pointer to a
+{src, type, ...} record, which is exactly the shape of an entry's data and of the
+temporary lv_image_cache_drop builds for a single-source drop. The key is `*(node)`.
+The held-entry test had modeled the same extra indirection and so agreed with it.
+
+Both are fixed and the fixtures now model the layout lv_init and drop_all_cb
+actually use. This is the same failure mode as the earlier disp+24 defect: when a
+test fixture is written from the same reading as the code, it confirms the reading
+rather than the behaviour.
