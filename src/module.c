@@ -4,7 +4,17 @@
 
 #define RH_MODULE_ID "resource_hook"
 #define RH_VERSION "0.3.0"
+#if defined(RH_TARGET_155) && RH_TARGET_155
+#define RH_TARGET_ID "xiaomi-band-11-4.100.155"
+#else
 #define RH_TARGET_ID "xiaomi-band-11-4.100.139"
+#endif
+/* Bind offline receipt verification to the same selection as the descriptor
+ * and platform adapter, rather than trusting a receipt label alone. */
+#if defined(__arm__) && defined(__ELF__)
+__attribute__((used, section(".rh.target")))
+static const char rh_artifact_target[48] = RH_TARGET_ID;
+#endif
 static struct rh_state S;
 static int configured;
 static uint32_t images_dropped;

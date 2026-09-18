@@ -1,19 +1,15 @@
-"""Execute .139 font ownership paths; allocation/list mutation are modeled.
+"""Execute selected-target font ownership paths; allocation/list mutation are modeled.
 
 These tests recover the teardown ordering needed by a UI reload. They do not
 run a display, restart miwear, or claim that all UI font owners are enumerated.
 """
-import os
-from pathlib import Path
+from firmware_support import Machine, fw, hook, require_identity_addresses
+
+require_identity_addresses(0xc494380, 0xc4940fc, 0x200bd3ec)
+
 import struct
-import sys
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
-from unicorn import UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R1
 
 
@@ -47,10 +43,7 @@ class FontLifecycle(unittest.TestCase):
         self.hook(0xc3a46dc, lambda: self.events.append(('unlink', m.reg(0), m.reg(1))) or 0)
 
     def hook(self, address, fn):
-        m = self.m
-        if address in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks[address])
-        m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, fn, address, address)
+        hook(self.m, address, fn)
 
     def forbid_file_resolution(self):
         def unexpected():
@@ -151,7 +144,7 @@ class FontLifecycle(unittest.TestCase):
         self.hook(0xc3a4a6a, lambda: 0)
         self.hook(0xc3a43b0, self.allocate_list_node)
         m.uc.reg_write(UC_ARM_REG_R1, self.wrapper)
-        m.call(0xc917394, self.manager)
+        m.call(fw(0xc917394), self.manager)
         self.assertEqual(m.word(self.node + 40), self.font)
         self.assertIn(('free', self.record), self.events)
         self.assertIn(('free', self.wrapper), self.events)

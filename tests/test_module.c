@@ -131,7 +131,11 @@ int main(void) {
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
     assert(!strcmp((const char *)d->module_id, "resource_hook"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
+#if defined(RH_TARGET_155) && RH_TARGET_155
+    assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.155"));
+#else
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.139"));
+#endif
     assert(d->stop(NULL) == 0 && d->deactivate(NULL) == 0);
     assert(d->query(NULL) == -1);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));

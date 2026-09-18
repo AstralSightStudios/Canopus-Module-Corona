@@ -1,4 +1,4 @@
-"""Execute the real .139 page lifecycle ladder the module uses to rebuild a page.
+"""Execute the selected firmware's page lifecycle ladder used to rebuild a page.
 
 The module forces the stack-top page through pause/stop/destroy regardless of its
 cache policy and then brings it back up, so widgets holding a redirected resource are
@@ -8,21 +8,17 @@ the on_create rebuild. The page object, its callbacks and the view allocator are
 modeled; the lifecycle transitions are the firmware's instructions. No display is
 run and no on-hardware behavior is claimed.
 """
-import os
-from pathlib import Path
-import sys
+from firmware_support import Machine, fw, hook, require_identity_addresses
+
+require_identity_addresses(0x200c2a28, 0x20096085, 0x200c33bc)
+
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
-from unicorn import UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R0
 
-POP_WITHOUT_POLICY = 0xc696e34   # exec_pop_lifecycle_without_cachepolicy
-POP_WITH_POLICY = 0xc696eb8      # exec_pop_lifecycle_with_cachepolicy
-ON_RESUME = 0xc696c18            # on_resume_wrapped: create + start + resume
+POP_WITHOUT_POLICY = fw(0xc696e34)   # exec_pop_lifecycle_without_cachepolicy
+POP_WITH_POLICY = fw(0xc696eb8)      # exec_pop_lifecycle_with_cachepolicy
+ON_RESUME = fw(0xc696c18)            # on_resume_wrapped: create + start + resume
 LOG = 0xc350474                  # pagemanager log
 TRACE = 0xc6d29f8                # lifecycle trace hook
 OBJ_DELETE = 0xc384e6c           # lv_obj_delete
@@ -57,20 +53,16 @@ class PageRebuild(unittest.TestCase):
         interleave with them are recorded separately."""
         return [c for c in self.calls if c != 'event']
 
-    def hook(self, address, fn):
-        m = self.m
-        if address in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks.pop(address))
-        m.firmware_hooks[address] = m.uc.hook_add(
-            UC_HOOK_CODE, m.firmware_call, fn, address, address)
+    def hook(self, address, fn, *, synthetic=False):
+        hook(self.m, address, fn, synthetic=synthetic)
 
     def on_delete(self):
         self.deleted.append(self.m.uc.reg_read(UC_ARM_REG_R0))
         return 0
 
     def build_page(self, *, state, policy, root=VIEW, async_destroy=0):
-        """A page whose handler chain is itself; callbacks are firmware stubs we
-        trap so the ladder's dispatches are observable."""
+        """A page whose handler chain is itself; callbacks are synthetic PSRAM
+        stubs we trap so dispatches never depend on arbitrary firmware PCs."""
         m = self.m
         m.uc.mem_write(PAGE, bytes(256))
         m.word(PAGE, 0)                       # end of the handler chain
@@ -83,9 +75,9 @@ class PageRebuild(unittest.TestCase):
         # Lifecycle callback slots: trap each to record that it ran.
         for slot, name in ((13, 'event'), (19, 'create'), (20, 'resume'),
                            (22, 'start'), (23, 'pause'), (24, 'stop'), (25, 'destroy')):
-            stub = 0xc900000 + slot * 8
+            stub = 0x1c7f0000 + slot * 8
             m.word(PAGE + slot * 4, stub | 1)
-            self.hook(stub, (lambda n=name: (self.calls.append(n), 0)[1]))
+            self.hook(stub, (lambda n=name: (self.calls.append(n), 0)[1]), synthetic=True)
 
     def state(self):
         return self.m.uc.mem_read(PAGE + STATE, 1)[0]

@@ -1,29 +1,24 @@
-"""Execute real .139 invalidation and display accessors against modeled objects.
+"""Execute selected-target invalidation/display accessors against modeled objects.
 
 Only display event dispatch is modeled. These tests verify dirty-area bookkeeping,
 not physical display output, decoder reopen behavior, or a whole UI lifecycle.
 """
-import os
-from pathlib import Path
 import struct
-import sys
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
-from unicorn import UC_HOOK_CODE
+from firmware_support import Machine, fw, hook
 from unicorn.arm_const import UC_ARM_REG_R1
 
-LV_INV_AREA = 0x0c382428          # _lv_inv_area(disp, area)
-HRES = 0xc380694                  # lv_display_get_horizontal_resolution
-VRES = 0xc3806b4                  # lv_display_get_vertical_resolution
+LV_INV_AREA = fw(0x0c382428)          # _lv_inv_area(disp, area)
+HRES = fw(0xc380694)                  # lv_display_get_horizontal_resolution
+VRES = fw(0xc3806b4)                  # lv_display_get_vertical_resolution
+DPI = fw(0xc3807bc)
+ACTIVE_SCREEN = fw(0xc3807ec)
 SEND_EVENT = 0xc3809a4            # lv_display_send_event; return 1 to continue
 
 W, H = 192, 490                   # modeled screen size; any positive pair works
 
-# Display field offsets recovered from the exact .139 lv_refr.c/lv_display.c.
+# Display offsets recovered from .139 and confirmed in exact .155 accessors.
 ACT_SCR = 696                     # verified by real accessor 0xc3807ec
 MODE = 57                        # render mode byte (2 == direct/full)
 FLAGS = 58                       # bit 1 == rendering_in_progress
@@ -42,10 +37,7 @@ class InvalidateArea(unittest.TestCase):
         # what the module has to agree with.
 
     def hook(self, address, fn):
-        m = self.m
-        if address in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks[address])
-        m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, fn, address, address)
+        hook(self.m, address, fn)
 
     def build_display(self, addr, *, mode, rendering, enabled, count=0, rotated=False):
         m = self.m
@@ -68,13 +60,13 @@ class InvalidateArea(unittest.TestCase):
     def test_real_accessors_distinguish_dpi_from_screen(self):
         m, disp = self.m, 0x3c780000
         self.build_display(disp, mode=1, rendering=0, enabled=1)
-        m.word(0x200bd200, disp)
-        self.assertEqual(m.call(0xc3807bc, disp), 130)
-        self.assertEqual(m.call(0xc3807ec, disp), disp + 0x800)
-        self.assertEqual(m.call(0xc3807ec, 0), disp + 0x800)
+        m.word(fw(0x200bd200), disp)
+        self.assertEqual(m.call(DPI, disp), 130)
+        self.assertEqual(m.call(ACTIVE_SCREEN, disp), disp + 0x800)
+        self.assertEqual(m.call(ACTIVE_SCREEN, 0), disp + 0x800)
         m.word(disp + ACT_SCR, 0)
-        self.assertEqual(m.call(0xc3807ec, disp), 0)
-        self.assertEqual(m.call(0xc3807bc, disp), 130)
+        self.assertEqual(m.call(ACTIVE_SCREEN, disp), 0)
+        self.assertEqual(m.call(DPI, disp), 130)
 
     def test_partial_mode_appends_full_screen_area(self):
         m = self.m
@@ -114,8 +106,8 @@ class InvalidateArea(unittest.TestCase):
         m = self.m
         disp, area = 0x3c780000, 0x3c781000
         self.build_display(disp, mode=1, rendering=0, enabled=1, rotated=True)
-        self.assertEqual(m.call(0xc380694, disp), H)   # horizontal is the +4 field
-        self.assertEqual(m.call(0xc3806b4, disp), W)   # vertical is the +0 field
+        self.assertEqual(m.call(HRES, disp), H)   # horizontal is the +4 field
+        self.assertEqual(m.call(VRES, disp), W)   # vertical is the +0 field
         m.uc.mem_write(area, struct.pack('<4i', 0, 0, 0x7fff, 0x7fff))
         self.inv_area(disp, area)
         self.assertEqual(m.word(disp + INV_COUNT), 1)

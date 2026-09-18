@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -13,16 +14,25 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'xiaomi-band-11-4.100.139'
+TARGETS = runpy.run_path(str(ROOT / 'scripts/verify-payload.py'))['TARGETS']
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='new delivery directory; existing paths are refused')
+    parser.add_argument('--target', choices=TARGETS, action='append',
+                        help='target to include; repeat for a dual bundle (default: .139)')
     args = parser.parse_args()
+    targets = args.target or [TARGET]
+    if len(set(targets)) != len(targets):
+        parser.error('duplicate target')
     output = args.output.absolute()
     if output.exists() or output.is_symlink():
         parser.error('output already exists; choose a new directory')
-    canopus = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
+    default_canopus = ROOT.parent / 'Canopus'
+    if not default_canopus.is_dir():
+        default_canopus = ROOT.parent / 'Canopus-Private'
+    canopus = Path(os.environ.get('CANOPUS_ROOT') or default_canopus).resolve()
     firmware_python = os.environ.get('FIRMWARE_PYTHON', str(canopus / 'build/band11-tests/bin/python'))
     if not shutil.which(firmware_python):
         parser.error('set FIRMWARE_PYTHON to a Python with the Canopus firmware-test dependencies')
@@ -46,21 +56,25 @@ def main():
                 raise RuntimeError(f'{label} failed (exit {result.returncode}); delivery not published')
             steps.append(label)
 
-        payload = stage / 'payload' / TARGET
-        run('Host sanitizers, ARM verifier and signed payload',
-            ['sh', str(ROOT / 'scripts/build-install-payload.sh'), TARGET, str(payload)])
-        env['RESOURCE_HOOK_PAYLOAD'] = str(payload)
-        run('Delivery identity and tamper rejection', [sys.executable, str(ROOT / 'tests/test_delivery.py')])
+        for target in targets:
+            payload = stage / 'payload' / target
+            env['RESOURCE_HOOK_TARGET'] = target
+            env['RESOURCE_HOOK_PAYLOAD'] = str(payload)
+            run(f'{target}: Host sanitizers, ARM verifier and signed payload',
+                ['sh', str(ROOT / 'scripts/build-install-payload.sh'), target, str(payload)])
+            run(f'{target}: Delivery identity and tamper rejection',
+                [sys.executable, str(ROOT / 'tests/test_delivery.py')])
+            for name in ('firmware_paths', 'firmware_restart', 'firmware_rebind',
+                         'firmware_font_lifecycle', 'firmware_image_lifecycle',
+                         'firmware_ui_redraw', 'firmware_page_rebuild',
+                         'firmware_font_retarget'):
+                run(f'{target}: {name}', [firmware_python, str(ROOT / 'tests' / (name + '.py'))])
         run('Installer generation and restricted Lua protocol',
             [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
-        for name in ('firmware_paths', 'firmware_restart', 'firmware_rebind',
-                     'firmware_font_lifecycle', 'firmware_image_lifecycle',
-                     'firmware_ui_redraw', 'firmware_page_rebuild',
-                     'firmware_font_retarget'):
-            run(name, [firmware_python, str(ROOT / 'tests' / (name + '.py'))])
+        target_args = [arg for target in targets for arg in ('--target', target)]
         run('Watchface payload and Supervisor trust-key verification', [
             sys.executable, str(canopus / 'scripts/build_module_installer_prod.py'),
-            '--product', 'resource-hook', '--target', TARGET, '--payload-dir', str(stage / 'payload'),
+            '--product', 'resource-hook', *target_args, '--payload-dir', str(stage / 'payload'),
             '--assets-dir', str(ROOT / 'examples'), '--output-dir', str(stage / 'watchface')])
         source = stage / 'source'
         source.mkdir()
@@ -70,7 +84,7 @@ def main():
             shutil.copyfile(ROOT / name, source / name)
         (stage / 'README.md').write_text(
             '# Resource Hook 0.3.0 integration delivery\n\n'
-            'Target: Xiaomi Band 11 4.100.139. Physical device: NOT_PROBED.\n\n'
+            f'Targets: {", ".join(targets)}. Physical device: NOT_PROBED.\n\n'
             '- Read INSTALL.md before installing or enabling.\n'
             '- payload/: signed ELF/CMI1, example mapping and verifier.\n'
             '- watchface/: installer Lua/resources; ZIP is input to a watchface packer, not a vendor watchface file.\n'
@@ -81,10 +95,15 @@ def main():
         shutil.copyfile(ROOT / 'docs/INSTALL.md', stage / 'INSTALL.md')
         evidence = stage / 'evidence'
         evidence.mkdir()
-        for name in ('evidence.json', 'ui-reload-audit.md', 'lifecycle-recovery.json'):
-            shutil.copyfile(ROOT / 'targets' / TARGET / name, evidence / name)
+        for target in targets:
+            destination = evidence if len(targets) == 1 else evidence / target
+            destination.mkdir(exist_ok=True)
+            for name in ('evidence.json', 'ui-reload-audit.md', 'lifecycle-recovery.json'):
+                shutil.copyfile(ROOT / 'targets' / target / name, destination / name)
         (stage / 'validation.json').write_text(json.dumps({
-            'module': 'resource_hook', 'version': '0.3.0', 'target': TARGET,
+            'module': 'resource_hook', 'version': '0.3.0',
+            **({'target': targets[0]} if len(targets) == 1 else {}),
+            'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',
             'automatic_miwear_restart': False, 'complete_cache_refresh': False,
         }, indent=2) + '\n')
@@ -92,7 +111,8 @@ def main():
         (stage / 'SHA256SUMS').write_text(''.join(
             f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(stage).as_posix()}\n'
             for p in files))
-        archive = stage / f'resource-hook-0.3.0-{TARGET}.zip'
+        archive_target = targets[0] if len(targets) == 1 else 'xiaomi-band-11-4.100.139-4.100.155'
+        archive = stage / f'resource-hook-0.3.0-{archive_target}.zip'
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
             for path in files + [stage / 'SHA256SUMS']:
                 bundle.write(path, path.relative_to(stage))

@@ -1,13 +1,20 @@
 # Canopus-Module-Resource-Hook
 
-**0.3.0 · Xiaomi Band 11 / 4.100.139 · 资源路径重定向集成交付**
+**0.3.0 · Xiaomi Band 11 / 4.100.139、4.100.155 · 资源路径重定向集成交付**
 
 提供经过宿主测试和固件指令仿真验证的驻留资源 Hook、签名 ELF/CMI1 payload、
 安装表盘 Lua/资源 ZIP，以及可重复执行的完整交付构建。
-**实机状态仍为 NOT_PROBED；不能视作已经通过设备验收的生产主题模块。**
+**两个目标的实机状态均为 NOT_PROBED；不能视作已经通过设备验收的生产主题模块。**
+
+`.155` 使用独立的固件地址配置、模块描述符和签名收据；`.139` 仍为默认构建目标。
+两个固件的 ELF 不可混用，也不能仅修改收据目标来迁移旧 ELF。
+`.155` 还按真实指令修正了缓存遍历的 `head → RB node → data` 间接寻址；
+`.139` 保留原行为，其旧缓存 key 假设仍需另行审计。
+`.155` 当前通过宿主测试、ARM verifier、31 项固件测试及七组平台探针；
+完整签名加载／重绑定仍受缺少 Supervisor 可信私钥阻塞，未生成正式安装包。
 
 **图片重载已实现：** activate 成功安装重定向后，模块在 UI 所属线程逐项退休
-图片缓存（`lv_cache_drop`，0x0c8b8cae），再调用 `_lv_inv_area`（0x0c382428）
+图片缓存（`lv_cache_drop`：.139 为 0x0c8b8cae，.155 为 0x0c8b8c9e），再调用 `_lv_inv_area`（0x0c382428）
 把整块活动屏标记为脏，让固件自身的刷新定时器在下一次 tick 重绘全屏、经重定向
 重新解码——不必再等用户翻页。**逐项退休而非整表清空**：仍被持有的缓存项只被
 标记失效并摘链，载荷等最后一个引用释放时才回收，不会把数据从活控件下面抽走；
@@ -39,7 +46,7 @@
 - 从 `/data/canopus/themes/mappings.tsv` 加载；先完整校验，再提交配置。
 - 替代资源必须位于 `/data/canopus/themes/` 词法路径下；拒绝路径穿越、
   重复规则、控制字符和非法目录前缀。主题树不得包含逃逸符号链接。
-- 只 Hook `.139` 的 `/` LVGL POSIX driver 读操作；正确处理去首斜杠 ABI
+- 只 Hook 所选目标的 `/` LVGL POSIX driver 读操作；正确处理去首斜杠 ABI
   和 `fd + 1` 文件句柄；替代文件打不开时回退原始资源，不递归重映射。
 - 已知 callback 才允许安装/重绑定；短临界区发布状态和 slot，不覆盖未知 Hook。
 - activate 安装重定向后逐项退休图片缓存（`lv_cache_drop`），随后调用
@@ -74,7 +81,7 @@
 - `lv_draw_image` 延迟绘制任务分支、以及自带解码缓冲的动画/画布类控件的验证；
   它们可能仍显示旧图，需页面重建。
 - 成功打开但解码失败的资源自动回退。
-- 热卸载、热更新映射或跨固件版本兼容。
+- 热卸载、热更新映射或同一 ELF 跨固件版本使用。
 - 已完成的 MPU/cache/display 实机验收，或 canonical `.canopus` 包格式。
 
 `restart_miwear.sh` 故意退出 78；固件反例测试证明固定延时再启动 builtin entry
@@ -83,7 +90,8 @@
 
 ## 从源码构建
 
-依赖：相邻 `../Canopus` 源码及其已构建 CLI、C 编译器、Clang ARM 后端、
+依赖：相邻 `../Canopus`（不存在时回退 `../Canopus-Private`）源码及其已构建 CLI、
+C 编译器、Clang ARM 后端、
 `ld.lld`、Python 3.11+、支持 Ed25519 的 OpenSSL。完整交付还需要 Lua 5.3+、
 Canopus 的固件测试 Python 环境、目标固件文件及已构建的 Band 11 Supervisor
 测试资源。这些固件和工具不随本模块分发。
@@ -92,7 +100,7 @@ Canopus 的固件测试 Python 环境、目标固件文件及已构建的 Band 1
 
 | 环境变量 | 默认值 |
 |---|---|
-| CANOPUS_ROOT | `../Canopus`（相对于模块目录） |
+| CANOPUS_ROOT | `../Canopus`，不存在时 `../Canopus-Private`（相对于模块目录） |
 | CANOPUS_CLI | `$CANOPUS_ROOT/target/debug/canopus` |
 | CC / CLANG / LD_LLD | `cc` / `clang` / `ld.lld` |
 | MODULE_INSTALL_KEY | `$CANOPUS_ROOT/.canopus-local/module-installer-ed25519.pem` |
@@ -100,15 +108,21 @@ Canopus 的固件测试 Python 环境、目标固件文件及已构建的 Band 1
 | CANOPUS_TEST_LUA | `lua` |
 | RESOURCE_HOOK_PAYLOAD | 单独运行测试时覆盖 payload 目录 |
 
-在 Canopus 仓库先执行 `cargo build -p canopus-cli`。在模块源码目录中：
+在 Canopus 仓库先执行 `cargo build -p canopus-cli`。`.155` 目标包还须包含
+`EVID-RESOURCE-4155-001` 及对应六个私有接口符号；本次已补入相邻
+`Canopus-Private/targets/xiaomi-band-11-4.100.155/`。旧目标包可能报地址不在
+allowlist，必须更新精确符号，不能关闭 verifier 或扩大地址范围。
+
+在模块源码目录中：
 
 ```sh
 # 三组 ASan/UBSan 宿主测试、ARM 编译、ELF verifier；不需要私钥
-sh scripts/build.sh
+sh scripts/build.sh xiaomi-band-11-4.100.155
+# 不传目标仍构建 .139；build/resource-hook.elf 是最近一次构建的目标
 
 # 完整签名交付：运行全部检查，然后生成 payload、安装表盘资源和 ZIP
 # 输出目录必须尚不存在；不会覆盖以前的交付
-python3 scripts/build-delivery.py dist/0.3.0
+python3 scripts/build-delivery.py dist/0.3.0-155 --target xiaomi-band-11-4.100.155
 ```
 
 签名 key 必须已被 Supervisor 信任；完整交付构建会用 **Supervisor 源码中的
@@ -118,8 +132,8 @@ Supervisor 公钥，也不把私钥打包或上传。
 输出结构：
 
 ```text
-dist/0.3.0/
-├── payload/xiaomi-band-11-4.100.139/
+dist/0.3.0-155/
+├── payload/xiaomi-band-11-4.100.155/
 │   ├── resource-hook.elf
 │   ├── receipt.bin
 │   ├── signer-public.pem
@@ -135,7 +149,7 @@ dist/0.3.0/
 ├── validation.json
 ├── validation.log
 ├── SHA256SUMS
-└── resource-hook-0.3.0-xiaomi-band-11-4.100.139.zip
+└── resource-hook-0.3.0-xiaomi-band-11-4.100.155.zip
 ```
 
 安装表盘 ZIP 是**供表盘打包工具使用的 Lua/资源包**，不是已经封装好的厂商
@@ -146,13 +160,19 @@ dist/0.3.0/
 ## 单独验证
 
 ```sh
-sh scripts/build-install-payload.sh xiaomi-band-11-4.100.139 \
-  build/payload-0.3.0/xiaomi-band-11-4.100.139
+export RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.155
+sh scripts/build-install-payload.sh "$RESOURCE_HOOK_TARGET" \
+  "build/payload-0.3.0/$RESOURCE_HOOK_TARGET"
+python3 tests/test_target_receipts.py  # 不需要生产签名私钥
 python3 tests/test_delivery.py
-../Canopus/build/band11-tests/bin/python tests/firmware_paths.py
-../Canopus/build/band11-tests/bin/python tests/firmware_restart.py
-../Canopus/build/band11-tests/bin/python tests/firmware_rebind.py
+"$FIRMWARE_PYTHON" tests/firmware_paths.py
+"$FIRMWARE_PYTHON" tests/firmware_restart.py
+"$FIRMWARE_PYTHON" tests/firmware_rebind.py
 ```
+
+固件测试需要设置 `CANOPUS_ROOT`、`FIRMWARE_PYTHON`，并在框架中准备对应目标的
+AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要 Supervisor 真正
+信任的签名收据。临时测试密钥通过离线校验不等于设备或 Supervisor 信任。
 
 若该 payload 目录已存在，选择新输出路径并设置 `RESOURCE_HOOK_PAYLOAD`，不要
 删除不明来源的目录。verify-payload.py 接受独立可信公钥；包内公钥仅供比对，
@@ -160,4 +180,5 @@ python3 tests/test_delivery.py
 
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
-固件证据：[ui-reload-audit.md](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)。
+固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、
+[.155 迁移证据](targets/xiaomi-band-11-4.100.155/)。

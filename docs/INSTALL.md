@@ -1,13 +1,15 @@
 # Resource Hook 安装与验收
 
 适用交付：Canopus-Module-Resource-Hook **0.3.0**，仅限 Xiaomi Band 11
-**4.100.139**。这是 ELF + CMI1 开发集成交付，不是 canonical `.canopus`
-压缩包，也不是已通过实机验收的完整主题产品。实机状态：**NOT_PROBED**。
+**4.100.139 / 4.100.155**，两个固件使用独立构建的 ELF 和收据，不能混用。
+这是 ELF + CMI1 开发集成交付，不是 canonical `.canopus` 压缩包，也不是已通过
+实机验收的完整主题产品。两个目标的实机状态均为 **NOT_PROBED**。
 
 ## 安装前提
 
-- 固件 SHA-256 必须为
-  `31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74`。
+- AP 固件（OTA 中的 `vela_ap.bin`，不是整个 OTA ZIP）SHA-256 必须匹配所选目标：
+  - `.139`：`31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74`
+  - `.155`：`ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f`
 - 已部署兼容 Canopus ABI **1.2**、CMI1 的 Supervisor；其可信签名公钥
   必须与本 payload 的签名者一致。不要为安装此模块关闭签名或固件校验。
 - 操作方必须具备文件传输、Manager 控制及故障后的设备重启/恢复手段。
@@ -17,9 +19,14 @@
 先用**独立可信来源**的 Supervisor 签名公钥验证：
 
 ```sh
-python3 verify-payload.py . --public-key /path/to/trusted-supervisor-public.pem
+python3 verify-payload.py . --target xiaomi-band-11-4.100.155 \
+  --public-key /path/to/trusted-supervisor-public.pem
 shasum -a 256 -c SHA256SUMS
 ```
+
+`.139` 包将命令中的目标改为 `xiaomi-band-11-4.100.139`。校验器默认 `.139`，
+不会从不可信收据自动猜测目标；`.155` 必须显式指定。固件升级前先禁用旧模块并完整
+重启，再按新固件重新部署匹配的 Supervisor 和模块，不要只给旧 ELF 换收据。
 
 `signer-public.pem` 是供比对的公钥，不是信任根。单独使用包内公钥只能检查
 自洽性，不能确认来源。SHA256SUMS 检查传输损坏；ELF 的真实性由 CMI1
@@ -54,13 +61,13 @@ shasum -a 256 -c SHA256SUMS
 ## 资源重载：图片、页面重建与字体
 
 **图片：** 每次 activate 成功安装重定向后，模块会在 UI 所属线程**逐项退休**
-图片缓存和图片头缓存（`lv_cache_drop`，.139 地址 0x0c8b8cae）。LVGL 图片缓存以
+图片缓存和图片头缓存（`lv_cache_drop`：.139 为 0x0c8b8cae，.155 为 0x0c8b8c9e）。LVGL 图片缓存以
 “源路径”为键，若不退休，已解码过的 `/resource/...` 图片会在 open 之前直接命中
 旧缓存，重定向永远不生效。退休后，模块紧接着调用 `_lv_inv_area`（0x0c382428）
 把整块活动屏标记为脏，让固件自身的刷新定时器在下一次 tick 重绘全屏、经过重定向
 重新解码。要点：
 - **逐项退休，不是整表清空。** 仍被持有的缓存项只被标记失效并摘链，载荷等最后
-  一个引用释放时（`lv_cache_entry_release_data`，0x0c8b9790）才回收，**不会把
+  一个引用释放时（`lv_cache_entry_release_data`）才回收，**不会把
   数据从正在使用它的控件下面抽走**；引用计数为 0 的项立即释放。无论哪种情况，
   下一次按该路径查找都会落空，从而走重定向。
   固件自带的 `drop_all` 会连带释放被持有项的节点存储，因此**不**使用它。
@@ -84,8 +91,9 @@ shasum -a 256 -c SHA256SUMS
 
 **页面重建（已实现，仅栈顶页）：** 退休缓存后，模块会强制**栈顶页面**走完整的
 拆除并重新拉起，让持有资源的控件被**重建**而不只是重绘：
-`exec_pop_lifecycle_without_cachepolicy`（0x0c696e34）依次 pause/stop/destroy，
-最终 `lv_obj_delete` 掉页面根视图；再由 `on_resume_wrapped`（0x0c696c18）
+`exec_pop_lifecycle_without_cachepolicy`（.139：0x0c696e34；.155：0x0c696e24）
+依次 pause/stop/destroy，最终 `lv_obj_delete` 掉页面根视图；再由
+`on_resume_wrapped`（.139：0x0c696c18；.155：0x0c696c08）
 create/start/resume，通过页面自己的 on_create 回调重建全部控件。
 
 这一步很重要，因为**普通导航不会重建页面**：导航走的是按缓存策略的变体，
@@ -108,7 +116,8 @@ create/start/resume，通过页面自己的 on_create 回调重建全部控件�
 模块改为直接改写**字体管理器的注册表**：遍历已注册的 {字体名, 路径} 条目，
 把路径命中映射规则的那些指向主题文件。注意**直接 add_path 是无效的**：它尾插，
 而解析按名字取第一个匹配，启动时注册的 MiSans 条目会一直胜出（日志还会打印
-"add success"）。因此必须先 `font_manager_remove_path`（0x0c904cfc）摘掉旧条目，
+"add success"）。因此必须先 `font_manager_remove_path`（.139：0x0c904cfc；
+.155：0x0c904cec）摘掉旧条目，
 再 `font_manager_add_path`（0x0c4924e0）加新的；旧的名字字符串会被 remove 释放，
 所以要先复制出来。替换后模块会**再解析一次**确认真的指向主题文件才计数。
 
@@ -120,7 +129,9 @@ create/start/resume，通过页面自己的 on_create 回调重建全部控件�
 - 只检查 `access()`，**不检查**主题字体文件能否被 FreeType 正确解析。
 - query 的 `fonts_retargeted` 每成功替换一个字体名加一。
 见
-`targets/xiaomi-band-11-4.100.139/lifecycle-recovery.json` 与 `ui-reload-audit.md`。
+`targets/xiaomi-band-11-4.100.139/lifecycle-recovery.json` 与 `ui-reload-audit.md`；
+`.155` 的迁移依据见 `targets/xiaomi-band-11-4.100.155/`。
+上文未标版本的公共接口地址仅用于说明，构建时仍按独立目标选择地址配置。
 
 当前 Manager 没有主题选择器、资源上传页面，也没有展示模块 RHQ1 计数器
 （“立即激活”只负责加载激活模块，不负责传输主题文件）。
@@ -136,7 +147,7 @@ create/start/resume，通过页面自己的 on_create 回调重建全部控件�
 在模块源码目录执行（只检查本地文件，不连接设备）：
 
 ```sh
-sh scripts/build.sh
+sh scripts/build.sh xiaomi-band-11-4.100.155
 ./build/check-config examples/mappings.tsv /resource/icons/a.bin
 ```
 

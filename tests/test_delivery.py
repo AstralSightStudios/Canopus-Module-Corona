@@ -11,8 +11,9 @@ import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+TARGET = os.environ.get('RESOURCE_HOOK_TARGET', 'xiaomi-band-11-4.100.139')
 PAYLOAD = Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
-    ROOT / 'build/payload-0.3.0/xiaomi-band-11-4.100.139'))
+    ROOT / 'build/payload-0.3.0' / TARGET))
 spec = importlib.util.spec_from_file_location('verify_payload', ROOT / 'scripts/verify-payload.py')
 verifier = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verifier)
@@ -28,10 +29,15 @@ class Delivery(unittest.TestCase):
         self.key = self.directory / 'signer-public.pem'
 
     def check(self):
-        return verifier.verify(self.directory, self.key)
+        return verifier.verify(self.directory, self.key, TARGET)
 
     def test_valid_receipt(self):
         self.assertEqual(len(self.check()), 64)
+
+    def test_wrong_expected_target(self):
+        other = next(target for target in verifier.TARGETS if target != TARGET)
+        with self.assertRaisesRegex(ValueError, 'target ID'):
+            verifier.verify(self.directory, self.key, other)
 
     def test_tampered_artifact(self):
         p = self.directory / 'resource-hook.elf'
@@ -80,6 +86,10 @@ class Delivery(unittest.TestCase):
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)
         self.assertEqual(metadata['version'], manifest['module']['version'])
         self.assertEqual(metadata['physical_device'], 'NOT_PROBED')
+        self.assertEqual(metadata['target'], TARGET)
+        receipt = (PAYLOAD / 'receipt.bin').read_bytes()
+        self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'))
+        self.assertEqual(receipt[112:144].hex(), verifier.TARGETS[TARGET])
         self.assertEqual(struct.unpack_from('<I', (PAYLOAD / 'receipt.bin').read_bytes(), 20)[0],
                          metadata['receipt_module_version'])
 
@@ -87,7 +97,7 @@ class Delivery(unittest.TestCase):
         marker = self.directory / 'keep'
         marker.write_text('keep this')
         result = subprocess.run(['sh', str(ROOT / 'scripts/build-install-payload.sh'),
-                                 verifier.TARGET, str(self.directory)], capture_output=True, text=True)
+                                 TARGET, str(self.directory)], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('already exists', result.stderr)
         self.assertEqual(marker.read_text(), 'keep this')

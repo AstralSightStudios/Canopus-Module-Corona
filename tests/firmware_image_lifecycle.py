@@ -1,4 +1,4 @@
-"""Counterexample: why the module does NOT use the .139 image-cache drop-all.
+"""Counterexample: why the module does NOT use the firmware image-cache drop-all.
 
 lv_image_cache_drop(0) (0x0c3a3888) dispatches drop_all_cb (0x0c3a7918) to both the
 decoded-image cache (*0x200bd310) and the header cache (*0x200bd314). drop_all_cb
@@ -12,18 +12,11 @@ Cache objects, the entry pool and the node tree are modeled; the LRU traversal a
 free dispatch are the firmware's own code. No display is run and no on-hardware
 behavior is claimed.
 """
-import os
-from pathlib import Path
-import struct
-import sys
+from firmware_support import Machine, fw, hook, require_identity_addresses
+
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
-from unicorn import UC_HOOK_CODE
-from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_SP
+from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_SP
 
 LV_IMAGE_CACHE_DROP = 0x0c3a3888       # lv_image_cache_drop(src)
 DROP_ALL_CB = 0x0c3a7919               # LRU-rb drop_all_cb (thumb)
@@ -32,6 +25,9 @@ HEADER_CACHE_GLOBAL = 0x200bd314
 LOG = 0xc3a5e34                        # firmware log; a5 (fmt) is at *sp
 RB_RESET = 0xc378b1e                   # ls-tree reset at the end of drop_all_cb
 FREE = 0xc3abe58                       # generic free; used as the per-entry free cb
+
+require_identity_addresses(LV_IMAGE_CACHE_DROP, DROP_ALL_CB, DATA_CACHE_GLOBAL,
+                           HEADER_CACHE_GLOBAL, LOG, RB_RESET, FREE)
 
 
 class ImageCacheDrop(unittest.TestCase):
@@ -47,10 +43,7 @@ class ImageCacheDrop(unittest.TestCase):
         self.hook(FREE, self.on_free)
 
     def hook(self, address, fn):
-        m = self.m
-        if address in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks[address])
-        m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, fn, address, address)
+        hook(self.m, address, fn)
 
     def on_log(self):
         self.logs.append(self.m.string(self.m.word(self.m.uc.reg_read(UC_ARM_REG_SP))))
@@ -155,6 +148,53 @@ class ImageCacheDrop(unittest.TestCase):
         self.assertIn(held_node, self.freed)
         self.assertIn(held_payload, self.freed)
         self.assertEqual(m.word(data_cache + 36), 0)
+
+    def test_retired_entry_is_freed_only_after_last_reference(self):
+        """Real generic drop/release independently of the signed-loader fixture.
+
+        Only class lookup/unlink and free leaves are modeled. The firmware must
+        mark a held entry invalid, unlink it, and defer both frees to refcount 0.
+        The signed-module traversal of head -> RB -> data is tested in rebind.
+        """
+        m = self.m
+        cache, node, data = 0x3c761000, 0x3c762000, 0x3c763000
+        entry = data + 64
+        for address in (cache, node, data):
+            m.uc.mem_write(address, bytes(128))
+        m.word(cache, fw(0x2ca168c4))
+        m.word(cache + 4, entry - data)
+        m.word(cache + 24, FREE | 1)
+        m.word(cache + 52, node)
+        m.word(entry + 4, 2)
+        m.word(entry + 8, entry - data)
+        m.uc.mem_write(data, b'held-image-canary')
+        looked_up = []
+
+        def lookup():
+            self.assertEqual((m.reg(0), m.reg(1)), (cache, data))
+            looked_up.append(data)
+            return entry
+
+        def unlink():
+            self.assertEqual((m.reg(0), m.reg(1)), (cache, entry))
+            m.word(cache + 52, 0)
+            return 0
+
+        self.hook(0xc3a4ace, lookup)
+        self.hook(0xc3a472c, unlink)
+        m.uc.reg_write(UC_ARM_REG_R1, data)
+        m.call(fw(0xc8b8cae), cache)
+        self.assertEqual(looked_up, [data])
+        self.assertEqual(m.word(cache + 52), 0)
+        self.assertEqual(m.uc.mem_read(entry + 12, 1), b'\x01')
+        self.assertEqual(m.word(entry + 4), 2)
+        self.assertEqual(self.freed, [])
+        for remaining in (1, 0):
+            m.uc.reg_write(UC_ARM_REG_R1, entry)
+            m.call(fw(0xc8b9790), cache)
+            self.assertEqual(m.word(entry + 4), remaining)
+            self.assertEqual(self.freed, [] if remaining else [data, data])
+            self.assertEqual(m.uc.mem_read(data, 17), b'held-image-canary')
 
     def test_empty_caches_drop_cleanly(self):
         m = self.m

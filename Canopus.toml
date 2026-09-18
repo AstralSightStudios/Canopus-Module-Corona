@@ -6,6 +6,6 @@ language = "c"
 lifecycle = "resident-after-activation"
 canopus_abi = "1"
 [targets]
-include = ["xiaomi-band-11-4.100.139"]
+include = ["xiaomi-band-11-4.100.139", "xiaomi-band-11-4.100.155"]
 [capabilities]
 required = ["identity-guard"]

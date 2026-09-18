@@ -1,4 +1,4 @@
-"""Execute the real .139 font-path registry the module retargets.
+"""Execute the selected firmware's font-path registry the module retargets.
 
 Fonts never reach the hooked LVGL POSIX open: font_manager_create_font_warpper
 resolves a family through font_manager_generate_def_path and opens the result with
@@ -9,21 +9,17 @@ add_path silently useless. The manager object and the allocator are modeled; the
 lookup, append and unlink are the firmware's instructions. No font is rendered and
 no on-hardware behavior is claimed.
 """
-import os
-from pathlib import Path
-import sys
+from firmware_support import Machine, fw, hook, require_identity_addresses
+
+require_identity_addresses(0xc490edc, 0xc4924e0, 0x200bd1e8)
+
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
-from unicorn import UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1
 
 GENERATE_DEF_PATH = 0xc490edc    # font_manager_generate_def_path(manager, name)
 ADD_PATH = 0xc4924e0             # font_manager_add_path(name, path)
-REMOVE_PATH = 0xc904cfc          # font_manager_remove_path(entry)
+REMOVE_PATH = fw(0xc904cfc)          # font_manager_remove_path(entry)
 LOG = 0xc3a5e34
 UIKIT_GLOBAL = 0x200bd1e8
 
@@ -53,11 +49,7 @@ class FontRegistry(unittest.TestCase):
         m.uc.mem_write(MANAGER + BASE_DIR, b'/resource/font\0')
 
     def hook(self, address, fn):
-        m = self.m
-        if address in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks.pop(address))
-        m.firmware_hooks[address] = m.uc.hook_add(
-            UC_HOOK_CODE, m.firmware_call, fn, address, address)
+        hook(self.m, address, fn)
 
     def alloc(self):
         size = (self.m.uc.reg_read(UC_ARM_REG_R0) + 15) & ~15

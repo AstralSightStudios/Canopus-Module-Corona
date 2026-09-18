@@ -1,24 +1,22 @@
-"""Actual .139 launch/init code; OS scheduling and libuv calls are modeled.
+"""Selected-target launch/init code; OS scheduling and libuv calls are modeled.
 
 These are counterexample tests, not a claim of an emulated process restart.
 """
-import pathlib
-import sys
+from firmware_support import Machine, fw, hook, require_identity_addresses
+
+require_identity_addresses(
+    0xc330720, 0xc35a345, 0xc34ee38, 0xc3533f4, 0xc494198,
+    0x200b04bc, 0x200b98e4, 0x200bd1e8, 0x200da910, 0x200da864, 0x200da7f8,
+)
+
 import unittest
-import os
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-CANOPUS = pathlib.Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
 from unicorn import UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC
 
 
 class Restart(unittest.TestCase):
     def hook(self, m, address, fn):
-        if address in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks[address])
-        m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, fn, address, address)
+        hook(m, address, fn)
 
     def test_builtin_loader_returns_fixed_miwear_entry_without_resetting_globals(self):
         m = Machine()
@@ -29,11 +27,11 @@ class Restart(unittest.TestCase):
         m.uc.mem_write(0x200da910, b'\x07')
         self.hook(m, 0xc34938c, lambda: 0)  # no slash in the supplied basename
         self.hook(m, 0xc34834c, lambda: 30)  # builtin index checked below
-        base = 0x2ca02564 + 30 * 16
+        base = fw(0x2ca02564) + 30 * 16
         self.assertEqual(m.string(m.word(base)), 'miwear')
         m.uc.reg_write(UC_ARM_REG_R1, name)
         self.assertEqual(m.call(0xc330720, image), 0)
-        self.assertEqual(m.word(image), 0xc7def89)
+        self.assertEqual(m.word(image), fw(0xc7def89))
         self.assertEqual(m.word(image + 172), 65536)
         self.assertEqual(bytes(m.uc.mem_read(image + 168, 1)), b'\x66')
         self.assertEqual(bytes(m.uc.mem_read(0x200da910, 1)), b'\x07')
@@ -47,7 +45,7 @@ class Restart(unittest.TestCase):
         m.uc.mem_write(name, b'miwear\0')
         m.word(argv, name)
         m.word(argv + 4, 0)
-        m.word(tcb + 56, 0xc7def89)
+        m.word(tcb + 56, fw(0xc7def89))
         m.word(tcb + 100, stack)
         m.word(stack + 44, argv)
         m.word(0x200b04bc, tcb)
@@ -156,11 +154,11 @@ class Restart(unittest.TestCase):
                 self.hook(m, 0xc4924e0, lambda: events.append(
                     ('font_path', m.string(m.reg(0)), m.string(m.reg(1)))) or 0)
                 m.uc.hook_add(UC_HOOK_CODE, lambda uc, address, size, data: uc.emu_stop(),
-                              None, 0xc7e895a, 0xc7e895a)
+                              None, fw(0xc7e895a), fw(0xc7e895a))
                 m.uc.reg_write(UC_ARM_REG_SP, m.stack_top)
                 m.uc.reg_write(UC_ARM_REG_LR, m.stop | 1)
-                m.uc.emu_start(0xc7e88b1, m.stop, count=10000)
-                self.assertEqual(m.uc.reg_read(UC_ARM_REG_PC), 0xc7e895a)
+                m.uc.emu_start(fw(0xc7e88b1), m.stop, count=10000)
+                self.assertEqual(m.uc.reg_read(UC_ARM_REG_PC), fw(0xc7e895a))
                 if already_initialized:
                     self.assertEqual(events, [])
                 else:
@@ -186,9 +184,9 @@ class Restart(unittest.TestCase):
             return 0
         self.hook(m, 0xc3f0a6e, timer)
         m.uc.mem_write(0x200da910, b'\x07')
-        self.assertEqual(m.call(0xc7def88), 0)
+        self.assertEqual(m.call(fw(0xc7def88)), 0)
         self.assertEqual(bytes(m.uc.mem_read(0x200da910, 1)), b'\x08')
-        self.assertEqual(scheduled, [0xc7e88b1])
+        self.assertEqual(scheduled, [fw(0xc7e88b1)])
         # State 8 reports boot completion, rather than reconstructing graphics.
         completed = []
         self.hook(m, 0xc3f0968, lambda: 0)
@@ -198,7 +196,7 @@ class Restart(unittest.TestCase):
         self.hook(m, 0xc6d0fd4, notify)
         self.hook(m, 0xc4fbbc4, lambda: 1)  # suppress optional vibration branch
         self.hook(m, 0xc8ec158, lambda: 0)
-        m.call(0xc7e88b0)
+        m.call(fw(0xc7e88b0))
         self.assertEqual(completed, ['booting-completed'])
         self.assertEqual(bytes(m.uc.mem_read(0x200da910, 1)), b'\x08')
 

@@ -2,16 +2,30 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CANOPUS=${CANOPUS_ROOT:-"$ROOT/../Canopus"}
+if [ -z "${CANOPUS_ROOT:-}" ] && [ ! -d "$CANOPUS" ]; then
+    CANOPUS="$ROOT/../Canopus-Private"
+fi
+export CANOPUS_ROOT="$CANOPUS"
 TARGET_ID=${1:?usage: build-install-payload.sh target-id NEW-output-dir}
 OUT=${2:?usage: build-install-payload.sh target-id NEW-output-dir}
 [ "$#" -eq 2 ] || { printf 'Expected target-id and new output directory.\n' >&2; exit 1; }
-[ "$TARGET_ID" = xiaomi-band-11-4.100.139 ] || { printf 'Unsupported target.\n' >&2; exit 1; }
+case "$TARGET_ID" in
+    xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.155) ;;
+    *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
+esac
 [ ! -e "$OUT" ] && [ ! -L "$OUT" ] || { printf 'Output already exists; use a new directory: %s\n' "$OUT" >&2; exit 1; }
 KEY=${MODULE_INSTALL_KEY:-"$CANOPUS/.canopus-local/module-installer-ed25519.pem"}
 [ -f "$KEY" ] || { printf 'Set MODULE_INSTALL_KEY to the trusted Supervisor Ed25519 private PEM.\n' >&2; exit 1; }
 command -v openssl >/dev/null
 command -v python3 >/dev/null
-sh "$ROOT/scripts/build.sh"
+FIRMWARE=$(python3 - "$ROOT" "$TARGET_ID" <<'PY'
+from pathlib import Path
+import runpy
+import sys
+print(runpy.run_path(str(Path(sys.argv[1]) / 'scripts/verify-payload.py'))['TARGETS'][sys.argv[2]])
+PY
+)
+sh "$ROOT/scripts/build.sh" "$TARGET_ID"
 mkdir -p "$(dirname -- "$OUT")"
 STAGE=$(mktemp -d "${OUT}.tmp.XXXXXX")
 trap 'rm -rf -- "$STAGE"' EXIT HUP INT TERM
@@ -20,14 +34,14 @@ python3 "$CANOPUS/scripts/build-module-installer-receipt.py" \
     --module "$STAGE/resource-hook.elf" \
     --module-id resource_hook --version 3 --lifecycle 1 \
     --target-id "$TARGET_ID" \
-    --firmware-sha256 31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74 \
+    --firmware-sha256 "$FIRMWARE" \
     --private-key "$KEY" --output "$STAGE/receipt.bin"
 openssl pkey -in "$KEY" -pubout -out "$STAGE/signer-public.pem"
-python3 "$ROOT/scripts/verify-payload.py" "$STAGE" --public-key "$STAGE/signer-public.pem"
+python3 "$ROOT/scripts/verify-payload.py" "$STAGE" --target "$TARGET_ID" --public-key "$STAGE/signer-public.pem"
 cp "$ROOT/examples/mappings.tsv" "$STAGE/mappings.tsv.example"
 cp "$ROOT/docs/INSTALL.md" "$STAGE/INSTALL.md"
 cp "$ROOT/scripts/verify-payload.py" "$STAGE/verify-payload.py"
-python3 - "$STAGE" <<'PY'
+python3 - "$STAGE" "$TARGET_ID" "$FIRMWARE" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -37,7 +51,7 @@ metadata = {
     "name": "Canopus-Module-Resource-Hook", "version": "0.3.0",
     "project_id": "org.canopus.resource-hook", "runtime_id": "resource_hook",
     "receipt_module_version": 3, "receipt_format_version": 1,
-    "target": "xiaomi-band-11-4.100.139", "format": "elf-cmi1",
+    "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi1",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",
     "automatic_ui_restart": False, "complete_cache_refresh": False,
 }

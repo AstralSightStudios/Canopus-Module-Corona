@@ -1,23 +1,27 @@
-"""Run signed resource ELF and resident Supervisor through the .139 harness.
+"""Run signed resource ELF/Supervisor through the selected firmware harness.
 
 The driver-slot reset is synthetic. This does not simulate killing or restarting
 miwear, and does not prove startup-before-resource ordering.
 """
 import pathlib
 import struct
-import sys
 import unittest
 import os
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-CANOPUS = pathlib.Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus')).resolve()
-sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
-from band11_arm_bootstrap import Machine
+from firmware_support import (
+    ROOT, TARGET, PORT_TARGET, FIRMWARE_SHA256, Machine, fw, hook, require_identity_addresses,
+)
+
+# These literal PCs/globals are deliberately retained only after verifying each
+# exact identity. Changed class pointers below must go through fw().
+require_identity_addresses(
+    0xc33dc4e, 0xc3a6195, 0xc3abd20, 0xc3abe70, 0xc3809a4, 0xc3807ec, 0xc3abe59,
+    0x200bd3b8, 0x200bd3bc, 0x200bd3c4, 0x200bd310, 0x200bd314, 0x200bd200,
+)
 from band11_module_load import registry
-from unicorn import UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
 
 PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
-    ROOT / 'build/payload-0.3.0/xiaomi-band-11-4.100.139'))
+    ROOT / 'build/payload-0.3.0' / TARGET))
 
 
 class Rebind(unittest.TestCase):
@@ -27,10 +31,14 @@ class Rebind(unittest.TestCase):
     def load_fixture(self, enabled):
         elf_path, receipt_path = PAYLOAD / 'resource-hook.elf', PAYLOAD / 'receipt.bin'
         if not elf_path.exists() or not receipt_path.exists():
-            self.fail('build the signed payload before running firmware_rebind.py')
+            self.fail(f'build the signed {TARGET} payload in {PAYLOAD} before running firmware_rebind.py')
         elf, receipt = elf_path.read_bytes(), receipt_path.read_bytes()
         self.assertEqual(len(receipt), 256)
         self.assertEqual(receipt[32:64].split(b'\0')[0], b'resource_hook')
+        self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'),
+                         'fixture receipt must match RESOURCE_HOOK_TARGET')
+        self.assertEqual(receipt[112:144], bytes.fromhex(FIRMWARE_SHA256[TARGET]),
+                         'fixture firmware fingerprint must match selected target')
         lifecycle, version = struct.unpack_from('<2I', receipt, 16)
         self.m = m = Machine()
         record = bytearray(registry('resource_hook', lifecycle, version))
@@ -46,8 +54,7 @@ class Rebind(unittest.TestCase):
             if count == 40 and m.word(ptr) == 0x31524d43:
                 self.descriptor = m.word(ptr + 4)
             return m.write()
-        m.uc.hook_del(m.firmware_hooks[0xc33dc4e])
-        m.uc.hook_add(UC_HOOK_CODE, m.firmware_call, write, 0xc33dc4e, 0xc33dc4e)
+        hook(m, 0xc33dc4e, write)
         self.assertEqual(m.boot(), 0)
         m.finish_access_monitor()
         m.word(0x200bd3b8, ord('/'))
@@ -60,11 +67,7 @@ class Rebind(unittest.TestCase):
         self.bind(0xc3abe70, self.delete_timer)
 
     def bind(self, addr, callback):
-        m = self.m
-        if addr in m.firmware_hooks:
-            m.uc.hook_del(m.firmware_hooks.pop(addr))
-        m.firmware_hooks[addr] = m.uc.hook_add(
-            UC_HOOK_CODE, m.firmware_call, callback, addr, addr)
+        hook(self.m, addr, callback)
 
     def create_timer(self):
         self.assertEqual(self.m.reg(1), 50)
@@ -92,8 +95,8 @@ class Rebind(unittest.TestCase):
         # lv_init gives the two caches DISTINCT class objects: 0x2ca168c4
         # ("IMAGE") and 0x2ca16944 ("IMAGE_HEADER"). Using one value for both
         # would hide a guard that rejects the real device.
-        for cache, glob, clz in ((0x3c781000, 0x200bd310, 0x2ca168c4),
-                                 (0x3c782000, 0x200bd314, 0x2ca16944)):
+        for cache, glob, clz in ((0x3c781000, 0x200bd310, fw(0x2ca168c4)),
+                                 (0x3c782000, 0x200bd314, fw(0x2ca16944))):
             m.uc.mem_write(cache, bytes(64))
             m.word(cache, clz)         # empty cache, real class
             m.word(glob, cache)
@@ -129,7 +132,12 @@ class Rebind(unittest.TestCase):
         m.uc.reg_write(UC_ARM_REG_R2, 384)
         self.assertEqual(m.call(m.word(m.fops + 8)), 384)
         self.assertEqual(m.word(status), 0x43505331)
-        return m.word(status + 24), m.word(status + 32)
+        error = m.word(status + 32)
+        if error == (-103 & 0xffffffff):  # CANOPUS_SUP_ERR_STAGE_SIGNATURE
+            self.fail('Supervisor rejected the fixture receipt signature (-103); '
+                      'provide a payload signed by its independently trusted key. '
+                      'Do not replace that key with a bundled payload key.')
+        return m.word(status + 24), error
 
     def test_resident_elf_reinstalls_same_callback_without_reloading_image(self):
         m = self.m
@@ -239,11 +247,11 @@ class Rebind(unittest.TestCase):
         walk an unknown layout."""
         m = self.m
         disp = self.graphics()
-        m.word(0x3c782000, 0x2ca168c4)   # header cache with the decoded class
+        m.word(0x3c782000, fw(0x2ca168c4))   # header cache with the decoded class
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(self.status_words()[6:8], (0, 0))
         self.assertEqual(m.word(disp + 604), 0)   # nothing was invalidated either
-        m.word(0x3c782000, 0x2ca16944)   # restore the class lv_init really uses
+        m.word(0x3c782000, fw(0x2ca16944))   # restore the class lv_init really uses
         self.tick()
         self.assertEqual(self.status_words()[6:8], (1, 1))
 
@@ -308,20 +316,28 @@ class Rebind(unittest.TestCase):
     def test_held_cache_entry_retired_then_freed_on_last_release(self):
         m = self.m
         self.graphics()
-        # Real LRU/RB layout: the node points at the entry's DATA, which is also
-        # the key lv_cache_drop takes (it has the same {src, type, ...} shape
-        # lv_image_cache_drop builds for a single-source drop). The word at
-        # data+16 is a pool offset, not a key: entry = *(cache+4) + offset.
+        # Keep the legacy .139 fixture, but model the independently recovered
+        # .155 layout explicitly: head -> RB node -> data at RB+16. The module
+        # must pass that DATA to drop; a direct head payload is not the key.
+        # Class lookup/unlink are modeled below; generic drop/release run real
+        # firmware instructions against the returned entry.
         cache, node, data, pool = 0x3c781000, 0x3c7a0000, 0x3c7a0100, 0x3c7a0200
         offset = 0x40
         entry = pool + offset
         for addr in (node, data, pool):
             m.uc.mem_write(addr, bytes(256))
-        m.word(cache + 4, pool)
         m.word(cache + 52, node)
         m.word(cache + 24, 0xc3abe59)
-        m.word(node, data)
-        m.word(data + 16, offset)
+        if TARGET == PORT_TARGET:
+            rb = 0x3c7a0300
+            m.uc.mem_write(rb, bytes(32))
+            m.word(node, rb)
+            m.word(rb + 16, data)
+            m.word(cache + 4, entry - data)
+        else:
+            m.word(cache + 4, pool)
+            m.word(node, data)
+            m.word(data + 16, offset)
         m.word(entry + 4, 2)            # two outstanding references
         m.word(entry + 8, entry - data)  # payload sits this far back
         m.uc.mem_write(data, b'held-image-canary')
@@ -349,11 +365,11 @@ class Rebind(unittest.TestCase):
         self.assertEqual(freed, [])
         self.assertEqual(m.uc.mem_read(data, 17), b'held-image-canary')
         m.uc.reg_write(UC_ARM_REG_R1, entry)
-        m.call(0xc8b9790, cache)
+        m.call(fw(0xc8b9790), cache)
         self.assertEqual(m.word(entry + 4), 1)
         self.assertEqual(freed, [])
         m.uc.reg_write(UC_ARM_REG_R1, entry)
-        m.call(0xc8b9790, cache)
+        m.call(fw(0xc8b9790), cache)
         self.assertEqual(m.word(entry + 4), 0)
         self.assertEqual(freed, [data, data])  # payload callback, allocation free
         self.assertEqual(self.status_words()[6:8], (1, 1))
@@ -367,11 +383,12 @@ class Rebind(unittest.TestCase):
 
     def test_unknown_slot_is_not_overwritten(self):
         self.assertEqual(self.restore(), (5, 0))
-        self.m.word(0x200bd3c4, 0xc3a620d)
+        unknown = 0x1c7e0001  # modeled foreign callback, not a firmware PC
+        self.m.word(0x200bd3c4, unknown)
         state, error = self.restore()
         self.assertEqual(state, 6)
         self.assertNotEqual(error, 0)
-        self.assertEqual(self.m.word(0x200bd3c4), 0xc3a620d)
+        self.assertEqual(self.m.word(0x200bd3c4), unknown)
 
 
 if __name__ == '__main__':

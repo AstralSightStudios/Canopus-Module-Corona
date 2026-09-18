@@ -1,0 +1,86 @@
+{
+  "target": "xiaomi-band-11-4.100.155",
+  "firmware_sha256": "ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f",
+  "status": "PLATFORM_LIFECYCLE_MIGRATED_BOUNDED_EMULATION_PASSED_HARDWARE_PENDING",
+  "evidence": "evidence.json and ui-reload-audit.md",
+  "page": {
+    "top": "0x0c697440",
+    "index_helper": "0x0c697318",
+    "top_index": -1,
+    "pop_without_cachepolicy": "0x0c696e24",
+    "resume": "0x0c696c08",
+    "screen_state": {"address": "0x200c2a28", "required": 2},
+    "layer_active": {"address": "0x20096085", "required": "nonzero"},
+    "fields": {"async_destroy": 36, "state": 40, "cache_policy": 41, "root_view": 48},
+    "refused": ["null page", "screen not on", "page layer inactive", "async destroy set", "policy 2", "state not 17", "null root"],
+    "teardown": [
+      {"entry": "0x0c6939d4", "name": "pause", "from": [17], "to": 18},
+      {"entry": "0x0c693a1e", "name": "stop", "from": [8, 18], "to": 9},
+      {"entry": "0x0c696cfc", "name": "destroy", "from": [8, 9], "to": 4}
+    ],
+    "synchronous_destroy": {
+      "entry": "0x0c696a6c",
+      "condition": "page+36 == 0",
+      "destroy_callback_word": 25,
+      "root_delete": "0x0c384e6c",
+      "clears_root_view": true
+    },
+    "recovery": [
+      {"entry": "0x0c696ad8", "name": "create", "from": [2, 4], "to": 5, "callback_word": 19},
+      {"entry": "0x0c693986", "name": "start", "from": [5, 9], "to": 8, "callback_word": 22},
+      {"entry": "0x0c696c08", "name": "resume", "from": [8, 18], "to": 17, "callback_word": 20}
+    ],
+    "module_success": "observed destroyed state 4 and cleared root, then resumed state 17 and nonzero root different from previous",
+    "limitations": [
+      "Always attempts resume after starting teardown; not a guarantee recovery succeeds",
+      "Root allocation reuse can cause false-negative success result",
+      "Only stack-top page is rebuilt",
+      "UI-owner thread and callback quiescence remain prerequisites"
+    ]
+  },
+  "font_manager": {
+    "uikit_global": "0x200bd1e8",
+    "uikit_font_manager_offset": 28,
+    "registry_payload_size_offset": 24,
+    "registry_head_offset": 28,
+    "node_name_offset": 0,
+    "node_path_offset": 4,
+    "node_next": "node + registry_payload_size + 4",
+    "remove_path": "0x0c904cec",
+    "add_path": "0x0c4924e0",
+    "resolve_path": "0x0c490edc",
+    "lookup": "first matching family wins; fallback base/name.ttf",
+    "module_sequence": "copy old name, remove (frees name/path/node), add new path, confirm via resolver",
+    "not_proven": ["active/shared/idle font cache invalidation", "rendered replacement on hardware", "rollback after allocation/removal failure"]
+  },
+  "image_cache": {
+    "decoded_global": "0x200bd310",
+    "header_global": "0x200bd314",
+    "decoded_class": "0x2ca168b4",
+    "header_class": "0x2ca16934",
+    "drop_one": "0x0c8b8c9e",
+    "head_offset": 52,
+    "head_payload": "RB node pointer, NOT key",
+    "rb_data_offset": 16,
+    "class_lookup_offset": 12,
+    "class_unlink_offset": 20,
+    "held_entry_refcount_offset": 4,
+    "held_entry_invalid_offset": 12,
+    "retirement": "drop(*(*head+16)); require head changed; bounded to 4096 iterations",
+    "validation": "real firmware drop and class lookup; modeled unlink/free leaves; confirms no held payload free in that bounded path",
+    "not_proven": ["complete tree reclamation", "last-release correctness under real owners", "concurrent cache pressure", "hardware rendering"]
+  },
+  "timer": {
+    "create": "0x0c3abd20",
+    "delete": "0x0c3abe70",
+    "period_ms": 50,
+    "user_data": 0,
+    "scheduling": "modeled in probe; hardware callback/lifetime gates pending"
+  },
+  "restart": {
+    "implemented": false,
+    "status": "NO_VERIFIED_NATIVE_BUILTIN_TEARDOWN_RESET_OR_STARTUP_BARRIER",
+    "warning": "Do not infer restart safety or whole-system resource reload from the page ladder"
+  },
+  "hardware_acceptance": "NOT RUN"
+}
