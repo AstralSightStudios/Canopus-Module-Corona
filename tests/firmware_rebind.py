@@ -377,11 +377,31 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_missing_config_keeps_original_driver(self):
+        m = self.m
+        del m.disk['/data/canopus/themes/mappings.tsv']
+        # The fixture models VFS open; model its errno storage as well.
+        errno_cell = 0x3c732000
+        m.word(errno_cell, 2)
+        self.bind(0xc349538, lambda: errno_cell)
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(m.word(0x200bd3c4), 0xc3a6195)
+        self.assertEqual(self.status_words()[2:], (0,) * 8)
+        self.assertEqual(self.timer_creates, 0)
+        # No-op must not cache absence for the lifetime of the resident image.
+        m.disk['/data/canopus/themes/mappings.tsv'] = b'/resource/\t/data/canopus/themes/current/\n'
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertNotEqual(m.word(0x200bd3c4), 0xc3a6195)
+
+    def test_config_open_io_failure_is_not_noop(self):
         del self.m.disk['/data/canopus/themes/mappings.tsv']
+        errno_cell = 0x3c732000
+        self.m.word(errno_cell, 5)
+        self.bind(0xc349538, lambda: errno_cell)
         state, error = self.restore()
         self.assertEqual(state, 6)
         self.assertNotEqual(error, 0)
         self.assertEqual(self.m.word(0x200bd3c4), 0xc3a6195)
+        self.assertEqual(self.timer_creates, 0)
 
     def test_unknown_slot_is_not_overwritten(self):
         self.assertEqual(self.restore(), (5, 0))

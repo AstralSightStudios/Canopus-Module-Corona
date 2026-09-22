@@ -15,6 +15,7 @@ static void (*timer_callback)(void *);
 static int timer_token, fail_timer, reject_redraw, reject_metadata, unsupported;
 static unsigned metadata_refreshes;
 static const struct rh_state *snapshot;
+static int open_errno = 5;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
            redraw_ready = 1, locked;
 static int driver;
@@ -33,6 +34,7 @@ int rh_platform_open(const char *path, int mode) {
     position = 0;
     return fail_open ? -1 : 11;
 }
+int rh_platform_errno(void) { assert(!locked && fail_open); return open_errno; }
 int rh_platform_read(int fd, void *out, uint32_t size) {
     unsigned remaining = (unsigned)strlen(input) - position;
     assert(!locked && fd == 11);
@@ -165,6 +167,22 @@ int main(void) {
     fail_open = 1;
     before = closes;
     assert(d->activate(NULL) == -2005 && slot == backend && closes == before);
+    open_errno = 13;  /* EACCES is not optional absence. */
+    assert(d->activate(NULL) == -2005 && slot == backend);
+    open_errno = 0;  /* Unknown failure must not become success. */
+    assert(d->activate(NULL) == -2005);
+    open_errno = RH_ENOENT;
+    driver_valid = 0;  /* No driver inspection is needed for a no-op. */
+    assert(d->prepare(NULL) == 0);
+    assert(d->activate(NULL) == 0 && slot == backend && closes == before);
+    assert(d->activate(NULL) == 0 && slot == backend);
+    assert(!allocations && !frees && !image_drops && !metadata_refreshes && !redraws &&
+           !retargets && !timers_created && !timer_callback);
+    assert(d->stop(NULL) == 0 && d->deactivate(NULL) == 0);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w));
+    for (unsigned i = 8; i < 40; i += 4) assert(u32(status + i) == 0);
+    driver_valid = 1;
     fail_open = 0; fail_alloc = 1;
     assert(d->activate(NULL) == -2006 && slot == backend && closes == before + 1);
     fail_alloc = 0; fail_read = 1;
@@ -175,6 +193,14 @@ int main(void) {
     assert(d->prepare(NULL) == -2008);
     assert(d->activate(NULL) == -2008 && slot == backend);
     input = config;
+    /* A prepared but unpublished snapshot must not survive missing config. */
+    assert(d->prepare(NULL) == 0);
+    fail_open = 1;
+    assert(d->prepare(NULL) == 0);
+    assert(d->activate(NULL) == 0 && slot == backend && !timers_created);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 12) == 0);
+    fail_open = 0;
     driver_valid = 0;
     assert(d->activate(NULL) == -2008 && slot == backend && !locked);
     assert(allocations == frees);

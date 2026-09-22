@@ -103,7 +103,14 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     (void)c;
     if (S.installed) return -2004;
     fd = rh_platform_open("/data/canopus/themes/mappings.tsv", 1);
-    if (fd < 0) return -2005;
+    if (fd < 0) {
+        if (rh_platform_errno() != RH_ENOENT) return -2005;
+        /* No published hook exists here. Discard any prepared snapshot and
+         * leave configuration retryable on the next activation. */
+        S.count = 0;
+        configured = 0;
+        return 0;
+    }
     staging = rh_platform_alloc(sizeof(*staging) * RH_RULES + RH_CONFIG_BYTES);
     if (!staging) rc = -2006;
     else {
@@ -130,6 +137,8 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     if (!configured) {
         rc = prepare(c);
         if (rc) return rc;
+        /* Optional configuration absent: no callback, timer or UI changes. */
+        if (!configured) return 0;
     }
     /* No allocation or firmware I/O is allowed while publishing the callback.
      * On the single-core target, prevent scheduling between state and slot. */

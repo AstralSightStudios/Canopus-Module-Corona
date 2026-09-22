@@ -4,6 +4,9 @@
 #include <stdint.h>
 
 int rh_platform_open(const char *, int);
+/* Snapshot native errno immediately after a failed open on the same task. */
+#define RH_ENOENT 2
+int rh_platform_errno(void);
 int rh_platform_read(int, void *, uint32_t);
 int rh_platform_write(int, const void *, uint32_t);
 void rh_platform_close(int);

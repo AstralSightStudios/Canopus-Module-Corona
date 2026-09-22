@@ -166,6 +166,9 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 不能单凭“使用包内公钥验签成功”确认发布来源。
 
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
+配置文件不存在时激活为成功 no-op，不安装 hook 或刷新 UI；补齐后再次激活即可
+重试。空配置、非法配置及其他读取错误仍会报错。构建需要含已批准 errno veneer
+的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、
 [.155 迁移证据](targets/xiaomi-band-11-4.100.155/)。

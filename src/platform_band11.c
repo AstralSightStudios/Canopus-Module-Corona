@@ -1,10 +1,15 @@
 #include "resource_hook_platform.h"
 #include "canopus_band11_memory.h"
 #include "resource_hook_target.h"
+#include "canopus_veneer.h"
 
 /* Only the selected, fingerprinted .139 or .155 AP image is supported. */
 int rh_platform_open(const char *path, int mode) {
     return ((int (*)(const char *, int, ...))(uintptr_t)RH_FW_OPEN)(path, mode);
+}
+int rh_platform_errno(void) {
+    const int *value = canopus_fw_errno_location();
+    return value ? *value : 0;
 }
 int rh_platform_read(int fd, void *out, uint32_t size) {
     return ((int (*)(int, void *, uint32_t))(uintptr_t)RH_FW_READ)(fd, out, size);

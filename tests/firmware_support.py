@@ -35,6 +35,7 @@ sys.path.insert(0, str(CANOPUS / 'scripts/tests'))
 _ADDRESSES_155 = {
     0x0c33dc4e: 0x0c33dc4e,  # native write, framework emulation-addresses.json
     0x0c342c54: 0x0c342c54,  # native open called by POSIX open
+    0x0c349538: 0x0c349538,  # errno accessor, EVID-ERRNO-4155-001
     0x0c380694: 0x0c380694,  # horizontal resolution (rotation aware)
     0x0c3806b4: 0x0c3806b4,  # vertical resolution (rotation aware)
     0x0c3807bc: 0x0c3807bc,  # DPI: .155 80b500af10b9034b986908b1806980bd
