@@ -12,7 +12,9 @@ static unsigned position, config_opens, closes, allocations, frees, registration
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
 static void (*timer_callback)(void *);
-static int timer_token, fail_timer, reject_redraw, reject_rebuild;
+static int timer_token, fail_timer, reject_redraw, reject_metadata, unsupported;
+static unsigned metadata_refreshes;
+static const struct rh_state *snapshot;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
            redraw_ready = 1, locked;
 static int driver;
@@ -63,10 +65,24 @@ rh_open_fn rh_platform_original(void) { assert(locked); return backend; }
 int rh_platform_driver_valid(void) { assert(locked); return driver_valid; }
 uint32_t rh_platform_lock(void) { assert(!locked); locked = 1; return 42; }
 void rh_platform_unlock(uint32_t irq) { assert(locked && irq == 42); locked = 0; }
-int rh_platform_image_cache_drop_all(void) {
+int rh_platform_retire_images(const struct rh_state *state) {
+    char mapped[RH_PATH];
+    assert(state && state->installed && state->count == 1);
+    assert(rh_resolve(state, "/resource/icon.bin", mapped) == 1);
+    assert(!strcmp(mapped, "/data/canopus/themes/current/icon.bin"));
+    if (snapshot) assert(snapshot == state);
+    snapshot = state;
+    if (unsupported) return 1;
     assert(!locked);  /* image invalidation must run outside the interrupt lock */
     if (!image_cache_ready) return -1;
     image_drops++;
+    return 0;
+}
+int rh_platform_refresh_images(const struct rh_state *state) {
+    assert(!locked && state == snapshot);
+    if (unsupported) return 1;
+    if (reject_metadata) return -1;
+    metadata_refreshes++;
     return 0;
 }
 int rh_platform_redraw_ready(void) { assert(!locked); return redraw_ready; }
@@ -106,10 +122,8 @@ int rh_platform_font_retarget(uint32_t index, const char *path) {
     return 0;
 }
 int rh_platform_rebuild_active_page(void) {
-    assert(!locked);  /* the page rebuild must also run outside the lock */
-    if (reject_rebuild) return -1;
-    rebuilds++;
-    return 0;
+    assert(!"automatic page rebuild forbidden");
+    return -1;
 }
 int rh_platform_request_full_redraw(void) {
     assert(!locked && redraw_ready);
@@ -195,7 +209,7 @@ int main(void) {
     assert(u32(status + 16) == 1 && u32(status + 20) == 0);
     assert(u32(status + 24) == image_drops && image_drops == 3);
     assert(u32(status + 28) == redraws && redraws == 3);
-    assert(u32(status + 32) == rebuilds && rebuilds == 3);
+    assert(u32(status + 32) == rebuilds && rebuilds == 0);
     assert(u32(status + 36) == retargets && retargets == 1);
     /* Busy UI: requests coalesce and the cache isn't touched mid-render. */
     redraw_ready = 0;
@@ -213,17 +227,21 @@ int main(void) {
     reject_redraw = 0;
     timer_callback(&timer_token);
     assert(redraws == 4 && !timer_callback && timers_created == timers_deleted);
-    /* The rebuild is attempted once per request and a refusal (a policy the
-     * forced teardown declines, or a deferred destroy) must not be counted,
-     * retried, or allowed to hold up the repaint. */
-    reject_rebuild = 1;
-    before = rebuilds;
-    redraw_ready = 0;
+    /* Metadata retry does not retire again, rebuild, or prematurely redraw. */
+    reject_metadata = 1;
+    before = metadata_refreshes;
     assert(d->activate(NULL) == 0 && timer_callback);
-    redraw_ready = 1;
+    assert(image_drops == 5 && redraws == 4);
     timer_callback(&timer_token);
-    assert(rebuilds == before && redraws == 5 && !timer_callback);
-    reject_rebuild = 0;
+    assert(image_drops == 5 && metadata_refreshes == before && rebuilds == 0);
+    reject_metadata = 0;
+    timer_callback(&timer_token);
+    assert(metadata_refreshes == before + 1 && redraws == 5 && !timer_callback);
+    /* Unsupported-target adapters complete a repaint, never claim retirement. */
+    unsupported = 1;
+    assert(d->activate(NULL) == 0 && !timer_callback);
+    assert(image_drops == 5 && redraws == 6 && metadata_refreshes == before + 1);
+    unsupported = 0;
     /* OOM remains visible, but doesn't remove the resident redirect. */
     redraw_ready = 0;
     fail_timer = 1;
@@ -232,7 +250,7 @@ int main(void) {
     assert(d->activate(NULL) == 0 && timer_callback);
     redraw_ready = 1;
     timer_callback(&timer_token);
-    assert(redraws == 6 && !timer_callback);
+    assert(redraws == 7 && !timer_callback);
     assert(allocations == frees && !locked);
     puts("module registration, activation failures, publication, query and resident lifecycle passed");
     return 0;

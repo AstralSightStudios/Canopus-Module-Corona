@@ -1,3 +1,125 @@
+# Current reload implementation: affected sources and verified owners
+
+This section supersedes the historical migration report below. The original
+report remains an evidence record, **not a description of current activation**.
+In particular, neither all-entry retirement nor forced page recreation remains
+in the module. The unused platform page-rebuild helper was removed as well.
+
+## Exact .155 adapter evidence
+
+AP SHA256 `ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f`.
+Instruction inspection used Capstone against this exact AP; no address delta,
+stale symbol name, or .139 structure assumption was used. Callable C constants
+carry the Thumb bit. `tests/firmware_reload.py` verifies the fingerprint before
+loading firmware, and compiles the current source into a temporary unsigned ELF.
+
+| Entry/layout | Witness in this AP |
+|---|---|
+| `lv_image_set_src` `0x0c3b2c28` | info query at +0x40 precedes pointer comparison at `0x0c3b2d36`; same-pointer branch goes to width/height stores at `0x0c3b2cd8` and sizing/invalidation calls |
+| image class `0x2ca14ca8` | literal at `0x0c3b3050`; class contains constructor `0x0c3ab59d`, destructor `0x0c3abff3`, image event handler `0x0c3b2de5`; constructor and event handler agree on source +52, width/height +68/+72, type bits at +96 |
+| object class pointer at +0 | class destructor `0x0c37f740` and constructor dispatch `0x0c37f760` load/use it; only exact image class is accepted, not derived classes |
+| get-info `0x0c38e4e4` | 12-byte header; calls `0x0c38e394`; cache-hit branch `0x0c38e3d6..0x0c38e3f4` copies header and releases acquired reference |
+| enabled-header-cache preflight | `0x0c38e3b4` reads capacity at cache+8; with nonzero capacity, `0x0c38e47c..0x0c38e4b8` must insert successfully before get-info reports success; insertion failure returns zero. Disabled header caches are not used for metadata reapplication |
+| header/decoded key source/type | `0x0c3a3888` constructs header `{src@0,type@4}` and decoded `{src@4,type@8}`; source-type `0x0c381464` returns 1 for file, 0 for descriptor, 2 for symbol, 3 for null |
+| LRU link payload/next | initializers `0x0c3a9e48` / `0x0c3a9eb0` set cache+48 to 4; `0x0c3a46dc` reads next at node+payload_size+4; list payload -> RB node -> data+16 established in original migration evidence |
+| native tree walk `0x0c380574` | null root walks display list (`0x200bd1e8+12`), screens at display+692/count+720; nonnull root invokes callback then child accessor `0x0c380320` and count `0x0c380342`; callback 2 prunes/stops a subtree |
+| parent +4, child layout | screen accessor `0x0c3802a8` follows parent+4; child accessors load object+8 spec_attr, children+0/count+48. Adapter only reads parent for a bounded depth guard; native walk owns child enumeration |
+| style getter `0x0c382620` | `(object,part,property)` returns value in r0; merges object state at +48, delegates to `0x0c382540`, which selects matching main-part state precedence |
+| explicit style refresh `0x0c38525c` | `(object,selector,property)` used by native local-style setter `0x0c3872b4` after a reported change; direct call avoids reliance on unchanged-pointer setter behavior |
+| property 40 on system buttons | native helper `0x0c387d1c` passes property 40 to local-style setter; system image-button setter `0x0c69606c` supplies main-part selectors 0/32/128 (expanded investigation) |
+
+## Current behavior and limits
+
+- Both exact classes/lists are validated before retirement. Only file keys whose
+  absolute `/` path resolves through the resident immutable mapping are dropped.
+  Non-head entries and native LRU lookup reordering are supported. The next link
+  is captured before drop; removed node/key/source are never dereferenced after
+  it. A bounded live-list scan checks unlink progress. Each list is capped at
+  4096 entries; unknown layouts/cycles/no-progress keep the request pending.
+- Native per-key drop/release, not a module free, owns held payload lifetime.
+  Header retirement precedes decoded retirement and all owner refreshes.
+- Owner scan covers registered screen trees, including offscreen screens. It
+  takes a temporary snapshot (1024 objects, parent depth 32), then revalidates
+  membership without dereferencing stale candidates before each operation.
+  Native deleting-bit subtrees (`object+51 & 16`, set at `0x0c380404`) are
+  skipped. No object/source pointer survives a UI tick. Allocation/size/depth failure
+  leaves owner refresh pending without partially mutating the snapshot.
+- Exact image-class affected file sources use successful get-info preflight and
+  same-pointer native setter; source-string churn is avoided. Header-cache
+  disabled/failed-info/source-changed cases skip the setter. This depends on
+  serialized UI ownership and immutable theme files; ordinary native setter
+  callback rules still apply (do not delete the receiver or invalidate its
+  source/header during that setter). This is not transactional decoder failure
+  rollback or protection against arbitrary reentrant owner callbacks.
+- Current effective **main-part property 40** is refreshed explicitly on all
+  affected objects, not only image widgets. Styles/selectors/state are unchanged.
+  Other parts/properties and custom owner caches are not covered.
+- No watchface hook, global animation stop, global cache clear, GPU finish call,
+  or page rebuild. Deferred VG_LITE descriptors live in native pending arrays;
+  non-rendering status is only an invalidation/mutation gate, **not GPU idle**.
+- `.139` keeps path/font-registry redirection and repaint, but both new image
+  adapters return unsupported without reading cache/object layouts. Its old
+  unaudited direct-key/global traversal was removed, not silently preserved.
+- RHQ1 remains v5/40 bytes. `images_dropped` counts completed targeted retirement
+  rounds (.139: zero), including empty affected sets; `rebuilds` is reserved zero.
+  `redraws` means accepted dirty area, not verified resource adoption. Failed
+  per-object info queries and unsupported owner classes are not separately
+  exposed by v5; a completed round is not universal replacement success.
+- Font registry retargeting remains, but active/idle wrapper reuse can bypass it.
+  No live-font eviction, arbitrary page teardown or rollback was introduced.
+
+## Focused verification
+
+`tests/firmware_reload.py`: **18 tests passed** against fingerprinted .155 AP.
+The actual native generic drop/release, screen walk/accessors, image setter,
+get-info cache-hit path, state/selector style lookup and explicit style-refresh
+instructions execute. Native I/O/decoder callbacks, cache lookup/unlink/free,
+heap functions, style property storage and GUI event/sizing leaves are modeled
+as described per test. A poisoned removed node/later-deleted object catches
+post-drop/stale-snapshot dereferences. Tests cover both cache types, unrelated,
+invalid/overlong and non-file sources, held/unheld entries, class/layout/cycle/
+progress guards, dimensions, unchanged source identity, failed/disabled info,
+source changes, main-part states 0/32/128, offscreen trees, allocation/size/depth
+limits, and compiled .139 unsupported guards (not .139 AP emulation).
+
+`tests/test_module.c` additionally tests immutable snapshot sharing, no page
+rebuild, coalescing, stage retries, unsupported-adapter retirement accounting,
+OOM scheduling and v5 status compatibility with ASan/UBSan.
+
+```sh
+RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.155 \
+  CLANG=/path/to/arm-capable/clang LD_LLD=/path/to/ld.lld \
+  build/firmware-tests/bin/python tests/firmware_reload.py
+```
+
+The older `platform-probe.py` now retains only unrelated platform entry/allocator/
+redraw/font/timer checks; new cache/owner probes above supersede its former
+all-entry traversal and page-rebuild sections. To link that probe, also compile
+and link `src/resource_hook.c` (the adapter uses the shared resolver), and use
+`rh_platform_retire_images` rather than the removed global-drop symbol as entry.
+
+## User-reported hardware observation (.155 only)
+
+The user reports successful installation of the current signed module using the
+local temporary `~/develop/temp/settings-icon-installer-155` installer, including
+its execute recovery path and directory creation (`mkdir`). The theme setup under
+`/data/canopus/themes/` with `/data/canopus/themes/mappings.tsv` resulted in the
+custom **Settings launcher icon visibly appearing on the .155 device**. This is
+an attributed user observation, not a new instrumented hardware run or a claim
+that the generic installer implements the temporary installer's workflow. See
+[the installation record](../../docs/INSTALL.md#155-用户报告的单项实机记录).
+
+**Broader hardware gates remain NOT_PROBED:** actual UI caller/callback lifetime,
+filesystem immutability/fallback, deferred decoder/GPU completion under pressure,
+changed dimensions/layout, animation intent, styles across navigation/state,
+offscreen adoption, fonts, and repeated activation memory/watchdog behavior.
+One visible icon does not establish acceptance for every owner or for .139.
+Signed loading/build verification is separate from this unsigned adapter probe.
+
+---
+
+## Historical migration report (superseded implementation details below)
+
 # Band 11 4.100.155 platform audit
 
 ## Identity, method and scope

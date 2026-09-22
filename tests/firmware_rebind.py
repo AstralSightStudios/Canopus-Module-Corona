@@ -25,6 +25,8 @@ PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
 
 
 class Rebind(unittest.TestCase):
+    retirement_round = 1 if TARGET == PORT_TARGET else 0
+
     def setUp(self):
         self.load_fixture(enabled=True)
 
@@ -99,6 +101,7 @@ class Rebind(unittest.TestCase):
                                  (0x3c782000, 0x200bd314, fw(0x2ca16944))):
             m.uc.mem_write(cache, bytes(64))
             m.word(cache, clz)         # empty cache, real class
+            m.word(cache + 48, 4)      # verified .155 list payload size
             m.word(glob, cache)
         m.uc.mem_write(disp, bytes(1024))
         m.word(disp, 192)
@@ -221,10 +224,10 @@ class Rebind(unittest.TestCase):
         self.assertEqual(bytes(m.uc.mem_read(output, 40)), b'x' * 40)
         self.assertEqual(m.word(writer + 8), 0)
 
-    def test_activate_drops_present_image_cache(self):
+    def test_activate_completes_supported_targeted_retirement(self):
         self.graphics()
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_full_redraw_is_recognised_on_a_rotated_display(self):
         """Which raw field is the horizontal resolution depends on the rotation
@@ -234,7 +237,7 @@ class Rebind(unittest.TestCase):
         disp = self.graphics()
         m.word(disp + 756, 2)            # rotated 90/270
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
         self.assertEqual(m.word(disp + 604), 1)
         # Clipped with the accessors, so the axes are swapped in raw-field terms.
         self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + 60, 16)),
@@ -249,11 +252,14 @@ class Rebind(unittest.TestCase):
         disp = self.graphics()
         m.word(0x3c782000, fw(0x2ca168c4))   # header cache with the decoded class
         self.assertEqual(self.restore(), (5, 0))
+        if TARGET != PORT_TARGET:
+            self.assertEqual(self.status_words()[6:8], (0, 1))
+            return  # .139 does not inspect or mutate unverified cache layouts
         self.assertEqual(self.status_words()[6:8], (0, 0))
         self.assertEqual(m.word(disp + 604), 0)   # nothing was invalidated either
         m.word(0x3c782000, fw(0x2ca16944))   # restore the class lv_init really uses
         self.tick()
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_activate_requests_full_redraw(self):
         m = self.m
@@ -273,7 +279,7 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.status_words()[6:8], (0, 0))
         self.m.word(disp + 696, disp + 0x800)
         self.tick()
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
         self.assertEqual(self.timer_callback, 0)
         self.assertEqual(self.timer_deletes, 1)
 
@@ -291,19 +297,19 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.status_words()[6:8], (0, 0))
         m.word(disp + 608, 1)
         self.tick()
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
         self.assertEqual(self.timer_callback, 0)
 
     def test_rejected_dirty_area_is_not_counted_or_repeatedly_dropped(self):
         self.graphics()
         self.bind(0xc3809a4, lambda: 0)  # firmware event rejects invalidation
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.status_words()[6:8], (1, 0))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 0))
         self.tick()
-        self.assertEqual(self.status_words()[6:8], (1, 0))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 0))
         self.bind(0xc3809a4, lambda: 1)
         self.tick()
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
         self.assertEqual(self.timer_callback, 0)
 
     def test_timer_allocation_failure_is_reported_with_hook_resident(self):
@@ -313,14 +319,12 @@ class Rebind(unittest.TestCase):
         self.assertNotEqual(error, 0)
         self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
 
+    @unittest.skipUnless(TARGET == PORT_TARGET, '.139 targeted retirement is unverified and disabled')
     def test_held_cache_entry_retired_then_freed_on_last_release(self):
         m = self.m
         self.graphics()
-        # Keep the legacy .139 fixture, but model the independently recovered
-        # .155 layout explicitly: head -> RB node -> data at RB+16. The module
-        # must pass that DATA to drop; a direct head payload is not the key.
-        # Class lookup/unlink are modeled below; generic drop/release run real
-        # firmware instructions against the returned entry.
+        # .155 head -> RB node -> data at RB+16. Only affected file keys retire.
+        # Generic native drop/release execute; class lookup/unlink are modeled.
         cache, node, data, pool = 0x3c781000, 0x3c7a0000, 0x3c7a0100, 0x3c7a0200
         offset = 0x40
         entry = pool + offset
@@ -328,19 +332,17 @@ class Rebind(unittest.TestCase):
             m.uc.mem_write(addr, bytes(256))
         m.word(cache + 52, node)
         m.word(cache + 24, 0xc3abe59)
-        if TARGET == PORT_TARGET:
-            rb = 0x3c7a0300
-            m.uc.mem_write(rb, bytes(32))
-            m.word(node, rb)
-            m.word(rb + 16, data)
-            m.word(cache + 4, entry - data)
-        else:
-            m.word(cache + 4, pool)
-            m.word(node, data)
-            m.word(data + 16, offset)
+        rb = 0x3c7a0300
+        m.uc.mem_write(rb, bytes(32))
+        m.word(node, rb)
+        m.word(rb + 16, data)
+        m.word(cache + 4, entry - data)
         m.word(entry + 4, 2)            # two outstanding references
         m.word(entry + 8, entry - data)  # payload sits this far back
-        m.uc.mem_write(data, b'held-image-canary')
+        m.word(data + 4, 0x3c7a0400)
+        m.uc.mem_write(data + 8, b'\x01')
+        m.uc.mem_write(0x3c7a0400, b'/resource/held.bin\0')
+        m.uc.mem_write(data + 64, b'held-image-canary')
         freed, looked_up = [], []
         def find_entry():
             self.assertEqual(m.reg(0), cache)
@@ -363,7 +365,7 @@ class Rebind(unittest.TestCase):
         self.assertEqual(m.uc.mem_read(entry + 12, 1), b'\x01')
         self.assertEqual(m.word(entry + 4), 2)
         self.assertEqual(freed, [])
-        self.assertEqual(m.uc.mem_read(data, 17), b'held-image-canary')
+        self.assertEqual(m.uc.mem_read(data + 64, 17), b'held-image-canary')
         m.uc.reg_write(UC_ARM_REG_R1, entry)
         m.call(fw(0xc8b9790), cache)
         self.assertEqual(m.word(entry + 4), 1)
@@ -372,7 +374,7 @@ class Rebind(unittest.TestCase):
         m.call(fw(0xc8b9790), cache)
         self.assertEqual(m.word(entry + 4), 0)
         self.assertEqual(freed, [data, data])  # payload callback, allocation free
-        self.assertEqual(self.status_words()[6:8], (1, 1))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_missing_config_keeps_original_driver(self):
         del self.m.disk['/data/canopus/themes/mappings.tsv']

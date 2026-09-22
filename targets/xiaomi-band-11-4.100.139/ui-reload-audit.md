@@ -1,3 +1,11 @@
+> **Current implementation update:** this is historical evidence, not current
+> activation behavior. The unaudited .139 all-entry/direct-key cache traversal
+> and automatic page-rebuild path have been removed. .139 now keeps file-open
+> redirection, font registry retargeting and repaint; image retirement/metadata/
+> style adapters return unsupported without inspecting layouts. No .155 address
+> or object layout is applied to .139. `images_dropped` and `rebuilds` stay zero.
+> A separate .139 firmware audit is required before enabling owner adoption.
+
 # .139 miwear restart verification
 
 ## Current result

@@ -19,10 +19,11 @@ static struct rh_state S;
 static int configured;
 static uint32_t images_dropped;
 static uint32_t redraws;
-static uint32_t rebuilds;
+/* Reserved RHQ1 v5 field: no forced page rebuilds in the reload path. */
+static const uint32_t rebuilds;
 static uint32_t fonts_retargeted;
 static void *refresh_timer;
-static unsigned refresh_pending, cache_dropped, fonts_done, rebuild_tried, refreshing;
+static unsigned refresh_pending, cache_dropped, images_done, fonts_done, refreshing;
 
 /* Point every registered font family whose file falls under a mapping rule at
  * the themed file. A retargeted entry is re-added at the end of the registry, so
@@ -44,30 +45,28 @@ static void retarget_fonts(void) {
 }
 
 /* One request, coalesced across activations. The temporary UI timer retries only
- * until the cache drop and dirty-area request succeed, then deletes itself. */
+ * until supported retirement/owner adoption and the dirty-area request complete.
+ * Unsupported .139 adapters do not count as retirements. */
 static void refresh_step(void *timer) {
     (void)timer;
     if (!refresh_pending || refreshing || !rh_platform_redraw_ready()) return;
     refreshing = 1;
-    if (!cache_dropped && rh_platform_image_cache_drop_all() == 0) {
-        cache_dropped = 1;
-        if (images_dropped != UINT32_MAX) images_dropped++;
+    if (!cache_dropped) {
+        int rc = rh_platform_retire_images(&S);
+        if (rc >= 0) {
+            cache_dropped = 1;
+            if (!rc && images_dropped != UINT32_MAX) images_dropped++;
+        }
     }
-    /* Retarget font families before the rebuild, so the page recreates its font
-     * wrappers from the themed files rather than the startup-registered ones. */
+    if (cache_dropped && !images_done && rh_platform_refresh_images(&S) >= 0)
+        images_done = 1;
+    /* Registry retargeting affects future resolution, not live/idle wrappers.
+     * Never force page teardown just to adopt a resource mapping. */
     if (cache_dropped && !fonts_done) {
         fonts_done = 1;
         retarget_fonts();
     }
-    /* Once the stale entries are gone, rebuild the page on top so widgets that
-     * hold a resource are recreated rather than repainted; a repaint alone
-     * cannot replace a font wrapper a live page owns. Attempted at most once,
-     * and a skip is not a failure: the redraw below still runs. */
-    if (cache_dropped && !rebuild_tried) {
-        rebuild_tried = 1;
-        if (rh_platform_rebuild_active_page() == 0 && rebuilds != UINT32_MAX) rebuilds++;
-    }
-    if (cache_dropped && rh_platform_request_full_redraw() == 0) {
+    if (cache_dropped && images_done && rh_platform_request_full_redraw() == 0) {
         void *done = refresh_timer;
         if (redraws != UINT32_MAX) redraws++;
         refresh_pending = 0;
@@ -80,7 +79,7 @@ static int request_refresh(void) {
     if (!refresh_pending) {
         cache_dropped = 0;
         fonts_done = 0;
-        rebuild_tried = 0;
+        images_done = 0;
         refresh_pending = 1;
     }
     refresh_step(0);
@@ -121,8 +120,8 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
 }
 /* Rebinding requires a caller-owned UI transaction. Installing this callback
  * does not restart miwear or tear down font wrappers already held by live
- * pages. It does drop the global image cache (see below) so redirected images
- * re-decode; fonts and on-screen references still need the full UI lifecycle. */
+ * pages. Affected cached file sources and verified owners adopt the immutable
+ * mapping through the platform adapter; other owners need their own lifecycle. */
 static int32_t activate(const struct canopus_context_v1 *c) {
     rh_open_fn *slot;
     uint32_t irq;

@@ -1,12 +1,10 @@
 """Execute the selected firmware's page lifecycle ladder used to rebuild a page.
 
-The module forces the stack-top page through pause/stop/destroy regardless of its
-cache policy and then brings it back up, so widgets holding a redirected resource are
-recreated rather than repainted. These tests run the firmware's own lifecycle code
-against a modeled page object and assert the state ladder, the root-view delete and
-the on_create rebuild. The page object, its callbacks and the view allocator are
-modeled; the lifecycle transitions are the firmware's instructions. No display is
-run and no on-hardware behavior is claimed.
+Historical investigation only: current activation does NOT rebuild pages. These
+counterexamples run native pause/stop/destroy/resume against modeled page objects
+and expose policy/refusal and owner-lifetime constraints. Page callbacks and the
+view allocator are modeled; transitions execute real firmware instructions.
+No display or on-hardware behavior is claimed.
 """
 from firmware_support import Machine, fw, hook, require_identity_addresses
 
@@ -99,7 +97,7 @@ class PageRebuild(unittest.TestCase):
 
     def test_forced_teardown_refuses_policy_two(self):
         """The forced path is not fully policy independent: policy 2 returns
-        after the pause leg, so the module must not report a rebuild for it."""
+        after the pause leg: final state alone cannot prove recreation."""
         self.build_page(state=17, policy=2)
         self.m.call(POP_WITHOUT_POLICY, PAGE)
         self.assertEqual(self.state(), 18)             # paused, not destroyed

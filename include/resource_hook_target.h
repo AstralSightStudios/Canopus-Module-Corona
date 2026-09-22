@@ -6,20 +6,21 @@
  * matching Canopus generated SDK headers. Static evidence and hardware gates:
  * targets/xiaomi-band-11-4.100.155/ui-reload-audit.md. */
 #if defined(RH_TARGET_155) && RH_TARGET_155
+/* Exact .155-only reload evidence: tests/firmware_reload.py and target audit. */
+#define RH_FW_IMAGE_CLASS         0x2ca14ca8u
+#define RH_FW_IMAGE_SET_SRC       0x0c3b2c29u
+#define RH_FW_IMAGE_GET_INFO      0x0c38e4e5u
+#define RH_FW_OBJECT_TREE_WALK    0x0c380575u
+#define RH_FW_OBJECT_STYLE_GET    0x0c382621u
+#define RH_FW_OBJECT_STYLE_REFRESH 0x0c38525du
 #define RH_FW_CACHE_DROP          0x0c8b8c9fu
 #define RH_FW_IMAGE_CACHE_CLASS   0x2ca168b4u
 #define RH_FW_HEADER_CACHE_CLASS  0x2ca16934u
-#define RH_FW_PAGE_POP            0x0c696e25u
-#define RH_FW_PAGE_RESUME         0x0c696c09u
-#define RH_FW_PAGE_TOP            0x0c697441u
 #define RH_FW_FONT_REMOVE_PATH    0x0c904cedu
 #else
 #define RH_FW_CACHE_DROP          0x0c8b8cafu
 #define RH_FW_IMAGE_CACHE_CLASS   0x2ca168c4u
 #define RH_FW_HEADER_CACHE_CLASS  0x2ca16944u
-#define RH_FW_PAGE_POP            0x0c696e35u
-#define RH_FW_PAGE_RESUME         0x0c696c19u
-#define RH_FW_PAGE_TOP            0x0c697451u
 #define RH_FW_FONT_REMOVE_PATH    0x0c904cfdu
 #endif
 
@@ -38,8 +39,6 @@
 #define RH_FW_INVALIDATE_AREA     0x0c382429u
 #define RH_FW_DISPLAY_WIDTH       0x0c380695u
 #define RH_FW_DISPLAY_HEIGHT      0x0c3806b5u
-#define RH_FW_SCREEN_STATE        0x200c2a28u
-#define RH_FW_PAGE_LAYER_ACTIVE   0x20096085u
 #define RH_FW_UIKIT_SLOT          0x200bd1e8u
 #define RH_FW_FONT_ADD_PATH       0x0c4924e1u
 #define RH_FW_FONT_RESOLVE_PATH   0x0c490eddu

@@ -118,7 +118,7 @@ class TargetRouting(unittest.TestCase):
 
     def test_unknown_target_fails_before_dependency_import(self):
         for name in ('font_lifecycle', 'font_retarget', 'image_lifecycle', 'page_rebuild',
-                     'paths', 'rebind', 'restart', 'ui_redraw'):
+                     'paths', 'rebind', 'reload', 'restart', 'ui_redraw'):
             with self.subTest(suite=name):
                 env = dict(os.environ, RESOURCE_HOOK_TARGET='unknown-firmware')
                 result = subprocess.run([sys.executable, str(HERE / f'firmware_{name}.py')],

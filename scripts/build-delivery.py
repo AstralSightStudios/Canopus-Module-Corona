@@ -69,6 +69,9 @@ def main():
                          'firmware_ui_redraw', 'firmware_page_rebuild',
                          'firmware_font_retarget'):
                 run(f'{target}: {name}', [firmware_python, str(ROOT / 'tests' / (name + '.py'))])
+            if target == 'xiaomi-band-11-4.100.155':
+                run(f'{target}: firmware_reload',
+                    [firmware_python, str(ROOT / 'tests/firmware_reload.py')])
         run('Installer generation and restricted Lua protocol',
             [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
         target_args = [arg for target in targets for arg in ('--target', target)]
