@@ -41,12 +41,16 @@ void rh_platform_unlock(uint32_t irq) {
 static uint32_t load32(uint32_t address) {
     return *(volatile uint32_t *)(uintptr_t)address;
 }
-static int affected(const struct rh_state *state, uint32_t source) {
+static int affected(const struct rh_mapping_view *previous,
+                    const struct rh_mapping_view *current, uint32_t source) {
     char mapped[RH_PATH];
-    /* File source type alone also admits other drive letters. Only absolute
-     * '/' paths can reach our selected POSIX driver and mapping snapshot. */
-    return source && *(const char *)(uintptr_t)source == '/' &&
-           rh_resolve(state, (const char *)(uintptr_t)source, mapped) == 1;
+    const char *path;
+    if (!source || *(const char *)(uintptr_t)source != '/') return 0;
+    path = (const char *)(uintptr_t)source;
+    /* A changed rule may need to restore an owner covered only by the old
+     * mapping, or redirect one covered only by the new mapping. */
+    return (previous && previous->count && rh_resolve_view(previous, path, mapped) == 1) ||
+           (current && current->count && rh_resolve_view(current, path, mapped) == 1);
 }
 /* Read-only bounded validation before any retirement. Both exact APs initialize
  * ll.node_size=4; unlink reads next at node+node_size+4. The list payload points
@@ -61,7 +65,7 @@ static int cache_valid(uint32_t cache, uint32_t clz) {
     return 1;
 }
 static int retire_cache(uint32_t cache, uint32_t source_offset,
-                        const struct rh_state *state) {
+                        const struct rh_mapping_view *mapping) {
     uint32_t node = load32(cache + 52u), n = 0;
     while (node) {
         uint32_t next, data, source;
@@ -72,7 +76,7 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
         /* Header {src,type,...}; decoded {buffer,src,type,...}. Never read a
          * descriptor/symbol as a pathname, or retire an unrelated cache key. */
         if (*(const unsigned char *)(uintptr_t)(data + source_offset + 4u) == 1u &&
-            affected(state, source)) {
+            affected(mapping, 0, source)) {
             uint32_t cursor, guard = 0;
             ((void (*)(uint32_t, uint32_t))(uintptr_t)RH_FW_CACHE_DROP)(cache, data);
             /* No dereference of the retired node/data/source after drop. Check
@@ -86,13 +90,21 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
     }
     return 0;
 }
-int rh_platform_retire_images(const struct rh_state *state) {
+int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     uint32_t data = load32(RH_FW_IMAGE_CACHE_SLOT);
     uint32_t header = load32(RH_FW_HEADER_CACHE_SLOT);
-    if (!state || !cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
+    if (!mapping || !mapping->rules || !mapping->count ||
+        !cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
         !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
-    if (retire_cache(header, 0u, state)) return -1;
-    return retire_cache(data, 4u, state);
+    if (retire_cache(header, 0u, mapping)) return -1;
+    return retire_cache(data, 4u, mapping);
+}
+int rh_platform_retire_images(const struct rh_state *state) {
+    struct rh_mapping_view view;
+    if (!state) return -1;
+    view.rules = state->rules;
+    view.count = state->count;
+    return rh_platform_retire_mapped_images(&view);
 }
 struct object_list { uint32_t objects[RH_RELOAD_LIMIT], count, overflow; };
 /* Bound native walk recursion as well as the snapshot size. Parent +4 is
@@ -137,10 +149,11 @@ static int live_object(uint32_t object) {
     walk(find_object, &m);
     return m.found;
 }
-int rh_platform_refresh_images(const struct rh_state *state) {
+int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
+                                      const struct rh_mapping_view *current) {
     struct object_list *list = rh_platform_alloc(sizeof(*list));
     uint32_t i;
-    if (!list) return -1;
+    if (!current || !current->rules || !current->count || !list) return -1;
     list->count = list->overflow = 0;
     /* Native NULL-root walk includes registered screens on all displays (also
      * offscreen cached pages), not objects outside the LVGL screen trees. */
@@ -164,7 +177,7 @@ int rh_platform_refresh_images(const struct rh_state *state) {
              * same-pointer setter reuses it. Disabled header caches are skipped.
              * As for any native setter, callbacks must not delete its receiver
              * or invalidate its source during the setter itself. */
-            if (affected(state, source) &&
+            if (affected(previous, current, source) &&
                 ((int (*)(uint32_t, void *))(uintptr_t)RH_FW_IMAGE_GET_INFO)(source, header) == 1 &&
                 load32(RH_FW_HEADER_CACHE_SLOT) == header_cache &&
                 load32(header_cache + 8u) && live_object(object) &&
@@ -181,12 +194,19 @@ int rh_platform_refresh_images(const struct rh_state *state) {
          * need not trigger refresh. Do not change state, selectors or styles. */
         source = ((uint32_t (*)(uint32_t, uint32_t, uint32_t))
             (uintptr_t)RH_FW_OBJECT_STYLE_GET)(object, 0, 40u);
-        if (affected(state, source))
+        if (affected(previous, current, source))
             ((void (*)(uint32_t, uint32_t, uint32_t))
                 (uintptr_t)RH_FW_OBJECT_STYLE_REFRESH)(object, 0, 40u);
     }
     rh_platform_free(list);
     return 0;
+}
+int rh_platform_refresh_images(const struct rh_state *state) {
+    struct rh_mapping_view view;
+    if (!state) return -1;
+    view.rules = state->rules;
+    view.count = state->count;
+    return rh_platform_refresh_mapped_images(0, &view);
 }
 /* Both targets' lv_display_get_screen_active (0x0c3807ec) read +696,
  * not +24 (DPI). This is a UI mutation/invalidation guard, NOT GPU idle.
@@ -283,10 +303,11 @@ int rh_platform_font_retarget(uint32_t index, const char *path) {
     resolved = ((uint32_t (*)(uint32_t, const char *))(uintptr_t)RH_FW_FONT_RESOLVE_PATH)(manager, name);
     return same_string(resolved, path) ? 0 : -1;
 }
-void *rh_platform_refresh_timer_create(void (*callback)(void *)) {
+void *rh_platform_timer_create(uint32_t interval_ms, void (*callback)(void *)) {
+    if (!interval_ms || !callback) return 0;
     return ((void *(*)(void (*)(void *), uint32_t, void *))(uintptr_t)RH_FW_TIMER_CREATE)
-        (callback, 50u, 0);
+        (callback, interval_ms, 0);
 }
-void rh_platform_refresh_timer_delete(void *timer) {
+void rh_platform_timer_delete(void *timer) {
     ((void (*)(void *))(uintptr_t)RH_FW_TIMER_DELETE)(timer);
 }

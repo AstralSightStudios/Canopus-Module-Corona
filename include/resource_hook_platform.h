@@ -24,9 +24,12 @@ void rh_platform_unlock(uint32_t);
  * The immutable published mapping snapshot is shared with the open hook.
  * Retirement only unlinks matching file keys; native refcounts own payloads. */
 int rh_platform_retire_images(const struct rh_state *);
-/* After retirement: refresh exact image-class file metadata and supported
- * effective image-bearing styles. Unsupported owner types are left alone. */
+int rh_platform_retire_mapped_images(const struct rh_mapping_view *);
+/* After retirement: refresh owners matched by either the previous or current
+ * mapping. This lets removed rules restore their original resources. */
 int rh_platform_refresh_images(const struct rh_state *);
+int rh_platform_refresh_mapped_images(const struct rh_mapping_view *,
+                                      const struct rh_mapping_view *);
 int rh_platform_redraw_ready(void);
 /* 0 only when a full-display dirty area was retained; otherwise retry later. */
 int rh_platform_request_full_redraw(void);
@@ -41,6 +44,6 @@ int rh_platform_request_full_redraw(void);
  * bypass them. */
 int rh_platform_font_path_get(uint32_t index, char *name, char *path);
 int rh_platform_font_retarget(uint32_t index, const char *path);
-void *rh_platform_refresh_timer_create(void (*callback)(void *));
-void rh_platform_refresh_timer_delete(void *);
+void *rh_platform_timer_create(uint32_t interval_ms, void (*callback)(void *));
+void rh_platform_timer_delete(void *);
 #endif

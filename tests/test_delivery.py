@@ -80,7 +80,7 @@ class Delivery(unittest.TestCase):
     def test_manifest_and_release_identity(self):
         manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
         metadata = json.loads((PAYLOAD / 'release.json').read_text())
-        self.assertEqual(manifest['module']['id'], 'org.canopus.resource-hook')
+        self.assertEqual(manifest['module']['id'], 'ng.lst.corona')
         self.assertEqual(manifest['module']['version'], '0.3.0')
         self.assertEqual(metadata['project_id'], manifest['module']['id'])
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)

@@ -222,10 +222,19 @@ printf '/resource/icons/\t/data/canopus/themes/my-theme/icons/\n' > mappings.tsv
 - 路径约束是**词法约束**，不是文件系统沙箱；不要在主题树下放置指向其他
   位置的符号链接。配置、主题文件及其父目录只应允许可信主体修改。
 
-首次成功安装 hook 后规则锁定在驻留模块内；缺配置的 no-op 不锁定规则。
-修改磁盘文件不会立即生效；同一 resident
-image 的再次激活只重绑回调，不重新读取配置。更换规则需要安全禁用并完整
-设备重启后重新加载；不支持热卸载。
+首次激活仍需 `/data/canopus/themes/mappings.tsv` 提供有效启动配置；缺配置的 no-op
+不会安装 hook，也不会启动轮询。安装后每秒由 UI-owner timer 检查
+`/data/files/ng.lst.corona/reload.request`。只有信号内容变化时才读取同目录
+`mappings.tsv`；接受的格式为 `resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`。
+新配置必须完整读取、非空并通过与启动配置相同的校验；读取失败、部分/非法配置会保留
+last-known-good，并在后续轮询重试。更新使用双规则 bank 原子切换，并在定向刷新中同时
+考虑旧、新规则，因此删除映射也会刷新回原始资源。第二份规则 bank 增加 32 KiB 常驻
+Umem；每次解析变更配置最多另需 32 KiB scratch，分配失败会保留当前规则并在后续轮询重试。
+运行时规则更新不会重新映射字体注册表，不代表完整 UI/字体热重载。
+
+这只实现了模块端消费者。目录后缀已统一为包标识 `ng.lst.corona`，但当前 Manager 页面仍是
+路径探测器，尚未实机验证 `system.file` 与 native 模块是否能看到同一物理文件；名称统一不绕过
+Vela 对绝对路径的处理。stop/deactivate 仍需完整重启卸载，不支持热卸载。
 
 ## 状态与错误
 
@@ -274,8 +283,8 @@ stop/deactivate 在安装后返回 SDK 的 `CANOPUS_RESULT_REBOOT_REQUIRED`。
 - `scripts/restart_miwear.sh` 故意退出 78；不要替换成 kill + sleep + start。
 - 旧模块运行时 ID `manager_resource_hook` 与新 ID `resource_hook` 不同。
   先禁用旧模块并完整重启，确认它不再恢复后再安装新模块；不能同时启用两者。
-- 项目 ID 是 `org.canopus.resource-hook`（manifest 的 reverse-DNS 约束）；
-  registration、receipt、registry 使用 `resource_hook`。
+- 项目/Manager 包标识为 `ng.lst.corona`；registration、receipt、registry 的
+  运行时模块 ID 仍为 `resource_hook`，两者不能混用。
 - semver 为 0.3.0，CMI1 模块整数版本为 3，CMI1 格式版本仍为 1。
   当前 Supervisor 不保证防降级，升级策略应由发布/安装流程另行控制。
 

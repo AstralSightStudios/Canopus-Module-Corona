@@ -10,6 +10,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,9 @@ def main():
                         help='target to include; repeat for a dual bundle (default: .139)')
     args = parser.parse_args()
     targets = args.target or [TARGET]
+    module_manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
+    project_id = module_manifest['module']['id']
+    module_version = module_manifest['module']['version']
     if len(set(targets)) != len(targets):
         parser.error('duplicate target')
     output = args.output.absolute()
@@ -110,7 +114,8 @@ def main():
             for name in ('evidence.json', 'ui-reload-audit.md', 'lifecycle-recovery.json'):
                 shutil.copyfile(ROOT / 'targets' / target / name, destination / name)
         (stage / 'validation.json').write_text(json.dumps({
-            'module': 'resource_hook', 'version': '0.3.0',
+            'module': 'resource_hook', 'version': module_version,
+            'project_id': project_id,
             **({'target': targets[0]} if len(targets) == 1 else {}),
             'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',

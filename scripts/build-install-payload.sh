@@ -41,15 +41,17 @@ python3 "$ROOT/scripts/verify-payload.py" "$STAGE" --target "$TARGET_ID" --publi
 cp "$ROOT/examples/mappings.tsv" "$STAGE/mappings.tsv.example"
 cp "$ROOT/docs/INSTALL.md" "$STAGE/INSTALL.md"
 cp "$ROOT/scripts/verify-payload.py" "$STAGE/verify-payload.py"
-python3 - "$STAGE" "$TARGET_ID" "$FIRMWARE" <<'PY'
+python3 - "$STAGE" "$TARGET_ID" "$FIRMWARE" "$ROOT/Canopus.toml" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import sys
+import tomllib
 p = Path(sys.argv[1])
+manifest = tomllib.loads(Path(sys.argv[4]).read_text())
 metadata = {
-    "name": "Canopus-Module-Resource-Hook", "version": "0.3.0",
-    "project_id": "org.canopus.resource-hook", "runtime_id": "resource_hook",
+    "name": "Canopus-Module-Resource-Hook", "version": manifest['module']['version'],
+    "project_id": manifest['module']['id'], "runtime_id": "resource_hook",
     "receipt_module_version": 3, "receipt_format_version": 1,
     "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi1",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",

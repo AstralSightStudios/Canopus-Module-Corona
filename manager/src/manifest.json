@@ -1,24 +1,22 @@
 {
-  "package": "co.ro.na",
+  "package": "ng.lst.corona",
   "name": "Corona",
   "versionName": "1.0.0",
   "versionCode": 1,
-  "minPlatformVersion": 1000,
+  "minPlatformVersion": 1010,
   "icon": "/common/logo.png",
-  "deviceTypeList": [
-    "watch"
-  ],
+  "deviceTypeList": ["watch"],
   "features": [
-	{
-		"name": "system.router"
-	},
-	{
-		"name": "system.interconnect"
-	},
-	{
-		"name": "system.file"
-	}
-],
+    {
+      "name": "system.router"
+    },
+    {
+      "name": "system.interconnect"
+    },
+    {
+      "name": "system.file"
+    }
+  ],
   "config": {
     "logLevel": "log",
     "designWidth": "device-width"

@@ -31,12 +31,13 @@ int rh_parse_config(const char *text, uint32_t size, struct rh_rule *staging,
     return 0;
 }
 
-int rh_read_config(struct rh_state *s, rh_read_fn read, void *cookie,
-                   char *text, uint32_t capacity, struct rh_rule *staging) {
-    uint32_t used = 0, count;
+int rh_read_staged_config(rh_read_fn read, void *cookie, char *text,
+                          uint32_t capacity, struct rh_rule *staging,
+                          uint32_t *count) {
+    uint32_t used = 0;
     int got, rc;
     char extra;
-    if (!s || s->installed || !read || !text || !staging ||
+    if (!read || !text || !staging || !count ||
         !capacity || capacity > RH_CONFIG_BYTES) return -1;
     while (used < capacity) {
         got = read(cookie, text+used, capacity-used);
@@ -45,7 +46,18 @@ int rh_read_config(struct rh_state *s, rh_read_fn read, void *cookie,
         used += (uint32_t)got;
     }
     if (used == capacity && read(cookie, &extra, 1) != 0) return -6;
-    rc = rh_parse_config(text, used, staging, RH_RULES, &count);
+    rc = rh_parse_config(text, used, staging, RH_RULES, count);
+    if (rc) return rc;
+    return rh_validate_rules(staging, *count);
+}
+
+int rh_read_config(struct rh_state *s, rh_read_fn read, void *cookie,
+                   char *text, uint32_t capacity, struct rh_rule *staging) {
+    uint32_t count;
+    int rc;
+    if (!s || s->installed || !read || !text || !staging ||
+        !capacity || capacity > RH_CONFIG_BYTES) return -1;
+    rc = rh_read_staged_config(read, cookie, text, capacity, staging, &count);
     if (rc) return rc;
     return rh_configure(s, staging, count);
 }

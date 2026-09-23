@@ -14,8 +14,11 @@
   词法路径；拒绝路径穿越、重复规则和非法前缀，主题树不得含逃逸符号链接。
 - 只 Hook 所选目标的 `/` LVGL POSIX driver、读模式 2；处理相对 driver 路径和
   `fd + 1` 句柄。替代文件打不开时退回原资源；成功打开但解码失败不自动回退。
-- 已知 callback 才允许安装/重绑定；短临界区发布状态。首次激活后映射锁定，
-  open hook 和重载适配器共享同一份映射，不支持热更新规则或热卸载。
+- 已知 callback 才允许安装/重绑定；短临界区发布状态。激活后每秒检查
+  `/data/files/ng.lst.corona/reload.request`，信号变化后读取同目录 `mappings.tsv`；
+  完整校验后通过双规则快照切换，错误或部分配置保留 last-known-good。双快照增加
+  32 KiB 常驻 Umem；读取变更配置时最多额外申请 32 KiB scratch，内存不足时下轮重试。
+  需要先有 `/data/canopus/themes/mappings.tsv` 以安装 hook；缺少启动配置时不启动轮询。
 - **.139/.155 定向图片退休与 owner 刷新：** 两个精确目标现在都使用逐键
   `lv_cache_drop` 退休命中映射的文件 key，不做全局 cache drop，也不动其他路径、驱动、
   内存描述符或符号源。持有项仅失效/摘链，payload 由原生最后一次引用释放。遍历前检查
@@ -58,7 +61,7 @@ AP 的 18 项 Unicorn 探针通过；这是静态/仿真验证，不是实机验
 - 不自动重启 miwear，不保证 Hook 早于首次资源读取，没有主题选择器/资源上传 UI。
   `restart_miwear.sh` 故意退出 78；stop/deactivate 的 reboot-required 不表示已拆除 Hook。
 
-项目标识为 `org.canopus.resource-hook`；运行时/收据标识为 `resource_hook`。
+项目/管理器包标识为 `ng.lst.corona`；运行时/收据标识仍为 `resource_hook`。
 旧 `manager_resource_hook` 不会自动迁移：先禁用并完整重启，再安装新模块，不能同时启用。
 
 新适配器的可重复验证：
@@ -178,8 +181,9 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 不能单凭“使用包内公钥验签成功”确认发布来源。
 
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
-配置文件不存在时激活为成功 no-op，不安装 hook 或刷新 UI；补齐后再次激活即可
-重试。空配置、非法配置及其他读取错误仍会报错。构建需要含已批准 errno veneer
+启动配置文件不存在时激活为成功 no-op，不安装 hook 或刷新 UI；补齐后再次激活即可
+重试。空配置、非法配置及其他读取错误仍会报错。启动成功后，控制目录的变更标记格式为
+`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。字体注册表不跟随运行时规则更新，且当前 Manager 仍是路径探测页，尚未验证它能写入这个 native 可见目录。构建需要含已批准 errno veneer
 的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、

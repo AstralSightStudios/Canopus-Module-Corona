@@ -1,48 +1,105 @@
 <template>
-  <div class="demo-page">
-    <text class="title">{{ $t("a.b") }},欢迎打开{{ title }}</text>
-    <!-- 点击跳转详情页 -->
-    <input class="btn" type="button" value="跳转到详情页" onclick="routeDetail" />
+  <div class="page">
+    <text class="title">文件桥接机制探测</text>
+    <text class="hint">固件 QJS 静态分析显示，system.file 会处理/限制绝对路径。下面分别探测模块目标路径和 Vela internal URI。</text>
+
+    <text class="label">模块目标路径</text>
+    <text class="path">{{ nativePath }}</text>
+    <input class="button" type="button" value="探测目标路径读写" onclick="probeNativePath" />
+
+    <text class="label">Vela internal URI</text>
+    <text class="path">{{ internalUri }}</text>
+    <input class="button" type="button" value="探测 internal URI 读写" onclick="probeInternalUri" />
+
+    <text class="status">{{ statusText }}</text>
+    <text class="footnote">即使某项回环成功，也只证明快应用 API 可读写；在确认 native 模块能看到同一物理文件前，不保存主题配置或写重载标记。</text>
   </div>
 </template>
 
 <script>
-import router from "@system.router"
-import {routes} from "../../ts/routes"
+import file from "@system.file"
+import { ThemeBridge, NATIVE_SHARED_PATH, QUICKAPP_FILES_URI } from "../../ts/theme-bridge"
 
 export default {
-  // 页面级组件的数据模型，影响传入数据的覆盖机制：private内定义的属性不允许被覆盖
   private: {
-    title: "示例页面"
+    nativePath: NATIVE_SHARED_PATH,
+    internalUri: QUICKAPP_FILES_URI,
+    statusText: "等待探测…",
+    bridge: null
   },
 
-  routeDetail() {
-    router.push({
-      uri: routes.detail
+  onInit() {
+    this.bridge = new ThemeBridge(file)
+  },
+
+  probeNativePath() {
+    this.statusText = "正在用 system.file 探测模块目标路径…"
+    this.bridge.probeNativeSharedPath().then(result => {
+      this.statusText = `system.file 对目标路径完成回环（${result.bytes} bytes）。这不证明模块可见同一文件；固件 QJS 显示绝对路径会被沙箱处理。`
+    }).catch(error => {
+      this.statusText = `目标路径探测失败：${String(error)}。这与固件中的绝对路径限制一致。`
+    })
+  },
+
+  probeInternalUri() {
+    this.statusText = "正在用 Vela internal URI 探测快应用文件区…"
+    this.bridge.probeQuickAppFilesUri().then(result => {
+      this.statusText = `internal URI 回环成功（${result.bytes} bytes）。这是 Vela 管理的快应用文件命名空间，不等于 ${NATIVE_SHARED_PATH}。`
+    }).catch(error => {
+      this.statusText = `internal URI 探测失败：${String(error)}`
     })
   }
 }
 </script>
 
 <style>
-.demo-page {
+.page {
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
 .title {
   font-size: 20px;
-  text-align: center;
+  font-weight: bold;
+  margin-bottom: 8px;
 }
 
-.btn {
-  width: 200px;
-  height: 40px;
-  margin-top: 20px;
-  border-radius: 5px;
-  background-color: #09ba07;
-  font-size: 20px;
-  color: #ffffff;
+.hint, .footnote {
+  font-size: 12px;
+  color: #667085;
+  margin-bottom: 8px;
+}
+
+.label {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.path {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #344054;
+}
+
+.button {
+  width: 100%;
+  height: 38px;
+  margin-top: 8px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.status {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #101828;
+}
+
+.footnote {
+  margin-top: 10px;
 }
 </style>

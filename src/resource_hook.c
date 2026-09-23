@@ -36,10 +36,9 @@ static int rule_ok(const struct rh_rule *r) {
            prefix(r->destination, root, sizeof(root)-1);
 }
 
-int rh_configure(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
-    uint32_t i, j, k;
-    if (!s || s->installed || n > RH_RULES || (n && !r)) return -1;
-    /* Validate the complete transaction before changing any existing rule. */
+int rh_validate_rules(const struct rh_rule *r, uint32_t n) {
+    uint32_t i, j;
+    if (n > RH_RULES || (n && !r)) return -1;
     for (i = 0; i < n; i++) {
         if (!rule_ok(&r[i])) return -2;
         for (j = 0; j < i; j++) {
@@ -47,31 +46,54 @@ int rh_configure(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
             if (a == length(r[j].source) && prefix(r[i].source, r[j].source, a)) return -3;
         }
     }
+    return 0;
+}
+
+static void copy_rules(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
+    uint32_t i, k;
     for (i = 0; i < n; i++) for (k = 0; k < RH_PATH; k++) {
         s->rules[i].source[k] = r[i].source[k];
         s->rules[i].destination[k] = r[i].destination[k];
     }
     s->count = n;
+}
+
+int rh_configure(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
+    int rc;
+    if (!s || s->installed || n > RH_RULES || (n && !r)) return -1;
+    /* Validate the complete transaction before changing any existing rule. */
+    rc = rh_validate_rules(r, n);
+    if (rc) return rc;
+    copy_rules(s, r, n);
     return 0;
 }
 
 /* Public paths are absolute. This function does no I/O, allocation or recursion. */
-int rh_resolve(const struct rh_state *s, const char *path, char out[RH_PATH]) {
+int rh_resolve_view(const struct rh_mapping_view *view, const char *path,
+                    char out[RH_PATH]) {
     uint32_t i, selected = RH_RULES, best = 0, n, dst, j;
-    if (!s || !out || !valid(path)) return -1;
+    if (!view || !view->rules || !out || !valid(path) || view->count > RH_RULES) return -1;
     n = length(path);
-    for (i = 0; i < s->count; i++) {
-        uint32_t size = length(s->rules[i].source);
-        if (size > best && size <= n && prefix(path, s->rules[i].source, size)) {
+    for (i = 0; i < view->count; i++) {
+        uint32_t size = length(view->rules[i].source);
+        if (size > best && size <= n && prefix(path, view->rules[i].source, size)) {
             best = size; selected = i;
         }
     }
     if (selected == RH_RULES) return 0;
-    dst = length(s->rules[selected].destination);
+    dst = length(view->rules[selected].destination);
     if (dst + n - best >= RH_PATH) return -2;
-    for (j = 0; j < dst; j++) out[j] = s->rules[selected].destination[j];
+    for (j = 0; j < dst; j++) out[j] = view->rules[selected].destination[j];
     for (j = best; j <= n; j++) out[dst+j-best] = path[j];
     return 1;
+}
+
+int rh_resolve(const struct rh_state *s, const char *path, char out[RH_PATH]) {
+    struct rh_mapping_view view;
+    if (!s) return -1;
+    view.rules = s->rules;
+    view.count = s->count;
+    return rh_resolve_view(&view, path, out);
 }
 
 int rh_open(struct rh_state *s, void *driver, const char *path, int mode) {
@@ -100,7 +122,8 @@ int rh_install(struct rh_state *s, void *d, rh_open_fn *slot, rh_open_fn w) {
 /* .139 strips the leading slash before calling its '/' driver's open slot.
  * The saved callback adds it back. Never feed that callback an absolute path.
  * Installation and all calls must be serialized by the UI owner. */
-int rh_posix_open(struct rh_state *s, void *driver, const char *path, int mode) {
+int rh_posix_open_view(struct rh_state *s, const struct rh_mapping_view *view,
+                       void *driver, const char *path, int mode) {
     char absolute[RH_PATH], mapped[RH_PATH];
     uint32_t i, n;
     int result;
@@ -110,7 +133,7 @@ int rh_posix_open(struct rh_state *s, void *driver, const char *path, int mode) 
         return s->original(driver, path, mode);
     absolute[0] = '/';
     for (i = 0; i <= n; i++) absolute[i+1] = path[i];
-    if (rh_resolve(s, absolute, mapped) == 1) {
+    if (rh_resolve_view(view, absolute, mapped) == 1) {
         result = s->original(driver, mapped+1, mode);
         if (result != 0 && result != -1) {
             if (s->redirected != UINT32_MAX) s->redirected++;
@@ -119,6 +142,14 @@ int rh_posix_open(struct rh_state *s, void *driver, const char *path, int mode) 
         if (s->fallback != UINT32_MAX) s->fallback++;
     }
     return s->original(driver, path, mode);
+}
+
+int rh_posix_open(struct rh_state *s, void *driver, const char *path, int mode) {
+    struct rh_mapping_view view;
+    if (!s) return 0;
+    view.rules = s->rules;
+    view.count = s->count;
+    return rh_posix_open_view(s, &view, driver, path, mode);
 }
 
 int rh_reinstall_posix(struct rh_state *s, void *driver, rh_open_fn *slot,
