@@ -1,0 +1,21 @@
+{
+  "name": "manager",
+  "version": "1.0.0",
+  "description": "",
+  "engines": {
+    "node": ">=14.17"
+  },
+  "scripts": {
+    "start": "npm run typecheck && aiot start --watch",
+    "build": "npm run typecheck && aiot build",
+    "release": "npm run typecheck && aiot release",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "ts:watch": "tsc --noEmit -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@aiot-toolkit/jsc": "^1.0.3",
+    "aiot-toolkit": "^2.0.5",
+    "typescript": "^5.9.3",
+    "ux-types": "^1.7.0"
+  }
+}

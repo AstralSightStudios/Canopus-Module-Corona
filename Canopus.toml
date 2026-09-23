@@ -1,6 +1,6 @@
 schema = 1
 [module]
-id = "org.canopus.resource-hook"
+id = "co.ro.na"
 version = "0.3.0"
 language = "c"
 lifecycle = "resident-after-activation"

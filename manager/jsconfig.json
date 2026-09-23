@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "module": "preserve",
+    "types": ["ux-types/feature"],
+    "allowJs": true,
+    "noEmit": true
+  }
+}
