@@ -1,12 +1,30 @@
-> **Current implementation update:** this is historical evidence, not current
-> activation behavior. The unaudited .139 all-entry/direct-key cache traversal
-> and automatic page-rebuild path have been removed. .139 now keeps file-open
-> redirection, font registry retargeting and repaint; image retirement/metadata/
-> style adapters return unsupported without inspecting layouts. No .155 address
-> or object layout is applied to .139. `images_dropped` and `rebuilds` stay zero.
-> A separate .139 firmware audit is required before enabling owner adoption.
+> **Current implementation update:** restart/reinstallation claims below remain
+> historical and are not current activation behavior. The unaudited all-entry
+> cache traversal and page-rebuild path remain removed. `.139` now has a
+> separately recovered, target-specific affected-image reload adapter; it does
+> not borrow `.155` class values or cache layout. Physical-device acceptance is
+> still NOT_PROBED.
 
 # .139 miwear restart verification
+
+## Current resource reload adapter
+
+The exact AP (`31ce8225…923b2c74`) is independently inspected. Its bounded
+cache/owner implementation is shared with `.155`, but this target uses image
+object class `0x2ca14cb8`, decoded/header cache classes `0x2ca168c4/0x2ca16944`,
+and cache drop `0x0c8b8cae`. The four owner APIs have byte-identical instruction
+windows across the two APs; the `.139` image-setter body and class identities
+were separately analyzed. See
+[`EVID-RESOURCE-4139-007`](evidence/EVID-RESOURCE-4139-007.json) and the four
+restricted symbol records.
+
+`tests/firmware_reload.py` executes the exact `.139` AP for all 18 tests when
+`RESOURCE_HOOK_FIRMWARE` points to the extracted `vela_ap.bin`; all 18 pass.
+Cache/I/O/decoder/GUI leaves are modeled, so this is static/host evidence only,
+not display, GPU or device acceptance. The adapter only retires mapped absolute
+file keys, refreshes exact image objects and current main-part property 40, and
+requests normal asynchronous full-screen invalidation. Font live wrappers,
+animation/canvas owners and complete miwear restart remain outside its scope.
 
 ## Current result
 

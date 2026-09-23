@@ -46,9 +46,9 @@ def main():
         steps = []
         log = stage / 'validation.log'
 
-        def run(label, command):
+        def run(label, command, run_env=None):
             print(label, flush=True)
-            result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+            result = subprocess.run(command, cwd=ROOT, env=run_env or env, capture_output=True, text=True)
             with log.open('a') as stream:
                 stream.write('\n=== ' + label + ' ===\n' + result.stdout + result.stderr)
             if result.returncode:
@@ -69,9 +69,15 @@ def main():
                          'firmware_ui_redraw', 'firmware_page_rebuild',
                          'firmware_font_retarget'):
                 run(f'{target}: {name}', [firmware_python, str(ROOT / 'tests' / (name + '.py'))])
-            if target == 'xiaomi-band-11-4.100.155':
-                run(f'{target}: firmware_reload',
-                    [firmware_python, str(ROOT / 'tests/firmware_reload.py')])
+            reload_env = dict(env, RESOURCE_HOOK_TARGET=target)
+            if target == 'xiaomi-band-11-4.100.139':
+                local_ap = ROOT / 'build/firmware-analysis/vela_ap_4.100.139.bin'
+                if not reload_env.get('RESOURCE_HOOK_FIRMWARE') and local_ap.is_file():
+                    reload_env['RESOURCE_HOOK_FIRMWARE'] = str(local_ap)
+            else:
+                reload_env.pop('RESOURCE_HOOK_FIRMWARE', None)
+            run(f'{target}: firmware_reload',
+                [firmware_python, str(ROOT / 'tests/firmware_reload.py')], reload_env)
         run('Installer generation and restricted Lua protocol',
             [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
         target_args = [arg for target in targets for arg in ('--target', target)]

@@ -45,8 +45,8 @@ static void retarget_fonts(void) {
 }
 
 /* One request, coalesced across activations. The temporary UI timer retries only
- * until supported retirement/owner adoption and the dirty-area request complete.
- * Unsupported .139 adapters do not count as retirements. */
+ * until the selected target's verified retirement/owner stages and dirty-area
+ * request complete; a failed adapter never counts as a completed retirement. */
 static void refresh_step(void *timer) {
     (void)timer;
     if (!refresh_pending || refreshing || !rh_platform_redraw_ready()) return;

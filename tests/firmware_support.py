@@ -36,12 +36,17 @@ _ADDRESSES_155 = {
     0x0c33dc4e: 0x0c33dc4e,  # native write, framework emulation-addresses.json
     0x0c342c54: 0x0c342c54,  # native open called by POSIX open
     0x0c349538: 0x0c349538,  # errno accessor, EVID-ERRNO-4155-001
+    0x0c380574: 0x0c380574,  # screen tree walk (reload adapter)
     0x0c380694: 0x0c380694,  # horizontal resolution (rotation aware)
     0x0c3806b4: 0x0c3806b4,  # vertical resolution (rotation aware)
     0x0c3807bc: 0x0c3807bc,  # DPI: .155 80b500af10b9034b986908b1806980bd
     0x0c3807ec: 0x0c3807ec,  # active screen at display +696
     0x0c3809a4: 0x0c3809a4,  # event dispatch called by invalidation
     0x0c382428: 0x0c382428,  # _lv_inv_area
+    0x0c382620: 0x0c382620,  # effective style property getter
+    0x0c38525c: 0x0c38525c,  # explicit style property refresh
+    0x0c38e4e4: 0x0c38e4e4,  # image decoder get-info
+    0x0c909798: 0x0c909788,  # image-size refresh leaf called by lv_image_set_src
     0x0c3a4360: 0x0c3a4360,  # driver lookup: LDRD [0x200bd1e8 + 0x1c4]
     0x0c3a6194: 0x0c3a6194,  # LVGL POSIX open
     0x0c3abd20: 0x0c3abd20,  # timer create, exact-target port evidence
@@ -54,7 +59,8 @@ _ADDRESSES_155 = {
     0x200bd3b8: 0x200bd3b8,  # POSIX driver, lv_init stores
     0x200bd3bc: 0x200bd3bc,  # driver buffer size, lv_init stores
     0x200bd3c4: 0x200bd3c4,  # driver open callback, lv_init stores
-    0x2ca168c4: 0x2ca168b4,  # decoded IMAGE class, lv_init literal
+    0x2ca14cb8: 0x2ca14ca8,  # LVGL image-object class, native class literal
+    0x2ca168c4: 0x2ca168b4,  # decoded IMAGE cache class, lv_init literal
     0x2ca16944: 0x2ca16934,  # IMAGE_HEADER class, distinct lv_init literal
     # Exact .155 instruction/call-site audit (Capstone 5, fingerprint above):
     # drop-all 0xc3a7918..0xc3a79c4, cache release 0xc8b9780..0xc8b97d8;
@@ -172,8 +178,8 @@ def require_identity_addresses(*addresses):
                 f'{TARGET}: fixture must explicitly translate {address:#x} to {actual:#x}')
 
 
-def check_firmware():
-    firmware = CANOPUS / 'fwbins' / TARGET / 'vela_ap.bin'
+def check_firmware(firmware=None):
+    firmware = Path(firmware) if firmware else CANOPUS / 'fwbins' / TARGET / 'vela_ap.bin'
     if not firmware.is_file():
         raise RuntimeError(f'missing selected-target firmware: {firmware}')
     digest = hashlib.sha256(firmware.read_bytes()).hexdigest()

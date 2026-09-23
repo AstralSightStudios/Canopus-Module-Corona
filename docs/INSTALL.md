@@ -126,12 +126,17 @@ shasum -a 256 -c SHA256SUMS
 - `images_dropped` 只统计定向退休**轮次**（即使没有匹配项）；`redraws` 只统计
   脏区接受，不证明新尺寸/内容实际显示或所有 owner 已刷新。v5 未提供逐对象结果。
 
-### .139 的保守行为
+### .139 的目标专属适配
 
-`.139` 保留读路径重定向、字体注册表重定向和整屏失效请求，但其旧直接-key
-缓存遍历未被独立验证，现已停用。不调用 .155 专用图片/样式适配器，不猜测对应
-地址/布局。`images_dropped` 保持 0；旧缓存/旧尺寸可能继续可见，需未来独立适配器
-或 owner 自己的正常生命周期。不能把 `.155` 的重载测试当作 `.139` 的证据。
+`.139` 的旧直接-key/全局 cache 路径仍停用；已按其精确 AP 单独恢复有界定向适配，
+逻辑与 `.155` 一致，但使用 `.139` 自己的 API 地址和 class/layout guards：image
+object class `0x2ca14cb8`、decoded/header cache classes `0x2ca168c4/0x2ca16944`，
+逐键 drop `0x0c8b8cae`。只处理命中当前映射的绝对文件 key；精确 image class 的尺寸
+更新、当前 main-part 图片 property 40 样式刷新及异步整屏失效均按上文流程进行。
+所有地址与类均由 `.139` AP 独立确认，没有将 `.155` 的 class/layout 常量平移使用。
+
+这是精确固件指令的静态/Unicorn 验证，不是实机验收；全 UI 重启、live 字体替换、
+动画/canvas/private buffer owners 等仍不支持。
 
 ### 字体注册路径（不是即时字体重载）
 
@@ -144,9 +149,18 @@ shasum -a 256 -c SHA256SUMS
 不是事务：add 分配失败可能丢失注册条目并回落默认路径。也不验证主题字体格式；
 打开/解析失败不保证自动恢复旧 face。
 
-当前证据与测试说明见 `targets/xiaomi-band-11-4.100.155/ui-reload-audit.md`
-和 `tests/firmware_reload.py`。旧 page/restart 固件测试保留为生命周期反例，
-不是激活路径仍会重建页面或重启 miwear 的声明。
+当前证据与测试说明见两个目标的 `ui-reload-audit.md`，以及
+`targets/xiaomi-band-11-4.100.139/evidence/EVID-RESOURCE-4139-007.json`。
+`.139` 探针必须提供与目标 fingerprint 匹配的 AP 文件，例如：
+
+```sh
+RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.139 \
+RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
+  "$FIRMWARE_PYTHON" tests/firmware_reload.py
+```
+
+旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
+miwear。
 
 当前 Manager 没有主题选择器、资源上传页面，也没有展示模块 RHQ1 计数器
 （“立即激活”只负责加载激活模块，不负责传输主题文件）。
@@ -225,7 +239,7 @@ query 返回 40 字节，小端序的十个 uint32：
 | 12 | rule_count |
 | 16 | redirected，替代资源打开成功次数 |
 | 20 | fallback，替代资源打开失败后的回退次数 |
-| 24 | images_dropped，成功完成定向图片退休的轮次（.139 为 0） |
+| 24 | images_dropped，成功完成定向图片退休的轮次（.139/.155 均支持目标专属适配） |
 | 28 | redraws，固件接受整屏脏区的次数（非同步刷新） |
 | 32 | rebuilds，保留字段，当前实现始终为 0 |
 | 36 | fonts_retargeted，成功改写字体注册路径的条目数 |

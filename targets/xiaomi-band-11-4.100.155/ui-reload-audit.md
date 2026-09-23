@@ -57,11 +57,13 @@ loading firmware, and compiles the current source into a temporary unsigned ELF.
 - No watchface hook, global animation stop, global cache clear, GPU finish call,
   or page rebuild. Deferred VG_LITE descriptors live in native pending arrays;
   non-rendering status is only an invalidation/mutation gate, **not GPU idle**.
-- `.139` keeps path/font-registry redirection and repaint, but both new image
-  adapters return unsupported without reading cache/object layouts. Its old
-  unaudited direct-key/global traversal was removed, not silently preserved.
+- `.139` now has the same bounded algorithm behind its own independently
+  fingerprinted adapter. Its exact image-object class is `0x2ca14cb8`, cache
+  classes are `0x2ca168c4/0x2ca16944`, and it uses .139 cache-drop/setter
+  addresses. These identities are not copied from .155. Its exact AP probe is
+  recorded in `targets/xiaomi-band-11-4.100.139/evidence/EVID-RESOURCE-4139-007.json`.
 - RHQ1 remains v5/40 bytes. `images_dropped` counts completed targeted retirement
-  rounds (.139: zero), including empty affected sets; `rebuilds` is reserved zero.
+  rounds, including empty affected sets; `rebuilds` is reserved zero.
   `redraws` means accepted dirty area, not verified resource adoption. Failed
   per-object info queries and unsupported owner classes are not separately
   exposed by v5; a completed round is not universal replacement success.
@@ -70,17 +72,19 @@ loading firmware, and compiles the current source into a temporary unsigned ELF.
 
 ## Focused verification
 
-`tests/firmware_reload.py`: **18 tests passed** against fingerprinted .155 AP.
-The actual native generic drop/release, screen walk/accessors, image setter,
-get-info cache-hit path, state/selector style lookup and explicit style-refresh
-instructions execute. Native I/O/decoder callbacks, cache lookup/unlink/free,
-heap functions, style property storage and GUI event/sizing leaves are modeled
-as described per test. A poisoned removed node/later-deleted object catches
-post-drop/stale-snapshot dereferences. Tests cover both cache types, unrelated,
-invalid/overlong and non-file sources, held/unheld entries, class/layout/cycle/
-progress guards, dimensions, unchanged source identity, failed/disabled info,
-source changes, main-part states 0/32/128, offscreen trees, allocation/size/depth
-limits, and compiled .139 unsupported guards (not .139 AP emulation).
+`tests/firmware_reload.py`: **18 tests passed against each exact AP** (.155 and
+.139, with `RESOURCE_HOOK_FIRMWARE` set to the extracted .139 `vela_ap.bin`).
+The native generic drop/release, screen walk/accessors, image setter, get-info
+cache-hit path, state/selector style lookup and explicit style-refresh
+instructions execute from the selected AP. Native I/O/decoder callbacks, cache
+lookup/unlink/free, heap functions, style storage and GUI event/sizing leaves
+are modeled as described per test. A poisoned removed node/later-deleted object
+catches post-drop/stale-snapshot dereferences. Both target runs cover the cache
+classes from that AP, unrelated/invalid/overlong/non-file sources, held/unheld
+entries, layout/cycle/progress guards, dimensions, unchanged source identity,
+failed/disabled info, source changes, main-part states 0/32/128, offscreen trees,
+and allocation/size/depth limits. Physical display/GPU/device behavior is not
+modeled.
 
 `tests/test_module.c` additionally tests immutable snapshot sharing, no page
 rebuild, coalescing, stage retries, unsupported-adapter retirement accounting,
@@ -88,6 +92,11 @@ OOM scheduling and v5 status compatibility with ASan/UBSan.
 
 ```sh
 RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.155 \
+  CLANG=/path/to/arm-capable/clang LD_LLD=/path/to/ld.lld \
+  build/firmware-tests/bin/python tests/firmware_reload.py
+
+RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.139 \
+RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
   CLANG=/path/to/arm-capable/clang LD_LLD=/path/to/ld.lld \
   build/firmware-tests/bin/python tests/firmware_reload.py
 ```
@@ -227,7 +236,7 @@ Against the fingerprinted AP and native .155 stage1/stage2/Supervisor resources,
 
 Ten offline payload delivery tests also pass using an explicitly temporary test-only signing key. The 15 signed-loader/rebind tests **do not pass** with that fixture: the real Supervisor rejects its receipt with signature error -103. No trusted production private key is available, the Supervisor trust root has not been changed, and signature checks have not been stubbed. Therefore complete delivery validation, signed-load/rebind acceptance, and production installer publication remain pending. The current `build/resource-hook.elf` is a .155 development artifact, not a trusted installable package.
 
-The .139 host/ARM build and offline delivery checks pass; its firmware suites were not rerun because its exact AP is unavailable in this checkout. Its legacy cache-key assumption remains outside this migration's validated scope.
+At the time of this historical migration audit, .139 firmware suites were not rerun and its legacy cache-key assumption remained out of scope. This is superseded by the independently fingerprinted .139 AP probes and adapter evidence linked above; physical-device acceptance for .139 remains pending.
 
 ## Pending hardware gates (not passed)
 

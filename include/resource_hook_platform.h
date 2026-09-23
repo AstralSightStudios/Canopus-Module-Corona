@@ -20,7 +20,7 @@ uint32_t rh_platform_lock(void);
 void rh_platform_unlock(uint32_t);
 /* All graphics operations require the UI owner thread, outside the IRQ lock.
  * A repaint is not a resource rebuild; retained decoders/fonts are not replaced. */
-/* 0 = completed, 1 = unsupported target (no mutation), -1 = retry.
+/* 0 = completed, -1 = retry/failure (no successful retirement is counted).
  * The immutable published mapping snapshot is shared with the open hook.
  * Retirement only unlinks matching file keys; native refcounts own payloads. */
 int rh_platform_retire_images(const struct rh_state *);

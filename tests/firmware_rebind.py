@@ -8,7 +8,7 @@ import struct
 import unittest
 import os
 from firmware_support import (
-    ROOT, TARGET, PORT_TARGET, FIRMWARE_SHA256, Machine, fw, hook, require_identity_addresses,
+    ROOT, TARGET, FIRMWARE_SHA256, Machine, fw, hook, require_identity_addresses,
 )
 
 # These literal PCs/globals are deliberately retained only after verifying each
@@ -25,7 +25,7 @@ PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
 
 
 class Rebind(unittest.TestCase):
-    retirement_round = 1 if TARGET == PORT_TARGET else 0
+    retirement_round = 1
 
     def setUp(self):
         self.load_fixture(enabled=True)
@@ -101,7 +101,7 @@ class Rebind(unittest.TestCase):
                                  (0x3c782000, 0x200bd314, fw(0x2ca16944))):
             m.uc.mem_write(cache, bytes(64))
             m.word(cache, clz)         # empty cache, real class
-            m.word(cache + 48, 4)      # verified .155 list payload size
+            m.word(cache + 48, 4)      # exact-target list payload size
             m.word(glob, cache)
         m.uc.mem_write(disp, bytes(1024))
         m.word(disp, 192)
@@ -252,9 +252,6 @@ class Rebind(unittest.TestCase):
         disp = self.graphics()
         m.word(0x3c782000, fw(0x2ca168c4))   # header cache with the decoded class
         self.assertEqual(self.restore(), (5, 0))
-        if TARGET != PORT_TARGET:
-            self.assertEqual(self.status_words()[6:8], (0, 1))
-            return  # .139 does not inspect or mutate unverified cache layouts
         self.assertEqual(self.status_words()[6:8], (0, 0))
         self.assertEqual(m.word(disp + 604), 0)   # nothing was invalidated either
         m.word(0x3c782000, fw(0x2ca16944))   # restore the class lv_init really uses
@@ -319,11 +316,10 @@ class Rebind(unittest.TestCase):
         self.assertNotEqual(error, 0)
         self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
 
-    @unittest.skipUnless(TARGET == PORT_TARGET, '.139 targeted retirement is unverified and disabled')
     def test_held_cache_entry_retired_then_freed_on_last_release(self):
         m = self.m
         self.graphics()
-        # .155 head -> RB node -> data at RB+16. Only affected file keys retire.
+        # Target head -> RB node -> data at RB+16. Only affected file keys retire.
         # Generic native drop/release execute; class lookup/unlink are modeled.
         cache, node, data, pool = 0x3c781000, 0x3c7a0000, 0x3c7a0100, 0x3c7a0200
         offset = 0x40

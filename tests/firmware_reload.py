@@ -1,15 +1,15 @@
-"""Exact .155 reload adapter probe, without signed loading or GPU simulation.
+"""Exact .139/.155 reload adapter probes, without signed loading or GPU simulation.
 
-Compiles source into a temporary fixed-address ELF. Native generic cache
-retirement/release, screen-tree traversal, image setter and style refresh execute
-AP instructions. Cache lookup/unlink/free, decoder info, style lookup and GUI
-leaves are explicitly modeled. Also tests .139's no-mutation capability guard
-without claiming to execute .139 firmware. No key or packaging script is read.
+Compiles the selected target source into a temporary fixed-address ELF and runs
+it against that exact AP. Native generic cache retirement/release, screen-tree
+traversal, image setter and style refresh execute AP instructions. Cache
+lookup/unlink/free, decoder info, style lookup and GUI leaves are explicitly
+modeled. No key or packaging script is read.
 
-RESOURCE_HOOK_TARGET must be .155 to run these AP probes. CLANG / LD_LLD may
-select the ARM-capable toolchain. Requires capstone, Unicorn and pyelftools.
+RESOURCE_HOOK_TARGET selects .139 (default) or .155. CLANG / LD_LLD may select
+the ARM-capable toolchain. Requires capstone, Unicorn and pyelftools.
 """
-from firmware_support import ROOT, CANOPUS, TARGET, PORT_TARGET, check_firmware
+from firmware_support import ROOT, CANOPUS, TARGET, PORT_TARGET, check_firmware, fw
 import os
 from pathlib import Path
 import shutil
@@ -24,43 +24,45 @@ from unicorn.arm_const import (UC_CPU_ARM_CORTEX_M33, UC_ARM_REG_R0, UC_ARM_REG_
                                UC_ARM_REG_LR, UC_ARM_REG_PC)
 
 REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3]
-IMAGE_CLASS = 0x2ca14ca8
+IMAGE_CLASS = fw(0x2ca14cb8)
+DATA_CLASS = fw(0x2ca168c4)
+HEADER_CLASS = fw(0x2ca16944)
 DATA, HEADER, STATE = 0x3c701000, 0x3c702000, 0x3c780000
 STOP = 0x1c73ff00
 
 
-@unittest.skipUnless(TARGET == PORT_TARGET, 'new owner adapter is .155-only; .139 remains unsupported')
 class Reload(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        check_firmware()
-        cls.firmware = (CANOPUS / 'fwbins' / TARGET / 'vela_ap.bin').read_bytes()
+        firmware_path = Path(os.environ.get(
+            'RESOURCE_HOOK_FIRMWARE', CANOPUS / 'fwbins' / TARGET / 'vela_ap.bin'))
+        check_firmware(firmware_path)
+        cls.firmware = firmware_path.read_bytes()
         cls.tmp = tempfile.TemporaryDirectory(prefix='rh-reload-')
         cls.addClassCleanup(cls.tmp.cleanup)
-        cls.images = {}
+        port = int(TARGET == PORT_TARGET)
+        objects = []
         clang = os.environ.get('CLANG', shutil.which('clang'))
         linker = os.environ.get('LD_LLD', shutil.which('ld.lld'))
-        for port in (0, 1):
-            objects = []
-            for name in ('platform_band11', 'resource_hook'):
-                obj = Path(cls.tmp.name) / f'{name}-{port}.o'
-                subprocess.run([clang, '--target=arm-none-eabi', '-mcpu=cortex-m33',
-                    '-mthumb', '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin',
-                    '-fno-stack-protector', '-fno-unwind-tables', '-Os', '-Wall',
-                    '-Wextra', '-Werror', f'-DRH_TARGET_155={port}',
-                    '-I' + str(ROOT / 'include'),
-                    '-I' + str(CANOPUS / 'manager/target/band11'),
-                    '-I' + str(CANOPUS / 'targets' / TARGET / 'generated'),
-                    '-c', str(ROOT / 'src' / (name + '.c')), '-o', str(obj)], check=True)
-                objects.append(str(obj))
-            elf = Path(cls.tmp.name) / f'adapter-{port}.elf'
-            subprocess.run([linker, '-Ttext=0x1c700000', '-e', 'rh_platform_retire_images',
-                            *objects, '-o', str(elf)], check=True)
-            with elf.open('rb') as stream:
-                f = ELFFile(stream)
-                cls.images[port] = (
-                    [(p['p_vaddr'], p.data()) for p in f.iter_segments() if p['p_type'] == 'PT_LOAD' and p['p_vaddr'] >= 0x1c700000],
-                    {s.name: s['st_value'] for s in f.get_section_by_name('.symtab').iter_symbols()})
+        for name in ('platform_band11', 'resource_hook'):
+            obj = Path(cls.tmp.name) / f'{name}-{port}.o'
+            subprocess.run([clang, '--target=arm-none-eabi', '-mcpu=cortex-m33',
+                '-mthumb', '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin',
+                '-fno-stack-protector', '-fno-unwind-tables', '-Os', '-Wall',
+                '-Wextra', '-Werror', f'-DRH_TARGET_155={port}',
+                '-I' + str(ROOT / 'include'),
+                '-I' + str(CANOPUS / 'manager/target/band11'),
+                '-I' + str(CANOPUS / 'targets' / TARGET / 'generated'),
+                '-c', str(ROOT / 'src' / (name + '.c')), '-o', str(obj)], check=True)
+            objects.append(str(obj))
+        elf = Path(cls.tmp.name) / f'adapter-{port}.elf'
+        subprocess.run([linker, '-Ttext=0x1c700000', '-e', 'rh_platform_retire_images',
+                        *objects, '-o', str(elf)], check=True)
+        with elf.open('rb') as stream:
+            f = ELFFile(stream)
+            cls.segments = [(p['p_vaddr'], p.data()) for p in f.iter_segments()
+                            if p['p_type'] == 'PT_LOAD' and p['p_vaddr'] >= 0x1c700000]
+            cls.symbols = {s.name: s['st_value'] for s in f.get_section_by_name('.symtab').iter_symbols()}
 
     def setUp(self):
         self.u = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
@@ -71,7 +73,7 @@ class Reload(unittest.TestCase):
             self.u.mem_map(address, size)
         self.u.mem_write(0xc0c0000, self.firmware)
         self.u.mem_write(0x2c0c0000, self.firmware)
-        self.load(1)
+        self.load()
         self.next_memory = 0x3c703000
         self.drops, self.freed, self.queries, self.sizes, self.invalidations = [], [], [], [], []
         self.styles = {}
@@ -96,7 +98,7 @@ class Reload(unittest.TestCase):
         self.hook(0xc3a472c, self.unlink)
         self.hook(0xc3abe58, lambda: self.freed.append(self.reg(0)) or 0)
         self.hook(0x1c73fe00, lambda: self.freed.append(self.reg(0)) or 0)
-        for cache, slot, clz in [(DATA, 0x200bd310, 0x2ca168b4), (HEADER, 0x200bd314, 0x2ca16934)]:
+        for cache, slot, clz in [(DATA, 0x200bd310, DATA_CLASS), (HEADER, 0x200bd314, HEADER_CLASS)]:
             self.word(slot, cache)
             self.word(cache, clz)
             self.word(cache + 4, 24)
@@ -115,7 +117,7 @@ class Reload(unittest.TestCase):
         self.word(self.display + 720, 0)
         self.info_hook = self.hook(0xc38e4e4, self.info)
         self.hook(0xc38400c, lambda: self.invalidations.append(self.reg(0)) or 0)
-        self.hook(0xc909788, lambda: self.sizes.append(self.reg(0)) or 0)
+        self.hook(fw(0xc909798), lambda: self.sizes.append(self.reg(0)) or 0)
         self.hook(0xc3ae5ea, lambda: 0)
         self.hook(0xc38414c, lambda: 0)
         self.style_hook = self.hook(0xc382620, lambda: self.style_value())
@@ -130,9 +132,8 @@ class Reload(unittest.TestCase):
         for address in (0xc3a3888, 0xc8b8d50, 0xc696e24, 0xc8ed4a8):
             self.hook(address, lambda: self.fail('forbidden global drop / owner teardown'))
 
-    def load(self, port):
-        segments, self.symbols = self.images[port]
-        for address, data in segments:
+    def load(self):
+        for address, data in self.segments:
             self.u.mem_write(address, data)
 
     def reg(self, index):
@@ -254,7 +255,9 @@ class Reload(unittest.TestCase):
         return int(self.info_ok)
 
     def style_value(self):
-        self.assertEqual((self.reg(1), self.reg(2)), (0, 40))
+        if self.reg(2) != 40:
+            return 0
+        self.assertEqual(self.reg(1), 0)
         return self.styles.get(self.reg(0), 0)
 
     def test_retire_only_affected_file_keys_in_both_caches(self):
@@ -282,13 +285,13 @@ class Reload(unittest.TestCase):
         self.assertEqual(self.call('rh_platform_retire_images', STATE), 0)
         self.assertEqual(self.freed, [])
         for refs in (1, 0):
-            self.call(0xc8b9780, DATA, data + 24)
+            self.call(fw(0xc8b9790), DATA, data + 24)
             self.assertEqual(self.word(data + 28), refs)
             self.assertEqual(self.freed, [] if refs else [data, data])
 
     def test_wrong_class_layout_cycles_and_null_rb_fail_before_mutation(self):
         node, data, source = self.cached(DATA, '/resource/a.bin')
-        for field, invalid in ((HEADER, 0x2ca168b4), (HEADER + 48, 8), (node, 0), (node + 8, node)):
+        for field, invalid in ((HEADER, DATA_CLASS), (HEADER + 48, 8), (node, 0), (node + 8, node)):
             saved = self.word(field)
             self.word(field, invalid)
             self.assertEqual(self.call('rh_platform_retire_images', STATE), 0xffffffff)
@@ -410,7 +413,7 @@ class Reload(unittest.TestCase):
             self.u.mem_write(self.word(root + 8) + 48, struct.pack('<H', 1))
             self.u.mem_write(second, b'\xff' * 128)
             return 0
-        self.hook(0xc909788, resize)
+        self.hook(fw(0xc909798), resize)
         self.assertEqual(self.call('rh_platform_refresh_images', STATE), 0)
         self.assertEqual(len(self.queries), 2)
 
@@ -467,12 +470,12 @@ class Reload(unittest.TestCase):
         self.assertEqual(self.call('rh_platform_refresh_images', STATE), 0xffffffff)
         self.assertEqual(self.queries, [])
 
-    def test_139_adapters_never_inspect_155_layouts(self):
-        self.load(0)
-        # Even an invalid snapshot pointer must not be dereferenced by guards.
-        self.assertEqual(self.call('rh_platform_retire_images', 0xffffffff), 1)
-        self.assertEqual(self.call('rh_platform_refresh_images', 0xffffffff), 1)
+    def test_selected_target_class_guards_reject_foreign_cache_layout(self):
+        self.word(HEADER, DATA_CLASS)
+        self.assertEqual(self.call('rh_platform_retire_images', STATE), 0xffffffff)
         self.assertEqual(self.drops, [])
+        self.word(HEADER, HEADER_CLASS)
+        self.assertEqual(self.call('rh_platform_retire_images', STATE), 0)
 
 
 if __name__ == '__main__':

@@ -34,9 +34,9 @@ void rh_platform_unlock(uint32_t irq) {
     b11_barrier();
     b11_irq_unlock(irq);
 }
-/* .155-only owner adapter. .139's old direct-key cache traversal was never
- * verified; do not keep globally retiring unrelated resources to preserve it. */
-#if defined(RH_TARGET_155) && RH_TARGET_155
+/* Exact .139/.155 owner adapter. Both APs use the validated LRU/RB entry-list
+ * shape; target-specific cache/object classes and callable addresses live in
+ * resource_hook_target.h. Never retire unrelated global cache entries. */
 #define RH_RELOAD_LIMIT 1024u
 static uint32_t load32(uint32_t address) {
     return *(volatile uint32_t *)(uintptr_t)address;
@@ -48,9 +48,9 @@ static int affected(const struct rh_state *state, uint32_t source) {
     return source && *(const char *)(uintptr_t)source == '/' &&
            rh_resolve(state, (const char *)(uintptr_t)source, mapped) == 1;
 }
-/* Read-only bounded validation before any retirement. The exact .155 class
- * initializer sets ll.node_size=4; unlink reads next at node+node_size+4.
- * The list payload points to an RB node, whose +16 points to entry data. */
+/* Read-only bounded validation before any retirement. Both exact APs initialize
+ * ll.node_size=4; unlink reads next at node+node_size+4. The list payload points
+ * to an RB node, whose +16 points to entry data. */
 static int cache_valid(uint32_t cache, uint32_t clz) {
     uint32_t node, n = 0;
     if (!cache || load32(cache) != clz || load32(cache + 48u) != 4u) return 0;
@@ -86,21 +86,14 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
     }
     return 0;
 }
-#endif
 int rh_platform_retire_images(const struct rh_state *state) {
-#if defined(RH_TARGET_155) && RH_TARGET_155
     uint32_t data = load32(RH_FW_IMAGE_CACHE_SLOT);
     uint32_t header = load32(RH_FW_HEADER_CACHE_SLOT);
     if (!state || !cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
         !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
     if (retire_cache(header, 0u, state)) return -1;
     return retire_cache(data, 4u, state);
-#else
-    (void)state;
-    return 1; /* Unsupported, not a successfully completed retirement. */
-#endif
 }
-#if defined(RH_TARGET_155) && RH_TARGET_155
 struct object_list { uint32_t objects[RH_RELOAD_LIMIT], count, overflow; };
 /* Bound native walk recursion as well as the snapshot size. Parent +4 is
  * independently established by lv_obj_get_screen (0x0c3802a8). */
@@ -144,9 +137,7 @@ static int live_object(uint32_t object) {
     walk(find_object, &m);
     return m.found;
 }
-#endif
 int rh_platform_refresh_images(const struct rh_state *state) {
-#if defined(RH_TARGET_155) && RH_TARGET_155
     struct object_list *list = rh_platform_alloc(sizeof(*list));
     uint32_t i;
     if (!list) return -1;
@@ -163,7 +154,7 @@ int rh_platform_refresh_images(const struct rh_state *state) {
         /* Exact image class only: never assume animation/canvas subclasses
          * share the image ownership contract, even if their base is image. */
         if (header_cache && load32(header_cache) == RH_FW_HEADER_CACHE_CLASS &&
-            load32(header_cache + 8u) && load32(object) == RH_FW_IMAGE_CLASS &&
+            load32(header_cache + 8u) && load32(object) == RH_FW_IMAGE_OBJECT_CLASS &&
             (*(const unsigned char *)(uintptr_t)(object + 96u) & 3u) == 1u) {
             source = load32(object + 52u);
             /* Preflight: set_src's failure path clears the existing source.
@@ -177,7 +168,7 @@ int rh_platform_refresh_images(const struct rh_state *state) {
                 ((int (*)(uint32_t, void *))(uintptr_t)RH_FW_IMAGE_GET_INFO)(source, header) == 1 &&
                 load32(RH_FW_HEADER_CACHE_SLOT) == header_cache &&
                 load32(header_cache + 8u) && live_object(object) &&
-                load32(object) == RH_FW_IMAGE_CLASS &&
+                load32(object) == RH_FW_IMAGE_OBJECT_CLASS &&
                 load32(object + 52u) == source &&
                 (*(const unsigned char *)(uintptr_t)(object + 96u) & 3u) == 1u) {
                 ((void (*)(uint32_t, uint32_t))(uintptr_t)RH_FW_IMAGE_SET_SRC)(object, source);
@@ -196,10 +187,6 @@ int rh_platform_refresh_images(const struct rh_state *state) {
     }
     rh_platform_free(list);
     return 0;
-#else
-    (void)state;
-    return 1;
-#endif
 }
 /* Both targets' lv_display_get_screen_active (0x0c3807ec) read +696,
  * not +24 (DPI). This is a UI mutation/invalidation guard, NOT GPU idle.

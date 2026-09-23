@@ -16,17 +16,19 @@
   `fd + 1` 句柄。替代文件打不开时退回原资源；成功打开但解码失败不自动回退。
 - 已知 callback 才允许安装/重绑定；短临界区发布状态。首次激活后映射锁定，
   open hook 和重载适配器共享同一份映射，不支持热更新规则或热卸载。
-- **.155 定向图片退休：** 只退休源类型为文件、绝对路径命中有效映射的图片头和
-  解码缓存项；不动其他路径、其他驱动、内存描述符或符号源。使用原生逐键
-  `lv_cache_drop`，不是全局清空；持有项摘链并标失效，载荷由原生最后一次引用
-  释放。遍历有类、布局、环路/数量及摘链进度检查。
-- **.155 图片尺寸/元数据刷新：** 在退休后扫描 LVGL 已注册屏幕树（含离屏屏幕）。
-  仅对**精确 image class** 的受影响文件源，先查询新头信息，成功后重新传入原来的
-  source 指针调用原生 setter，更新宽高/尺寸失效，不换字符串。头缓存关闭、
-  查询失败或对象/源已变化时跳过，不冒充完成任意资源替换。
-- **.155 图片样式：** 普通对象/图片按钮的当前状态、主 part 的属性 40 文件源命中
-  映射时，显式调用原生 style refresh。保持原有样式指针、selector 和状态；不依赖
-  “再设置同一个指针”触发刷新。其他 part/属性及私有样式资源尚未覆盖。
+- **.139/.155 定向图片退休与 owner 刷新：** 两个精确目标现在都使用逐键
+  `lv_cache_drop` 退休命中映射的文件 key，不做全局 cache drop，也不动其他路径、驱动、
+  内存描述符或符号源。持有项仅失效/摘链，payload 由原生最后一次引用释放。遍历前检查
+  目标专属类、布局、链路边界与摘链进度。
+- 两目标均在已注册屏幕树（含离屏树）收集/重验 owner。精确 image class 的受影响
+  文件源先经原生 get-info 验证，再用相同 source 指针调用原生 setter 更新宽高/尺寸失效；
+  不复制或替换 source。头缓存关闭、查询失败、对象/源变化时跳过。主 part 当前状态的
+  属性 40 文件源命中映射时显式 style refresh，不改变 style 指针、selector 或状态。
+  其他 part/属性、动画/canvas 派生 owner 仍不保证刷新。
+- 目标地址/类并不混用：`.139` image object class 为 `0x2ca14cb8`，image/header cache
+  classes 为 `0x2ca168c4/0x2ca16944`；`.155` 分别为 `0x2ca14ca8`、
+  `0x2ca168b4/0x2ca16934`。新用到的四个 owner API 已在两个精确 AP 中逐字节核对；
+  `.139` 的 image setter 及 cache/drop 入口仍按自己的固件布局验证。
 - UI 请求一次性且可合并：忙碌、缓存未就绪、快照分配失败等情况由临时 LVGL timer
   重试；成功请求整屏脏区后自删。已经完成的退休/元数据阶段不因脏区被拒绝而反复执行。
   定时器分配失败返回 -2011，重定向仍驻留。
@@ -36,9 +38,10 @@
   图片数量/全局清空次数），`redraws` 是被接受的整屏脏区请求，`rebuilds` 保留为 0。
   计数器不证明所有图片、字体或 GPU 工作已采用新资源。详见 [安装文档](docs/INSTALL.md)。
 
-**.139 保守兼容：** 保留路径重定向、字体注册路径重定向和重绘请求，但停用旧的
-未经验证的全缓存遍历，也不套用 .155 图片/样式对象布局。当前 `.139` 不保证已缓存
-图片立即采用映射，`images_dropped` 为 0；需要独立固件证据后才能启用对应适配器。
+**.139 新逻辑已按独立固件证据启用：** 旧的全缓存/全局 drop 路径仍禁用；新适配器
+仅对已验证的映射 key 和 owner 生效，不套用 `.155` 的对象或 cache class。精确 `.139`
+AP 的 18 项 Unicorn 探针通过；这是静态/仿真验证，不是实机验收。完整 UI 重启、live
+字体替换及未覆盖 owner 仍不支持。
 
 ## 生命周期边界
 
@@ -61,13 +64,22 @@
 新适配器的可重复验证：
 
 ```sh
+# .155 使用 Canopus 的目标 AP
 RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.155 \
+  "$FIRMWARE_PYTHON" tests/firmware_reload.py
+
+# .139 可从本地 OTA 包提取 AP，再用该精确文件运行探针
+unzip -p ../../temp/miwear.watch.q66tc_v4.100.139_full_a02b7af5.bin vela_ap.bin \
+  > build/firmware-analysis/vela_ap_4.100.139.bin
+RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.139 \
+RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
   "$FIRMWARE_PYTHON" tests/firmware_reload.py
 ```
 
-该测试临时编译源文件，不读取签名密钥，不依赖已签名 payload。原生 cache drop/release、
-屏幕遍历、image setter 和 style refresh 执行真实 .155 指令，I/O/decoder/GUI 叶节点
-按测试说明建模；**没有测试真实显示器或 GPU 完成**。
+该测试临时编译所选目标源码，不读取签名密钥，不依赖已签名 payload。两个 AP 上的
+cache drop/release、屏幕遍历、image setter 和 style refresh 运行真实固件指令；I/O、
+cache lookup/unlink/free、decoder 与 GUI 叶节点按测试说明建模。**未测试真实显示器、GPU
+完成或实机资源采用。**
 
 ## 编辑图片资源
 

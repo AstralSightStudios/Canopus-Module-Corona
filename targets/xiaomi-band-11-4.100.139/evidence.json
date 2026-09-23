@@ -2,6 +2,8 @@
   "target": "xiaomi-band-11-4.100.139",
   "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
   "status": "STATIC_HOOK_CANDIDATE_RESTART_BLOCKED",
+  "resource_reload_evidence": "evidence/EVID-RESOURCE-4139-007.json",
+  "resource_reload_status": "TARGETED_IMAGE_OWNER_ADAPTER_STATICALLY_TESTED_DEVICE_NOT_PROBED",
   "lv_fs_open": "0x0c3a7d7c",
   "lv_fs_get_driver": "0x0c3a4360",
   "driver_open_offset": 12,
@@ -12,7 +14,7 @@
     "native builtin-task teardown and reset contract",
     "resident heap/device ownership on task-group exit",
     "pre-resource owner-thread startup barrier",
-    "font face and image-cache reconstruction"
+    "complete font, animation/canvas and private-owner adoption (targeted image-cache retirement and supported image/style owner refresh are separately validated)"
   ],
   "posix_driver": "0x200bd3b8",
   "driver_letter": "/",

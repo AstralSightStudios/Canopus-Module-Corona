@@ -18,9 +18,12 @@
     "cached_font_pointer_offset": 40
   },
   "image_cache": {
-    "status": "IMPLEMENTED_IN_MODULE",
+    "status": "TARGETED_RELOAD_ADAPTER_IMPLEMENTED_STATIC_ONLY",
     "decoded_image_cache_ptr_global": "0x200bd310",
     "image_header_cache_ptr_global": "0x200bd314",
+    "decoded_image_cache_class": "0x2ca168c4",
+    "image_header_cache_class": "0x2ca16944",
+    "image_object_class": "0x2ca14cb8",
     "heap_context_global": "0x200bd3f4",
     "lv_image_cache_drop": "0x0c3a3888",
     "lv_cache_drop_all_wrapper": "0x0c8b8d60",
@@ -29,8 +32,8 @@
     "drop_all_cb": "0x0c3a7918",
     "display_refr_timer": "0x0c38956c",
     "keying": "The cache is keyed by the decoded source path, so an already-decoded image is served before open() is called; a path redirect never reaches a cached image until it is dropped.",
-    "module_action": "activate() calls lv_image_cache_drop(0) on the UI owner thread after installing the redirect (guarded on both cache globals and their class vtable being non-null), then calls _lv_inv_area (0x0c382428) with an oversized area to mark the whole active screen dirty so the firmware's refresh timer repaints every widget and re-opens each image through the redirect on its next tick, without waiting for a navigation.",
-    "semantics": "Entries are retired ONE AT A TIME with the generic lv_cache_drop (0x0c8b8cae), never with the firmware's drop_all: drop_all frees every red-black node allocation even for still-referenced entries. Per-entry retirement marks a held entry invalid and unlinks it while leaving its payload valid for the holder (deferred free in lv_cache_entry_release_data 0x0c8b9790 on last release); a zero-reference entry is freed immediately. Either way the next lookup for that source path misses and goes through the redirect. NOT established: that every image widget re-opens its source on the next draw — a widget holding a decoded handle across draws keeps showing the old image and needs a page rebuild.",
+    "module_action": "After installing the immutable mapping, the UI-owner timer validates both exact .139 cache classes/list layouts, retires only mapped absolute file keys with per-key lv_cache_drop, refreshes affected exact-image metadata and current main-part image styles, then requests asynchronous full-screen invalidation. The adapter does not call lv_image_cache_drop(0), drop_all, or rebuild pages.",
+    "semantics": "Entries are retired ONE AT A TIME with .139 lv_cache_drop (0x0c8b8cae), never with drop_all: drop_all can free red-black node allocations for still-referenced entries. Per-entry retirement marks a held entry invalid and unlinks it while keeping its payload valid for the holder (deferred free in lv_cache_entry_release_data 0x0c8b9790 on last release); a zero-reference entry is freed immediately. Both cache class pointers, node layout, list bounds and unlink progress are checked. Exact image-class file owners use get-info plus the same-pointer setter to update dimensions; current main-part property 40 file sources use explicit style refresh. Deferred type-5 drawing, animation/canvas/private-buffer owners are not guaranteed to re-open and remain outside the adapter.",
     "forced_redraw": {
       "status": "IMPLEMENTED_IN_MODULE",
       "lv_inv_area": "0x0c382428",
@@ -41,24 +44,31 @@
       "lv_cache_drop": "0x0c8b8cae",
       "lv_cache_entry_release_data": "0x0c8b9790",
       "lru_rb_class_pointer_guard": "0x2ca168c4",
+      "header_lru_rb_class_pointer_guard": "0x2ca16944",
+      "image_object_class_guard": "0x2ca14cb8",
       "refresh_timer": {"create": "0x0c3abd20", "delete": "0x0c3abe70", "period_ms": 50},
       "rendering_flag": "bit 1 of disp+58",
       "invalidation_enabled_offset": 608,
       "area_intersect": "0x0c3a39b4",
       "display_refr_timer": "0x0c38956c",
-      "semantics": "Only schedules a repaint through the firmware's own refresh timer (no forced synchronous flush) and does not rebuild pages. One coalesced request is retried from a temporary LVGL timer when the UI is busy (rendering, invalidation disabled, or no active screen yet) and the timer deletes itself on success; this is not periodic polling. Success is counted only when the firmware retained a dirty area covering the whole display. Counted as RHQ1 'redraws' (status format v3, 32 bytes). Timer allocation failure returns -2011 with the redirect left resident.",
+      "semantics": "Only schedules a repaint through the firmware's own refresh timer (no forced synchronous flush) and does not rebuild pages. One coalesced request is retried from a temporary LVGL timer when the UI is busy (rendering, invalidation disabled, or no active screen yet) and the timer deletes itself on success; this is not periodic polling. Success is counted only when the firmware retained a dirty area covering the whole display. Counted as RHQ1 redraws in the compatible v5/40-byte status format. Timer allocation failure returns -2011 with the redirect left resident.",
       "tests": ["firmware_ui_redraw.py", "firmware_rebind.py:test_activate_requests_full_redraw", "firmware_rebind.py:test_missing_screen_not_confused_with_nonzero_dpi", "firmware_rebind.py:test_busy_render_and_disabled_invalidation_retry_once", "firmware_rebind.py:test_rejected_dirty_area_is_not_counted_or_repeatedly_dropped", "firmware_rebind.py:test_timer_allocation_failure_is_reported_with_hook_resident"]
     },
-    "tests": ["firmware_image_lifecycle.py", "firmware_rebind.py:test_activate_drops_present_image_cache"]
+    "tests": ["firmware_reload.py (18 exact-.139-AP tests)", "firmware_rebind.py:test_activate_requests_full_redraw"]
   },
   "functions": [
-    {"address": "0x0c3a3888", "role": "lv_image_cache_drop(src): src=0 drops the decoded-image cache (*0x200bd310) and header cache (*0x200bd314); the module calls this on activate to reload redirected images", "test": "firmware_image_lifecycle.py"},
+    {"address": "0x0c38e4e4", "role": "lv_image_decoder_get_info: writes a 12-byte caller-owned header and returns 1/0; exact .139 same-pointer setter path consumes it", "test": "firmware_reload.py"},
+    {"address": "0x0c380574", "role": "lv_obj_tree_walk: synchronous registered-screen/child walk used only for bounded owner collection", "test": "firmware_reload.py"},
+    {"address": "0x0c382620", "role": "lv_obj_get_style_prop: resolves effective current part/state property; property 40 is read as a borrowed image source", "test": "firmware_reload.py"},
+    {"address": "0x0c38525c", "role": "lv_obj_refresh_style: explicit current style refresh for affected mapped image-source property", "test": "firmware_reload.py"},
+    {"address": "0x0c3b2c28", "role": "lv_image_set_src: exact .139 same-pointer path refreshes dimensions after successful get-info; setter body independently analyzed from .155", "test": "firmware_reload.py"},
+    {"address": "0x0c3a3888", "role": "Legacy lv_image_cache_drop(src): src=0 dispatches global cache retirement; unsafe for current live-owner path and not called by the targeted adapter", "test": null},
     {"address": "0x0c8b8d60", "role": "lv_cache_drop_all: dispatches cache->clz->drop_all_cb at vtable +28", "test": "firmware_image_lifecycle.py"},
     {"address": "0x0c3a7918", "role": "LRU-rb drop_all_cb: frees only unreferenced entries, logs still-referenced ones, resets the tree and count", "test": "firmware_image_lifecycle.py"},
     {"address": "0x0c381880", "role": "lv_draw_image: per draw calls lv_image_decoder_get_info and (direct branch) lv_image_decoder_open, then lv_image_decoder_close before returning; no decoder is retained across draws. The other branch queues a type-5 draw task via 0x0c380cb8 and is NOT traced", "test": null},
     {"address": "0x0c38e394", "role": "image_decoder_get_info: header-cache (*0x200bd314) lookup; on a hit releases the reference immediately via lv_cache_entry_release_data, on a miss calls lv_fs_open (0x0c3a7d7c) — the hooked driver — and caches the header", "test": null},
     {"address": "0x0c38ea60", "role": "lv_image_decoder_open: decoded-image cache (*0x200bd310) lookup; on a hit stores the entry at dsc+68 and holds that reference only until lv_image_decoder_close (0x0c38cf50); on a miss falls through to get_info and the decoder chain", "test": null},
-    {"address": "0x0c382428", "role": "_lv_inv_area: append an area to the display's invalidated-area list (disp+60.., count at disp+604); an oversized area is clipped to the screen, marking the whole display dirty. The module calls this after the image-cache drop to force a full repaint; the firmware's MiWearScreen wake handler (0x0c6d096c) uses it for its 'invalidate screen.' path", "test": "firmware_ui_redraw.py"},
+    {"address": "0x0c382428", "role": "_lv_inv_area: append an area to the display invalidation list; an oversized area clips to the whole screen. The module calls this after targeted cache retirement and owner refresh; the firmware's MiWearScreen wake handler (0x0c6d096c) also uses it", "test": "firmware_ui_redraw.py"},
     {"address": "0x0c3807bc", "role": "lv_display_get_screen_active: returns *(disp+24); confirms the active-screen offset the module's redraw guard reads", "test": "firmware_ui_redraw.py"},
     {"address": "0x0c380b2c", "role": "lv_display_is_invalidation_enabled: returns disp+608 > 0; _lv_inv_area no-ops when it is 0", "test": "firmware_ui_redraw.py"},
     {"address": "0x0c494380", "role": "Create wrapper: reuse active face, then idle cache, then resolve native path and create FreeType face", "test": "firmware_font_lifecycle.py"},
@@ -87,8 +97,8 @@
     "test": "firmware_restart.py:test_font_setup_has_an_independent_one_time_guard"
   },
   "test_model_boundaries": [
-    "Exact firmware instructions execute in Unicorn.",
-    "Allocator, selected linked-list mutations and native I/O are modeled in font tests.",
+    "Exact .139 AP cache-drop/release, object walk, style getter/refresh and image setter instructions execute in Unicorn (18 tests in firmware_reload.py).",
+    "Cache lookup/unlink/free, allocator, decoder/I/O, style storage and GUI event/sizing leaves are modeled.",
     "No physical GPU/display/cache behavior or whole-task shutdown is tested.",
     "No synthetic address in a fixture is a claim about the live heap layout."
   ],
