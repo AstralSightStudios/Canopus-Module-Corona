@@ -106,7 +106,7 @@ class Reload(unittest.TestCase):
             self.word(cache + 24, 0x1c73fe01)
             self.word(cache + 48, 4)
         self.u.mem_write(STATE, b'/resource/\0')
-        self.u.mem_write(STATE + 256, b'/data/canopus/themes/current/\0')
+        self.u.mem_write(STATE + 256, b'/data/quickapp/files/ng.lst.corona/themes/current/\0')
         self.word(STATE + 64 * 512, 1)
         # Real native NULL-root walk: display list -> screens -> spec_attr children.
         self.display = self.mem(1024)
@@ -279,6 +279,25 @@ class Reload(unittest.TestCase):
         self.assertEqual(self.freed, [affected[1], affected[1], affected[3], affected[3]])
         self.assertEqual(self.call('rh_platform_retire_images', STATE), 0)
         self.assertEqual(len(self.drops), 4)
+
+    def test_empty_mapping_refreshes_old_sources_to_original(self):
+        rules = self.mem(512)
+        self.u.mem_write(rules, b'/resource/\0')
+        self.u.mem_write(rules + 256, b'/data/quickapp/files/ng.lst.corona/themes/current/\0')
+        previous, current = self.mem(8), self.mem(8)
+        self.word(previous, rules)
+        self.word(previous + 4, 1)
+        self.word(current, 0)
+        self.word(current + 4, 0)
+
+        image = self.obj('/resource/app/settings/launcher.bin')
+        self.screens(image)
+        source = self.word(image + 52)
+        self.assertEqual(self.call('rh_platform_retire_mapped_images', current), 1)
+        self.assertEqual(self.call('rh_platform_refresh_mapped_images', previous, current), 0)
+        self.assertEqual(self.queries, [source, source])
+        self.assertEqual((self.word(image + 68), self.word(image + 72)), (77, 99))
+        self.assertEqual(self.word(image + 52), source)
 
     def test_held_payload_survives_until_native_last_release(self):
         node, data, source = self.cached(DATA, '/resource/held.bin')

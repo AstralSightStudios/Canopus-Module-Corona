@@ -6,10 +6,11 @@
 #include <string.h>
 #include <stdio.h>
 
-static const char config[] = "/resource/\t/data/canopus/themes/current/\n";
+static const char config[] = "/resource/\t" RH_THEME_ROOT "current/\n";
 static const char *input = config, *control_config, *control_signal;
 static unsigned position, control_position, signal_position;
 static unsigned config_opens, control_opens, signal_opens, closes, allocations, frees, persistent_allocs, registrations;
+static int watcher_scheduled;
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
 static int fail_timer, reject_redraw, reject_metadata, unsupported;
@@ -18,7 +19,7 @@ static int open_errno = 5;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
            redraw_ready = 1, locked;
 static int driver;
-static const char *backend_expected = "data/canopus/themes/current/icon.bin";
+static const char *backend_expected = "data/quickapp/files/ng.lst.corona/themes/current/icon.bin";
 struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 static int backend(void *d, const char *p, int mode) {
@@ -32,23 +33,23 @@ int rh_platform_open(const char *path, int mode) {
     assert(!locked);
     if (!strcmp(path, "/dev/canopus")) { assert(mode == 2); return 10; }
     assert(mode == 1);
-    if (!strcmp(path, "/data/canopus/themes/mappings.tsv")) {
-        config_opens++;
-        position = 0;
-        if (fail_open) { open_errno = open_errno ? open_errno : 5; return -1; }
-        return 11;
-    }
-    if (!strcmp(path, "/data/files/ng.lst.corona/reload.request")) {
+    if (!strcmp(path, RH_RELOAD_SIGNAL_PATH)) {
         signal_opens++;
         signal_position = 0;
         if (!control_signal) { open_errno = RH_ENOENT; return -1; }
         return 12;
     }
-    if (!strcmp(path, "/data/files/ng.lst.corona/mappings.tsv")) {
-        control_opens++;
-        control_position = 0;
-        if (!control_config) { open_errno = RH_ENOENT; return -1; }
-        return 13;
+    if (!strcmp(path, RH_CONFIG_PATH)) {
+        if (watcher_scheduled) {
+            control_opens++;
+            control_position = 0;
+            if (!control_config) { open_errno = RH_ENOENT; return -1; }
+            return 13;
+        }
+        config_opens++;
+        position = 0;
+        if (fail_open) { open_errno = open_errno ? open_errno : 5; return -1; }
+        return 11;
     }
     assert(!"unexpected file path");
     return -1;
@@ -96,9 +97,9 @@ int rh_platform_driver_valid(void) { assert(locked); return driver_valid; }
 uint32_t rh_platform_lock(void) { assert(!locked); locked = 1; return 42; }
 void rh_platform_unlock(uint32_t irq) { assert(locked && irq == 42); locked = 0; }
 int rh_platform_retire_mapped_images(const struct rh_mapping_view *view) {
-    assert(view && view->rules && view->count == 1);
+    assert(view && view->rules && view->count <= 1);
     assert(!rh_validate_rules(view->rules, view->count));
-    if (unsupported) return 1;
+    if (!view->count || unsupported) return 1;
     assert(!locked);  /* image invalidation must run outside the interrupt lock */
     if (!image_cache_ready) return -1;
     image_drops++;
@@ -109,9 +110,9 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
     char mapped[RH_PATH];
     int old_match = previous ? rh_resolve_view(previous, "/resource/icon.bin", mapped) : 0;
     int new_match;
-    assert(!locked && current && current->rules && current->count == 1);
+    assert(!locked && current && current->rules && current->count <= 1);
     new_match = rh_resolve_view(current, "/resource/icon.bin", mapped);
-    assert(old_match == 1 || new_match == 1);
+    assert(old_match == 1 || new_match == 1 || (!previous && !current->count));
     if (unsupported) return 1;
     if (reject_metadata) return -1;
     metadata_refreshes++;
@@ -127,6 +128,7 @@ void *rh_platform_timer_create(uint32_t interval, void (*cb)(void *)) {
             mock_timers[i].interval = interval;
             mock_timers[i].callback = cb;
             mock_timers[i].active = 1;
+            if (interval == 1000u) watcher_scheduled = 1;
             timers_created++;
             return &mock_timers[i];
         }
@@ -155,7 +157,7 @@ static unsigned active_timers(uint32_t interval) {
 /* Two registered families: one whose file falls under a mapping rule, one that
  * does not. Once retargeted the first resolves to the themed file, so it stops
  * matching and the walk terminates. */
-#define THEMED_FONT "/data/canopus/themes/current/font/MiSans-Regular.ttf"
+#define THEMED_FONT RH_THEME_ROOT "current/font/MiSans-Regular.ttf"
 int rh_platform_font_path_get(uint32_t index, char *name, char *path) {
     assert(!locked && name && path);
     if (index >= 2u) return -1;
@@ -190,11 +192,51 @@ static uint32_t u32(const unsigned char *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
-int main(void) {
+static int test_empty_startup_then_theme_reload(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
     unsigned char status[48];
     unsigned before;
+
+    fail_open = 1;
+    open_errno = RH_ENOENT;
+    assert(d->activate(NULL) == 0);
+    assert(slot != backend && active_timers(1000u) == 1 && !active_timers(50u));
+    assert(!image_drops && !metadata_refreshes && !redraws && !retargets);
+    backend_expected = "resource/icon.bin";
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 8) == 1 && u32(status + 12) == 0);
+
+    before = signal_opens;
+    fire_timers(1000u);
+    assert(signal_opens == before + 1 && !control_opens);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tlate-theme\n";
+    control_config = "/resource/\t" RH_THEME_ROOT "current/\n";
+    backend_expected = "data/quickapp/files/ng.lst.corona/themes/current/icon.bin";
+    before = image_drops;
+    fire_timers(1000u);
+    assert(image_drops == before + 1 && metadata_refreshes == 1 && redraws == 1);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(active_timers(1000u) == 1);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 8) == 1 && u32(status + 12) == 1);
+    assert(allocations == frees + persistent_allocs && persistent_allocs == 1);
+    puts("empty startup stays resident and applies a later theme reload");
+    return 0;
+}
+int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--empty-startup"))
+        return test_empty_startup_then_theme_reload();
+    assert(argc == 1);
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    struct canopus_status_writer_v1 w;
+    unsigned char status[48];
+    unsigned before;
+    assert(!strcmp(RH_APP_FILES_ROOT, "/data/quickapp/files/ng.lst.corona/"));
+    assert(!strcmp(RH_CONFIG_PATH, "/data/quickapp/files/ng.lst.corona/mappings.tsv"));
+    assert(!strcmp(RH_RELOAD_SIGNAL_PATH, "/data/quickapp/files/ng.lst.corona/reload.request"));
+    assert(!strcmp(RH_THEME_ROOT, "/data/quickapp/files/ng.lst.corona/themes/"));
     assert(registrations == 1 && closes == 1);
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
     assert(!strcmp((const char *)d->module_id, "resource_hook"));
@@ -224,35 +266,42 @@ int main(void) {
     open_errno = 0;  /* Unknown failure must not become success. */
     assert(d->activate(NULL) == -2005);
     open_errno = RH_ENOENT;
-    driver_valid = 0;  /* No driver inspection is needed for a no-op. */
-    assert(d->prepare(NULL) == 0);
-    assert(d->activate(NULL) == 0 && slot == backend && closes == before);
-    assert(d->activate(NULL) == 0 && slot == backend);
-    assert(!allocations && !frees && !image_drops && !metadata_refreshes && !redraws &&
+    driver_valid = 0;
+    assert(d->prepare(NULL) == 0);  /* Missing mappings prepare an empty snapshot. */
+    assert(slot == backend && allocations == frees + persistent_allocs &&
+           persistent_allocs == 1 && !image_drops && !metadata_refreshes && !redraws &&
            !retargets && !timers_created && !active_timers(50u) && !active_timers(1000u));
-    assert(d->stop(NULL) == 0 && d->deactivate(NULL) == 0);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
-    assert(!d->query(&w));
-    for (unsigned i = 8; i < 40; i += 4) assert(u32(status + i) == 0);
+    assert(!d->query(&w) && u32(status + 8) == 0 && u32(status + 12) == 0);
+    assert(d->stop(NULL) == 0 && d->deactivate(NULL) == 0);
+
     driver_valid = 1;
     fail_open = 0; fail_alloc = 1;
-    assert(d->activate(NULL) == -2006 && slot == backend && closes == before + 1);
+    assert(d->prepare(NULL) == -2006 && slot == backend && closes == before + 1);
     fail_alloc = 0; fail_read = 1;
-    assert(d->activate(NULL) == -2007 && allocations == frees);
+    assert(d->prepare(NULL) == -2007 && allocations == frees + persistent_allocs);
     fail_read = 0; input = "/resource/\t/outside/\n";
-    assert(d->activate(NULL) == -2007 && slot == backend && allocations == frees);
+    assert(d->prepare(NULL) == -2007 && slot == backend &&
+           allocations == frees + persistent_allocs);
     input = "# empty\n";
-    assert(d->prepare(NULL) == -2008);
-    assert(d->activate(NULL) == -2008 && slot == backend);
+    driver_valid = 0;
+    assert(d->prepare(NULL) == 0);
+    input = "";
+    assert(d->prepare(NULL) == 0);
+    assert(slot == backend && allocations == frees + persistent_allocs &&
+           !image_drops && !metadata_refreshes && !redraws && !timers_created);
+    driver_valid = 1;
     input = config;
-    /* A prepared but unpublished snapshot must not survive missing config. */
+    /* An empty file also leaves a prepared, but unpublished, zero-rule snapshot. */
     assert(d->prepare(NULL) == 0);
     fail_open = 1;
     assert(d->prepare(NULL) == 0);
-    assert(d->activate(NULL) == 0 && slot == backend && !timers_created);
+    assert(slot == backend && !timers_created);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
-    assert(!d->query(&w) && u32(status + 12) == 0);
+    assert(!d->query(&w) && u32(status + 8) == 0 && u32(status + 12) == 0);
     fail_open = 0;
+    input = config;
+    assert(d->prepare(NULL) == 0);
     driver_valid = 0;
     assert(d->activate(NULL) == -2008 && slot == backend && !locked);
     assert(allocations == frees + persistent_allocs);
@@ -339,10 +388,10 @@ int main(void) {
 
     /* A package-qualified signal publishes the manager's complete new snapshot. */
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr1\n";
-    control_config = "/resource/\t/data/canopus/themes/alternate/\n";
+    control_config = "/resource/\t" RH_THEME_ROOT "alternate/\n";
     before = image_drops;
     fire_timers(1000u);
-    backend_expected = "data/canopus/themes/alternate/icon.bin";
+    backend_expected = "data/quickapp/files/ng.lst.corona/themes/alternate/icon.bin";
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
     assert(image_drops == before + 2 && redraws == 8);
     before = control_opens;
@@ -359,39 +408,53 @@ int main(void) {
     before = image_drops;
     fire_timers(1000u);
     assert(image_drops == before && slot(&driver, "resource/icon.bin", 2) == 7);
-    control_config = "/resource/\t/data/canopus/themes/alternate2/\n";
+    control_config = "/resource/\t" RH_THEME_ROOT "alternate2/\n";
     fire_timers(1000u);
-    backend_expected = "data/canopus/themes/alternate2/icon.bin";
+    backend_expected = "data/quickapp/files/ng.lst.corona/themes/alternate2/icon.bin";
     assert(image_drops == before + 2 && slot(&driver, "resource/icon.bin", 2) == 7);
 
     /* Removed mappings are included in owner refresh, so the original path is
      * restored rather than leaving an image stuck on the previous theme. */
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr3\n";
-    control_config = "/other/\t/data/canopus/themes/other/\n";
+    control_config = "/other/\t" RH_THEME_ROOT "other/\n";
     fire_timers(1000u);
     backend_expected = "resource/icon.bin";
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
-    backend_expected = "data/canopus/themes/other/icon.bin";
+    backend_expected = "data/quickapp/files/ng.lst.corona/themes/other/icon.bin";
     assert(slot(&driver, "other/icon.bin", 2) == 7);
 
     /* A second revision arriving during a pending refresh waits until the first
      * retirement/owner transaction completes, then is applied in order. */
     redraw_ready = 0;
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr4\n";
-    control_config = "/resource/\t/data/canopus/themes/pending/\n";
+    control_config = "/resource/\t" RH_THEME_ROOT "pending/\n";
     fire_timers(1000u);
     assert(active_timers(50u) == 1);
     before = control_opens;
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr5\n";
-    control_config = "/resource/\t/data/canopus/themes/final/\n";
+    control_config = "/resource/\t" RH_THEME_ROOT "final/\n";
     fire_timers(1000u);
     assert(control_opens == before);
     redraw_ready = 1;
     fire_timers(50u);
     fire_timers(1000u);
-    backend_expected = "data/canopus/themes/final/icon.bin";
+    backend_expected = "data/quickapp/files/ng.lst.corona/themes/final/icon.bin";
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
     fire_timers(1000u);
+
+    /* Empty runtime config removes the last mapping and restores the base path. */
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tr6\n";
+    control_config = "# no active themes\n";
+    before = image_drops;
+    fire_timers(1000u);
+    backend_expected = "resource/icon.bin";
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(image_drops == before + 1);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 12) == 0 && u32(status + 8) == 1);
+    assert(d->activate(NULL) == 0);  /* a zero-rule resident snapshot can rebind */
+    fire_timers(1000u);  /* discard the superseded watcher handle */
+
     assert(allocations == frees + persistent_allocs && persistent_allocs == 1 &&
            active_timers(1000u) == 1 && !locked);
     puts("module registration, activation, config polling, atomic snapshots and targeted refresh passed");

@@ -93,8 +93,10 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
 int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     uint32_t data = load32(RH_FW_IMAGE_CACHE_SLOT);
     uint32_t header = load32(RH_FW_HEADER_CACHE_SLOT);
-    if (!mapping || !mapping->rules || !mapping->count ||
-        !cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
+    if (!mapping || mapping->count > RH_RULES ||
+        (mapping->count && !mapping->rules)) return -1;
+    if (!mapping->count) return 1;
+    if (!cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
         !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
     if (retire_cache(header, 0u, mapping)) return -1;
     return retire_cache(data, 4u, mapping);
@@ -151,9 +153,15 @@ static int live_object(uint32_t object) {
 }
 int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
                                       const struct rh_mapping_view *current) {
-    struct object_list *list = rh_platform_alloc(sizeof(*list));
+    struct object_list *list;
     uint32_t i;
-    if (!current || !current->rules || !current->count || !list) return -1;
+    if (!current || current->count > RH_RULES ||
+        (current->count && !current->rules) ||
+        (previous && (previous->count > RH_RULES ||
+                      (previous->count && !previous->rules)))) return -1;
+    if (!current->count && (!previous || !previous->count)) return 0;
+    list = rh_platform_alloc(sizeof(*list));
+    if (!list) return -1;
     list->count = list->overflow = 0;
     /* Native NULL-root walk includes registered screens on all displays (also
      * offscreen cached pages), not objects outside the LVGL screen trees. */

@@ -29,7 +29,7 @@ static int valid(const char *s) {
     return 1;
 }
 static int rule_ok(const struct rh_rule *r) {
-    static const char root[] = "/data/canopus/themes/";
+    static const char root[] = RH_THEME_ROOT;
     uint32_t a = length(r->source), b = length(r->destination);
     return valid(r->source) && valid(r->destination) &&
            r->source[a-1] == '/' && r->destination[b-1] == '/' &&

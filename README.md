@@ -9,16 +9,17 @@
 
 ## 已实现
 
-- 最多 64 条最长前缀目录映射，从 `/data/canopus/themes/mappings.tsv` 完整校验后提交。
-  路径最多 255 字节，配置最多 32 KiB。替代资源限于 `/data/canopus/themes/`
-  词法路径；拒绝路径穿越、重复规则和非法前缀，主题树不得含逃逸符号链接。
+- 最多 64 条最长前缀目录映射，从快应用私有文件根目录
+  `/data/quickapp/files/ng.lst.corona/mappings.tsv` 完整校验后提交。路径最多 255 字节，
+  配置最多 32 KiB。替代资源限于同根目录的 `themes/` 子树；拒绝路径穿越、重复规则和非法
+  前缀，主题树不得含逃逸符号链接。Manager 对应 URI 根目录为 `internal://files/`。
 - 只 Hook 所选目标的 `/` LVGL POSIX driver、读模式 2；处理相对 driver 路径和
   `fd + 1` 句柄。替代文件打不开时退回原资源；成功打开但解码失败不自动回退。
 - 已知 callback 才允许安装/重绑定；短临界区发布状态。激活后每秒检查
-  `/data/files/ng.lst.corona/reload.request`，信号变化后读取同目录 `mappings.tsv`；
+  `/data/quickapp/files/ng.lst.corona/reload.request`，信号变化后读取同目录 `mappings.tsv`；
   完整校验后通过双规则快照切换，错误或部分配置保留 last-known-good。双快照增加
   32 KiB 常驻 Umem；读取变更配置时最多额外申请 32 KiB scratch，内存不足时下轮重试。
-  需要先有 `/data/canopus/themes/mappings.tsv` 以安装 hook；缺少启动配置时不启动轮询。
+  配置缺失或为空时以零规则启动透明 pass-through hook 和轮询器，不重定向资源；之后写入映射并更新信号即可加载主题。
 - **.139/.155 定向图片退休与 owner 刷新：** 两个精确目标现在都使用逐键
   `lv_cache_drop` 退休命中映射的文件 key，不做全局 cache drop，也不动其他路径、驱动、
   内存描述符或符号源。持有项仅失效/摘链，payload 由原生最后一次引用释放。遍历前检查
@@ -181,9 +182,9 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 不能单凭“使用包内公钥验签成功”确认发布来源。
 
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
-启动配置文件不存在时激活为成功 no-op，不安装 hook 或刷新 UI；补齐后再次激活即可
-重试。空配置、非法配置及其他读取错误仍会报错。启动成功后，控制目录的变更标记格式为
-`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。字体注册表不跟随运行时规则更新，且当前 Manager 仍是路径探测页，尚未验证它能写入这个 native 可见目录。构建需要含已批准 errno veneer
+启动配置文件不存在、为空或仅含注释时，模块以零规则启动 pass-through hook 和轮询器，不重定向资源或刷新 UI；之后写入映射并更新信号即可加载主题。模块运行后也可用 0 条规则清除全部映射。非法配置及其他读取错误会保留
+last-known-good。控制目录的变更标记格式为
+`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。字体注册表不跟随运行时规则更新。Manager 现在提供三个测试按钮：安装内置设置图标、删除该测试映射与图标、写入重载信号；安装/删除后需手动点重载，且 Manager 无法确认模块是否已应用。它通过 `internal://files/` 访问同一 app-scoped 文件区，仍不是通用配置编辑器或资源上传器。构建需要含已批准 errno veneer
 的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、

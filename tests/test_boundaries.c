@@ -37,50 +37,50 @@ int main(void) {
     uint32_t count, i;
     struct input input;
     rh_open_fn slot = original, second = original;
-    rule("/resource/", "/data/canopus/themes/base/");
+    rule("/resource/", RH_THEME_ROOT "base/");
     assert(!rh_configure(&state, rules, 1));
-    rejected("relative/", "/data/canopus/themes/base/");
-    rejected("/resource", "/data/canopus/themes/base/");
-    rejected("/resource/", "/data/canopus/themes-evil/");
-    rejected("/resource/", "/data/canopus/themes/../outside/");
-    rejected("/resource/", "/data/canopus/themes/./base/");
-    rejected("/resource/", "/data/canopus/themes//base/");
-    rejected("/resource/", "/data/canopus/themes/a\\b/");
-    rejected("/resource/", "/data/canopus/themes/a:b/");
-    rejected("/resource/", "/data/canopus/themes/a\177/");
+    rejected("relative/", RH_THEME_ROOT "base/");
+    rejected("/resource", RH_THEME_ROOT "base/");
+    rejected("/resource/", "/data/quickapp/files/ng.lst.corona/themes-evil/");
+    rejected("/resource/", RH_THEME_ROOT "../outside/");
+    rejected("/resource/", RH_THEME_ROOT "./base/");
+    rejected("/resource/", RH_THEME_ROOT "/base/");
+    rejected("/resource/", RH_THEME_ROOT "a\\b/");
+    rejected("/resource/", RH_THEME_ROOT "a:b/");
+    rejected("/resource/", RH_THEME_ROOT "a\177/");
     rejected("/resource/", "");
-    rejected("", "/data/canopus/themes/base/");
+    rejected("", RH_THEME_ROOT "base/");
     for (i = 1; i < 32; i++) {
         strcpy(path, "/resource/x/"); path[10] = (char)i;
-        rejected(path, "/data/canopus/themes/base/");
+        rejected(path, RH_THEME_ROOT "base/");
     }
-    rule("/resource/", "/data/canopus/themes/base/");
+    rule("/resource/", RH_THEME_ROOT "base/");
     rules[1] = rules[0];
     assert(rh_configure(&state, rules, 2) == -3);
     assert(rh_configure(&state, rules, RH_RULES + 1) < 0);
     for (i = 0; i < RH_RULES; i++) {
         snprintf(rules[i].source, RH_PATH, "/resource/%u/", i);
-        strcpy(rules[i].destination, "/data/canopus/themes/base/");
+        strcpy(rules[i].destination, RH_THEME_ROOT "base/");
     }
     assert(!rh_configure(&state, rules, RH_RULES));
     assert(rh_resolve(&state, "/resource/63/x", out) == 1);
-    rule("/", "/data/canopus/themes/base/");
+    rule("/", RH_THEME_ROOT "base/");
     assert(!rh_configure(&state, rules, 1));
     assert(rh_resolve(&state, "/resource/x", out) == 1);
-    assert(!strcmp(out, "/data/canopus/themes/base/resource/x"));
+    assert(!strcmp(out, RH_THEME_ROOT "base/resource/x"));
     memset(path, 'x', sizeof(path)); path[0] = '/'; path[RH_PATH-1] = 0;
     assert(rh_resolve(&state, path, out) == -2);
     assert(rh_resolve(&state, NULL, out) < 0);
     assert(rh_resolve(&state, "/x", NULL) < 0);
 
     count = 99;
-    assert(!rh_parse_config("/a/\t/data/canopus/themes/a/", sizeof("/a/\t/data/canopus/themes/a/") - 1, rules, RH_RULES, &count));
+    assert(!rh_parse_config("/a/\t" RH_THEME_ROOT "a/", sizeof("/a/\t" RH_THEME_ROOT "a/") - 1, rules, RH_RULES, &count));
     assert(count == 1 && !rh_configure(&state, rules, count));
     count = 99;
     assert(rh_parse_config("#\0x", 3, rules, RH_RULES, &count) < 0 && count == 99);
     assert(rh_parse_config("/a/\t\n", 5, rules, RH_RULES, &count) < 0);
     assert(rh_parse_config("\t/d/\n", 5, rules, RH_RULES, &count) < 0);
-    assert(!rh_parse_config("/a/\t/data/canopus/themes/a/\textra", sizeof("/a/\t/data/canopus/themes/a/\textra") - 1, rules, RH_RULES, &count));
+    assert(!rh_parse_config("/a/\t" RH_THEME_ROOT "a/\textra", sizeof("/a/\t" RH_THEME_ROOT "a/\textra") - 1, rules, RH_RULES, &count));
     assert(rh_configure(&state, rules, count) < 0);
 
     memset(text, '#', sizeof(text));
@@ -95,7 +95,7 @@ int main(void) {
     assert(rh_read_config(&state, read_input, &input, buffer, sizeof(buffer), rules) == -5);
     assert(!memcmp(&state, &snapshot, sizeof(state)));
 
-    rule("/resource/", "/data/canopus/themes/base/");
+    rule("/resource/", RH_THEME_ROOT "base/");
     assert(!rh_configure(&state, rules, 1));
     assert(!rh_reinstall_posix(&state, &state, &slot, original, wrapper));
     assert(rh_reinstall_posix(&state, &snapshot, &second, original, wrapper) < 0);

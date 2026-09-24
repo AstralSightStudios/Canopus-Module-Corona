@@ -4,10 +4,9 @@
 
 #define RH_MODULE_ID "resource_hook"
 #define RH_VERSION "0.3.0"
-/* Keep the native control directory suffix aligned with the Manager package.
- * QJS access to this absolute path still needs device-level visibility testing. */
-#define RH_CONTROL_CONFIG "/data/files/ng.lst.corona/mappings.tsv"
-#define RH_CONTROL_SIGNAL "/data/files/ng.lst.corona/reload.request"
+/* `internal://files/` resolves to this app-scoped native path on Band 11. */
+#define RH_CONTROL_CONFIG RH_CONFIG_PATH
+#define RH_CONTROL_SIGNAL RH_RELOAD_SIGNAL_PATH
 #define RH_RELOAD_PREFIX "resource-hook-reload-v1\t"
 #define RH_RELOAD_SIGNAL_MAX 128u
 #define RH_RELOAD_POLL_MS 1000u
@@ -261,7 +260,7 @@ static void poll_control_file(void) {
                                rule_banks[inactive], &count);
     rh_platform_close(fd);
     rh_platform_free(text);
-    if (rc || !count) {
+    if (rc) {
         irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
         return;
     }
@@ -323,30 +322,26 @@ static int schedule_watch_timer(void) {
 static int32_t prepare(const struct canopus_context_v1 *c) {
     struct rh_rule *staging;
     char *text;
-    int fd, rc;
+    int fd, rc = 0;
     (void)c;
     if (S.installed) return -2004;
-    fd = rh_platform_open("/data/canopus/themes/mappings.tsv", 1);
+    fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
     if (fd < 0) {
         if (rh_platform_errno() != RH_ENOENT) return -2005;
-        /* No published hook exists here. Discard any prepared snapshot and
-         * leave configuration retryable on the next activation. */
+        /* Start with an empty snapshot; activation will keep the pass-through
+         * hook and watcher resident so a later theme can be loaded by signal. */
         S.count = 0;
-        rule_counts[0] = 0;
-        if (rule_banks[1]) rule_counts[1] = 0;
-        configured = 0;
-        return 0;
+    } else {
+        staging = rh_platform_alloc(sizeof(*staging) * RH_RULES + RH_CONFIG_BYTES);
+        if (!staging) rc = -2006;
+        else {
+            text = (char *)(staging + RH_RULES);
+            rc = rh_read_config(&S, config_read, &fd, text, RH_CONFIG_BYTES, staging);
+            rh_platform_free(staging);
+            if (rc) rc = -2007;
+        }
+        rh_platform_close(fd);
     }
-    staging = rh_platform_alloc(sizeof(*staging) * RH_RULES + RH_CONFIG_BYTES);
-    if (!staging) rc = -2006;
-    else {
-        text = (char *)(staging + RH_RULES);
-        rc = rh_read_config(&S, config_read, &fd, text, RH_CONFIG_BYTES, staging);
-        rh_platform_free(staging);
-        if (rc) rc = -2007;
-    }
-    rh_platform_close(fd);
-    if (!rc && !S.count) rc = -2008;
     if (!rc && !rule_banks[1]) {
         rule_banks[1] = rh_platform_alloc(sizeof(struct rh_rule) * RH_RULES);
         if (!rule_banks[1]) rc = -2013;
@@ -374,20 +369,21 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     if (!configured) {
         rc = prepare(c);
         if (rc) return rc;
-        /* Optional configuration absent: no callback, timer or UI changes. */
+        /* Defensive path if a prepare implementation declines to publish state. */
         if (!configured) return 0;
     }
     /* No allocation or firmware I/O is allowed while publishing the callback.
      * On the single-core target, prevent scheduling between state and slot. */
     irq = rh_platform_lock();
     slot = rh_platform_slot();
-    if (!S.count || !rh_platform_driver_valid()) rc = -2008;
+    if (active_rule_bank > 1u || !configured || !rule_banks[active_rule_bank] ||
+        !rh_platform_driver_valid()) rc = -2008;
     else if (!slot || (*slot != rh_platform_original() && *slot != rh_wrapper)) rc = -2009;
     else if (rh_reinstall_posix(&S, rh_platform_driver(), slot,
                                rh_platform_original(), rh_wrapper)) rc = -2010;
     rh_platform_unlock(irq);
     if (!rc) {
-        int refresh_rc = request_refresh();
+        int refresh_rc = S.count || refresh_pending ? request_refresh() : 0;
         int watch_rc = schedule_watch_timer();
         rc = refresh_rc ? refresh_rc : watch_rc;
     }

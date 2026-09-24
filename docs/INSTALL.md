@@ -13,9 +13,10 @@
 配置后，自定义**设置启动器图标实际可见**。该流程包含 execute 恢复路径与 `mkdir`
 目录创建；这是历史测试流程记录，不是通用安装器已支持这些操作的承诺。
 本仓库不整合该临时安装器；后续资源传输使用其他方式。
-本次原始资源路径为 `/resource/app/settings/launcher.bin`，替代文件为
-`/data/canopus/themes/current/app/settings/launcher.bin`（112×112 I8）。映射配置入口为
-`/data/canopus/themes/mappings.tsv`；不要把临时安装器的本地目录当作设备主题路径。
+本次历史测试把 `/resource/app/settings/launcher.bin` 映射到旧目录
+`/data/canopus/themes/current/app/settings/launcher.bin`，配置位于旧路径
+`/data/canopus/themes/mappings.tsv`。当前配置和主题目录已迁至
+`/data/quickapp/files/ng.lst.corona/`；这条历史测试不代表新目录已在所有固件目标上重新验收。
 本次交付 ELF 的 SHA-256 为
 `3b43d674390459457d4b302c811d516a4518cd4fae599ae8f85949a05abc27fe`；
 该值用于识别测试交付，不代表后续构建自动获得相同实机结论。
@@ -57,12 +58,13 @@ shasum -a 256 -c SHA256SUMS
 需要提取或编辑图片时，先阅读[资源图片工具说明](../tools/RESOURCE_IMAGE.md)：
 工具仅支持受限 LVGL v9 I8 格式，先做 PNG 预览，再传输 BIN；它不负责模块安装或激活。
 
-1. 备份已有 `/data/canopus/themes/mappings.tsv` 和原主题文件。
-2. 在 `/data/canopus/themes/current/` 下上传兼容固件的资源文件。
+1. 备份快应用文件区中的 `mappings.tsv` 和原主题文件。Manager URI 根为
+   `internal://files/`，模块原生文件根为 `/data/quickapp/files/ng.lst.corona/`。
+2. 在 `/data/quickapp/files/ng.lst.corona/themes/current/` 下放置兼容固件的资源文件。
    例如 `/resource/icons/a.bin` 对应
-   `/data/canopus/themes/current/icons/a.bin`。
-3. 检查 `mappings.tsv.example`，按实际资源源路径修改，然后上传为
-   `/data/canopus/themes/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
+   `/data/quickapp/files/ng.lst.corona/themes/current/icons/a.bin`。
+3. 检查 `mappings.tsv.example`，按实际资源源路径修改，然后保存为
+   `/data/quickapp/files/ng.lst.corona/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
    不意味着固件的所有字体和图片都经过这个目录。
 4. 使用兼容 Manager 的已验签安装流程导入 ELF 和 receipt；对应的 inbox
    文件名为 `resource_hook.ko` 和 `resource_hook.cmi`，目录是
@@ -162,15 +164,12 @@ RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
 旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
 miwear。
 
-当前 Manager 没有主题选择器、资源上传页面，也没有展示模块 RHQ1 计数器
+当前 Manager 仅提供固定设置图标测试主题的安装/删除/重载按钮，不是通用主题选择器或资源上传页面，也没有展示模块 RHQ1 计数器
 （“立即激活”只负责加载激活模块，不负责传输主题文件）。
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
-配置文件或父目录不存在（ENOENT）时，激活成功但不执行任何资源操作：不安装
-hook、不创建刷新定时器、不刷新 UI，继续使用原始 driver。补齐配置后再次激活
-会重试读取。配置存在时必须至少包含一条规则；空配置、超长、非法内容以及
-权限或 I/O 错误仍使激活失败。替代文件不存在/无法打开时退回原资源。
+配置文件或父目录不存在（ENOENT），以及配置为空/仅含注释时，激活成功并安装零规则 pass-through hook 与轮询器：资源仍使用原始 driver，不重定向、不刷新 UI；之后写入有效映射并更新 reload 信号即可加载主题。超长、非法内容以及权限或 I/O 错误仍使激活失败。运行后热更新也允许 0 条规则以清除映射。替代文件不存在/无法打开时退回原资源。
 成功打开但格式错误的资源**不会**自动退回；打开成功不等于解码成功。
 
 ## 先在电脑上检查配置
@@ -186,7 +185,7 @@ sh scripts/build.sh xiaomi-band-11-4.100.155
 
 ```text
 Valid configuration: 1 rule(s)
-Mapped path: /data/canopus/themes/current/icons/a.bin
+Mapped path: /data/quickapp/files/ng.lst.corona/themes/current/icons/a.bin
 ```
 
 工具直接使用设备模块的 C 解析器和映射函数，不是另一份近似校验逻辑。
@@ -195,15 +194,15 @@ Mapped path: /data/canopus/themes/current/icons/a.bin
 例如要映射整个 `/resource/icons/` 目录，在电脑上生成真实 TAB 的配置：
 
 ```sh
-printf '/resource/icons/\t/data/canopus/themes/my-theme/icons/\n' > mappings.tsv
+printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/icons/\n' > mappings.tsv
 ./build/check-config mappings.tsv /resource/icons/a.bin
 ```
 
 然后用已有、已授权的设备文件传输工具创建父目录并分别传输：
 
 ```text
-本地 mappings.tsv       -> /data/canopus/themes/mappings.tsv
-本地兼容格式的 a.bin    -> /data/canopus/themes/my-theme/icons/a.bin
+本地 mappings.tsv       -> /data/quickapp/files/ng.lst.corona/mappings.tsv
+本地兼容格式的 a.bin    -> /data/quickapp/files/ng.lst.corona/themes/my-theme/icons/a.bin
 ```
 
 这里的 `a.bin` 是路径示例，不是包内附带的图片。原始资源路径和格式必须先
@@ -215,26 +214,25 @@ printf '/resource/icons/\t/data/canopus/themes/my-theme/icons/\n' > mappings.tsv
 - LF 或 CRLF；允许末行无换行；空行以及首字节 `#` 的注释行被忽略。
 - 最多 64 条；文件最多 32768 字节；每个路径最多 255 字节（不含 NUL）。
 - 源和目标必须是绝对目录前缀，末尾 `/` 不可省略。
-- 目标必须位于 `/data/canopus/themes/`；拒绝 `.`、`..`、重复分隔符、
+- 目标必须位于 `/data/quickapp/files/ng.lst.corona/themes/`；拒绝 `.`、`..`、重复分隔符、
   反斜杠、冒号、ASCII 控制字符和 DEL。重复源前缀也会拒绝整份配置。
 - 最长源前缀优先；拼接结果超过 255 字节时保持原始路径；不递归映射。
 - 只重定向 LVGL POSIX driver 的读模式（mode=2），不改变写入/读写操作。
 - 路径约束是**词法约束**，不是文件系统沙箱；不要在主题树下放置指向其他
   位置的符号链接。配置、主题文件及其父目录只应允许可信主体修改。
 
-首次激活仍需 `/data/canopus/themes/mappings.tsv` 提供有效启动配置；缺配置的 no-op
-不会安装 hook，也不会启动轮询。安装后每秒由 UI-owner timer 检查
-`/data/files/ng.lst.corona/reload.request`。只有信号内容变化时才读取同目录
+首次激活读取 `/data/quickapp/files/ng.lst.corona/mappings.tsv`；缺配置、空配置或仅注释配置会以零规则安装透明 hook，并启动轮询，资源仍透传到原始 driver。有效规则配置同样安装 hook；激活后每秒由 UI-owner timer 检查
+`/data/quickapp/files/ng.lst.corona/reload.request`。Manager 使用 `internal://files/`；Vela 按
+当前 app ID 将其映射到上述 native 文件根。只有信号内容变化时才读取同目录
 `mappings.tsv`；接受的格式为 `resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`。
-新配置必须完整读取、非空并通过与启动配置相同的校验；读取失败、部分/非法配置会保留
-last-known-good，并在后续轮询重试。更新使用双规则 bank 原子切换，并在定向刷新中同时
+新配置必须完整读取并通过校验；运行时允许 0 条规则以清除全部映射。零规则配置会保持透明 hook 和轮询器常驻。读取失败或非法配置会保留 last-known-good，并在后续轮询重试。更新使用双规则 bank 原子切换，并在定向刷新中同时
 考虑旧、新规则，因此删除映射也会刷新回原始资源。第二份规则 bank 增加 32 KiB 常驻
 Umem；每次解析变更配置最多另需 32 KiB scratch，分配失败会保留当前规则并在后续轮询重试。
 运行时规则更新不会重新映射字体注册表，不代表完整 UI/字体热重载。
 
-这只实现了模块端消费者。目录后缀已统一为包标识 `ng.lst.corona`，但当前 Manager 页面仍是
-路径探测器，尚未实机验证 `system.file` 与 native 模块是否能看到同一物理文件；名称统一不绕过
-Vela 对绝对路径的处理。stop/deactivate 仍需完整重启卸载，不支持热卸载。
+Manager 的三个按钮会把 `settings-launcher.bin` 写到 `internal://files/themes/current/app/settings/launcher.bin`，安装或删除 `/resource/app/settings/` 对应映射，并由“重载资源”按钮写入 `internal://files/reload.request`。该页面只管理这个固定测试主题，不是通用配置编辑器或资源上传器；重载按钮也无法确认模块是否已应用。模块侧使用 native 绝对路径，Manager 侧使用
+`internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
+stop/deactivate 仍需完整重启卸载，不支持热卸载。
 
 ## 状态与错误
 
@@ -262,10 +260,10 @@ query 需要至少 40 字节可写剩余空间，成功后发布 writer。状态
 | 返回值 | 含义 |
 |---|---|
 | -2004 | 已安装，不能重新 prepare |
-| -2005 | 配置文件打开失败（不含 ENOENT；不存在时为成功 no-op） |
+| -2005 | 配置文件打开失败（不含 ENOENT；不存在时以零规则 pass-through 模式启动） |
 | -2006 | 临时内存不可用 |
 | -2007 | 配置读取/解析/校验失败 |
-| -2008 | 空规则或 driver 标识/布局不符 |
+| -2008 | driver 标识/布局不符；空规则以 pass-through 模式启动，不触发此错误 |
 | -2009 | 原始 callback slot 未知，不覆盖 |
 | -2010 | 重绑定状态不一致 |
 | -2011 | 刷新定时器分配失败（重定向已驻留，可再次激活重试） |

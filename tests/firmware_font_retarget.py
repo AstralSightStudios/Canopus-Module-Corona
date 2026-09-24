@@ -102,7 +102,7 @@ class FontRegistry(unittest.TestCase):
     def test_add_path_alone_cannot_override_a_registered_family(self):
         """The trap: add_path appends at the tail, lookup takes the first match."""
         self.add('MiSans-Regular', '/tmp/MiSans-Regular.ttf')
-        themed = '/data/canopus/themes/current/font/MiSans-Regular.ttf'
+        themed = '/data/quickapp/files/ng.lst.corona/themes/current/font/MiSans-Regular.ttf'
         self.assertNotEqual(self.add('MiSans-Regular', themed), 0)  # reports success
         self.assertEqual(len(self.entries()), 2)                    # and did append
         # ...yet the startup entry still wins, so the theme would never be used.
@@ -114,7 +114,7 @@ class FontRegistry(unittest.TestCase):
         self.add('MiSans-Demibold', '/tmp/MiSans-Demibold.ttf')
         node, name, path = self.entries()[0]
         self.assertEqual((name, path), ('MiSans-Regular', '/tmp/MiSans-Regular.ttf'))
-        themed = '/data/canopus/themes/current/font/MiSans-Regular.ttf'
+        themed = '/data/quickapp/files/ng.lst.corona/themes/current/font/MiSans-Regular.ttf'
         # The name string is freed by the removal, so it must be copied first.
         copied = self.string(name)
         self.m.call(REMOVE_PATH, node)

@@ -42,13 +42,13 @@ produce a byte-identical original BIN, including duplicate/unused palette entrie
 Upload the edited BIN as:
 
 ```text
-/data/canopus/themes/current/app/common/icon/confirm.bin
+/data/quickapp/files/ng.lst.corona/themes/current/app/common/icon/confirm.bin
 ```
 
 Use the following directory mapping (generate a literal TAB):
 
 ```sh
-printf '/resource/app/common/icon/\t/data/canopus/themes/current/app/common/icon/\n' > mappings.tsv
+printf '/resource/app/common/icon/\t/data/quickapp/files/ng.lst.corona/themes/current/app/common/icon/\n' > mappings.tsv
 ```
 
 Follow [INSTALL.md](../docs/INSTALL.md) for configuration validation, installation

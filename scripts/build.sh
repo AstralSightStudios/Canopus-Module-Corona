@@ -52,6 +52,7 @@ done
     "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
     "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module"
 "$ROOT/build/test_module"
+"$ROOT/build/test_module" --empty-startup
 "$CC" -std=c11 -Wall -Wextra -Werror -I"$ROOT/include" \
     "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" "$ROOT/tools/check_config.c" \
     -o "$ROOT/build/check-config"

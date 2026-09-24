@@ -18,8 +18,8 @@ class Paths(unittest.TestCase):
             seen.append((m.string(m.reg(0)),m.reg(1)))
             return 0 # descriptor zero is valid; LVGL must return one
         hook(m, 0x0c342c54, opened)
-        m.uc.mem_write(path,b'data/canopus/themes/a.bin\0')
+        m.uc.mem_write(path,b'data/quickapp/files/ng.lst.corona/themes/a.bin\0')
         m.uc.reg_write(UC_ARM_REG_R1,path);m.uc.reg_write(UC_ARM_REG_R2,2)
         self.assertEqual(m.call(fw(0x0c3a6194),fw(0x200bd3b8)),1)
-        self.assertEqual(seen,[('/data/canopus/themes/a.bin',1)])
+        self.assertEqual(seen,[('/data/quickapp/files/ng.lst.corona/themes/a.bin',1)])
 if __name__=='__main__':unittest.main()

@@ -22,6 +22,8 @@ from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
 
 PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
     ROOT / 'build/payload-0.3.0' / TARGET))
+CONFIG_PATH = '/data/quickapp/files/ng.lst.corona/mappings.tsv'
+THEME_ROOT = '/data/quickapp/files/ng.lst.corona/themes/'
 
 
 class Rebind(unittest.TestCase):
@@ -48,8 +50,8 @@ class Rebind(unittest.TestCase):
         m.disk['/data/canopus/registry.bin'] = bytes(record)
         m.disk['/data/canopus/inbox/resource_hook.cmi'] = receipt
         m.disk['/data/canopus/inbox/resource_hook.ko'] = elf
-        m.disk['/data/canopus/themes/mappings.tsv'] = b'/resource/\t/data/canopus/themes/current/\n'
-        m.disk['/data/canopus/themes/current/a.bin'] = b'mapped file'
+        m.disk[CONFIG_PATH] = f'/resource/\t{THEME_ROOT}current/\n'.encode()
+        m.disk[THEME_ROOT + 'current/a.bin'] = b'mapped file'
         self.descriptor = None
         def write():
             ptr, count = m.reg(1), m.reg(2)
@@ -149,7 +151,7 @@ class Rebind(unittest.TestCase):
         self.assertTrue(0x1c000000 <= hook < 0x1d000000, hex(hook))
         resident = {p: n for p, n in m.allocations.items() if p not in m.frees}
         # A changed on-disk file must not mutate the locked live mappings.
-        m.disk['/data/canopus/themes/mappings.tsv'] = b'bad config'
+        m.disk[CONFIG_PATH] = b'bad config'
         m.word(0x200bd3c4, 0xc3a6195)  # model the store performed by lv_init
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(m.word(0x200bd3c4), hook)
@@ -160,7 +162,7 @@ class Rebind(unittest.TestCase):
         m.uc.reg_write(UC_ARM_REG_R2, 2)
         handle = m.call(hook, 0x200bd3b8)
         self.assertGreater(handle, 0)
-        self.assertEqual(m.files[handle - 1][2], '/data/canopus/themes/current/a.bin')
+        self.assertEqual(m.files[handle - 1][2], THEME_ROOT + 'current/a.bin')
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(m.word(0x200bd3c4), hook)
 
@@ -186,7 +188,7 @@ class Rebind(unittest.TestCase):
     def test_existing_open_handle_is_not_replaced_by_activation(self):
         m = self.m
         m.disk['/data/canopus/original/a.bin'] = b'original file'
-        m.disk['/data/canopus/themes/mappings.tsv'] = b'/data/canopus/original/\t/data/canopus/themes/current/\n'
+        m.disk[CONFIG_PATH] = f'/data/canopus/original/\t{THEME_ROOT}current/\n'.encode()
         path = 0x3c710000
         m.uc.mem_write(path, b'data/canopus/original/a.bin\0')
         m.uc.reg_write(UC_ARM_REG_R1, path)
@@ -199,7 +201,7 @@ class Rebind(unittest.TestCase):
         m.uc.reg_write(UC_ARM_REG_R2, 2)
         new_handle = m.call(m.word(0x200bd3c4), 0x200bd3b8)
         self.assertNotEqual(old_handle, new_handle)
-        self.assertEqual(m.files[new_handle - 1][2], '/data/canopus/themes/current/a.bin')
+        self.assertEqual(m.files[new_handle - 1][2], THEME_ROOT + 'current/a.bin')
 
     def test_query_publishes_status_and_rejects_short_buffer(self):
         self.assertEqual(self.restore(), (5, 0))
@@ -374,7 +376,7 @@ class Rebind(unittest.TestCase):
 
     def test_missing_config_keeps_original_driver(self):
         m = self.m
-        del m.disk['/data/canopus/themes/mappings.tsv']
+        del m.disk[CONFIG_PATH]
         # The fixture models VFS open; model its errno storage as well.
         errno_cell = 0x3c732000
         m.word(errno_cell, 2)
@@ -384,12 +386,12 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.status_words()[2:], (0,) * 8)
         self.assertEqual(self.timer_creates, 0)
         # No-op must not cache absence for the lifetime of the resident image.
-        m.disk['/data/canopus/themes/mappings.tsv'] = b'/resource/\t/data/canopus/themes/current/\n'
+        m.disk[CONFIG_PATH] = f'/resource/\t{THEME_ROOT}current/\n'.encode()
         self.assertEqual(self.restore(), (5, 0))
         self.assertNotEqual(m.word(0x200bd3c4), 0xc3a6195)
 
     def test_config_open_io_failure_is_not_noop(self):
-        del self.m.disk['/data/canopus/themes/mappings.tsv']
+        del self.m.disk[CONFIG_PATH]
         errno_cell = 0x3c732000
         self.m.word(errno_cell, 5)
         self.bind(0xc349538, lambda: errno_cell)
