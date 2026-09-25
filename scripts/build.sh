@@ -12,6 +12,17 @@ case "$TARGET_ID" in
     xiaomi-band-11-4.100.155) TARGET_DEFINE=-DRH_TARGET_155=1 ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
+FONT_EXPERIMENT=${RH_EXPERIMENTAL_FONT_RELOAD:-0}
+case "$FONT_EXPERIMENT" in
+    0) FONT_DEFINE=; ARTIFACT=resource-hook.elf ;;
+    1)
+        [ "$TARGET_ID" = xiaomi-band-11-4.100.155 ] || {
+            printf 'Experimental font reload supports only .155.\n' >&2; exit 1;
+        }
+        FONT_DEFINE=-DRH_EXPERIMENTAL_FONT_RELOAD=1
+        ARTIFACT=resource-hook-font-experimental.elf ;;
+    *) printf 'RH_EXPERIMENTAL_FONT_RELOAD must be 0 or 1.\n' >&2; exit 1 ;;
+esac
 CC=${CC:-cc}
 CLANG=${CLANG:-clang}
 LD_LLD=${LD_LLD:-ld.lld}
@@ -53,16 +64,29 @@ done
     "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module"
 "$ROOT/build/test_module"
 "$ROOT/build/test_module" --empty-startup
+# Independently exercise the opt-in module scheduler and checked transaction.
+# These are host models, not hardware/GPU acceptance tests.
+"$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -DRH_TARGET_155=1 -DRH_EXPERIMENTAL_FONT_RELOAD=1 \
+    -I"$ROOT/include" -I"$SDK/sdk/c" "$ROOT/src/module.c" \
+    "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+    "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
+    -o "$ROOT/build/test_module_fonts"
+"$ROOT/build/test_module_fonts" --experimental-fonts
+"$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -I"$ROOT/include" "$ROOT/tests/test_font_reload_155.c" "$ROOT/src/resource_hook.c" \
+    -o "$ROOT/build/test_font_reload_155"
+"$ROOT/build/test_font_reload_155"
 "$CC" -std=c11 -Wall -Wextra -Werror -I"$ROOT/include" \
     "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" "$ROOT/tools/check_config.c" \
     -o "$ROOT/build/check-config"
 python3 "$ROOT/tests/test_config_cli.py"
 python3 "$ROOT/tests/test_target_receipts.py"
 python3 "$ROOT/tests/firmware_support_test.py"
-for name in module resource_hook config platform_band11; do
+for name in module resource_hook config platform_band11 font_reload_155; do
     "$CLANG" -Wall -Wextra -Werror --target=arm-none-eabi -mcpu=cortex-m33 -mthumb \
         -mfloat-abi=soft -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
-        -Os $TARGET_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
+        -Os $TARGET_DEFINE $FONT_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
         -I"$SDK/targets/$TARGET_ID/generated" -I"$ROOT/include" \
         -c "$ROOT/src/$name.c" -o "$ROOT/build/$name.o"
 done
@@ -71,7 +95,11 @@ done
     -Os -I"$SDK/sdk/c" -c "$SDK/runtime/control/canopus_control.c" -o "$ROOT/build/control.o"
 "$LD_LLD" -r -T "$SDK/scripts/canopus_supervisor_sections.ld" \
     "$ROOT/build/module.o" "$ROOT/build/resource_hook.o" "$ROOT/build/config.o" \
-    "$ROOT/build/platform_band11.o" "$ROOT/build/control.o" -o "$ROOT/build/resource-hook.elf"
-"$CANOPUS_CLI" verify "$ROOT/build/resource-hook.elf" \
+    "$ROOT/build/platform_band11.o" "$ROOT/build/font_reload_155.o" \
+    "$ROOT/build/control.o" -o "$ROOT/build/$ARTIFACT"
+"$CANOPUS_CLI" verify "$ROOT/build/$ARTIFACT" \
     --target "$TARGET_ID" --targets-dir "$SDK/targets"
-printf 'Built resource-hook.elf for %s. Static validation only; physical-device acceptance remains required.\n' "$TARGET_ID"
+printf 'Built %s for %s. Static validation only; physical-device acceptance remains required.\n' "$ARTIFACT" "$TARGET_ID"
+if [ "$FONT_EXPERIMENT" = 1 ]; then
+    printf 'EXPERIMENTAL: healthy serialized UI only; GPU recovery/restart safety is NOT verified.\n'
+fi

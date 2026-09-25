@@ -22,6 +22,20 @@ static int driver;
 static const char *backend_expected = "data/quickapp/files/ng.lst.corona/themes/current/icon.bin";
 struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+static unsigned in_ui_timer, font_calls, font_disabled, font_changes;
+static int font_rc;
+static char last_font_path[RH_PATH];
+int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
+    assert(in_ui_timer && !locked && current && changed);
+    font_calls++;
+    last_font_path[0] = 0;
+    (void)rh_resolve_view(current, "/resource/font/MiSans-Regular.ttf", last_font_path);
+    *changed = !font_disabled && !font_rc ? font_changes : 0;
+    return font_disabled ? -2099 : font_rc;
+}
+void rh_font_reload_disable(void) { assert(!locked); font_disabled++; }
+#endif
 static int backend(void *d, const char *p, int mode) {
     assert(d == &driver && mode == 2);
     assert(!strcmp(p, backend_expected));
@@ -145,7 +159,15 @@ static void fire_timers(uint32_t interval) {
     unsigned i;
     for (i = 0; i < sizeof(mock_timers) / sizeof(mock_timers[0]); i++) {
         struct mock_timer *timer = &mock_timers[i];
-        if (timer->active && timer->interval == interval) timer->callback(timer);
+        if (timer->active && timer->interval == interval) {
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+            in_ui_timer = 1;
+#endif
+            timer->callback(timer);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+            in_ui_timer = 0;
+#endif
+        }
     }
 }
 static unsigned active_timers(uint32_t interval) {
@@ -225,7 +247,101 @@ static int test_empty_startup_then_theme_reload(void) {
     puts("empty startup stays resident and applies a later theme reload");
     return 0;
 }
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+static void font_status(int32_t result, uint32_t pending, uint32_t changed) {
+    struct canopus_status_writer_v1 w;
+    unsigned char status[48];
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!canopus_module_descriptor.query(&w));
+    assert(w.used == 48 && u32(status + 4) == 6);
+    assert((int32_t)u32(status + 40) == result && u32(status + 44) == pending);
+    assert(u32(status + 36) == changed);
+    assert(!canopus_status_writer_init(&w, status, 47));
+    assert(canopus_module_descriptor.query(&w) == -1 && !w.used);
+}
+static int test_experimental_font_integration(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned before;
+    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0-font-exp"));
+    font_status(0, 0, 0);
+    font_rc = 1;
+    assert(d->activate(NULL) == 0);
+    assert(!font_calls && !retargets && !redraws && active_timers(50u) == 1);
+    font_status(1, 1, 0);
+    fire_timers(50u);
+    assert(font_calls == 1 && !redraws);
+    before = font_calls;
+    assert(d->activate(NULL) == 0 && font_calls == before);
+    font_rc = 0; font_changes = 3;
+    fire_timers(50u);
+    assert(redraws == 1 && !active_timers(50u));
+    assert(!strcmp(last_font_path, THEMED_FONT));
+    font_status(0, 0, 3);
+    fire_timers(1000u);
+    assert(active_timers(1000u) == 1);
+
+    control_config = "/resource/\t" RH_THEME_ROOT "font-g2/\n";
+    control_signal = "resource-hook-reload-v1\tfont-g2\n";
+    font_rc = 1;
+    fire_timers(1000u);
+    font_status(1, 1, 3);
+    assert(strstr(last_font_path, "/font-g2/") != NULL);
+    before = control_opens;
+    fire_timers(1000u);
+    assert(control_opens == before); /* pending keeps the mapping bank pinned */
+    font_rc = -2090;
+    fire_timers(50u);
+    font_status(-2090, 0, 3);
+    assert(!active_timers(50u));
+
+    /* A distinct signal retries a rejected transaction without re-retiring
+     * images or republishing an identical mapping bank. */
+    before = image_drops;
+    control_signal = "resource-hook-reload-v1\tretry-font-g2\n";
+    font_rc = 0; font_changes = 1;
+    fire_timers(1000u);
+    assert(image_drops == before);
+    font_status(0, 0, 4);
+    before = font_calls;
+    control_signal = "resource-hook-reload-v1\tunchanged-font-g2\n";
+    fire_timers(1000u);
+    assert(font_calls == before);
+
+    control_config = "# restore stock\n";
+    control_signal = "resource-hook-reload-v1\trestore-fonts\n";
+    fire_timers(1000u);
+    font_status(0, 0, 5);
+    assert(!last_font_path[0]);
+    assert(!retargets && !rebuilds);
+
+    /* A nonempty active map schedules image refresh after a restart too; the
+     * restart latch must not be overwritten by request_refresh(). */
+    control_config = config;
+    control_signal = "resource-hook-reload-v1\tfont-before-restart\n";
+    font_rc = 0; font_changes = 1;
+    fire_timers(1000u);
+    font_status(0, 0, 6);
+
+    slot = backend; /* UI restart loses the old callback slot. */
+    assert(d->activate(NULL) == 0 && font_disabled == 1);
+    font_status(-2014, 1, 6);
+    fire_timers(50u);
+    font_status(-2099, 0, 6);
+    control_config = config;
+    control_signal = "resource-hook-reload-v1\tpost-restart\n";
+    fire_timers(1000u);
+    font_status(-2099, 0, 6);
+    assert(!retargets && !locked);
+    assert(allocations == frees + persistent_allocs);
+    puts("experimental font scheduling, busy retry, error status, restore and restart latch passed");
+    return 0;
+}
+#endif
 int main(int argc, char **argv) {
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    if (argc == 2 && !strcmp(argv[1], "--experimental-fonts"))
+        return test_experimental_font_integration();
+#endif
     if (argc == 2 && !strcmp(argv[1], "--empty-startup"))
         return test_empty_startup_then_theme_reload();
     assert(argc == 1);

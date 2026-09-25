@@ -1,5 +1,9 @@
 #!/bin/sh
 set -eu
+[ "${RH_EXPERIMENTAL_FONT_RELOAD:-0}" = 0 ] || {
+    printf 'Experimental fonts are not a release payload; use build.sh for the opt-in prototype.\n' >&2
+    exit 1
+}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CANOPUS=${CANOPUS_ROOT:-"$ROOT/../Canopus"}
 if [ -z "${CANOPUS_ROOT:-}" ] && [ ! -d "$CANOPUS" ]; then
