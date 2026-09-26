@@ -28,9 +28,13 @@ int main(void) {
     rh_open_fn slot=original;
     strcpy(rules[0].source,"/resource/");strcpy(rules[0].destination,RH_THEME_ROOT "base/");
     strcpy(rules[1].source,"/resource/icons/");strcpy(rules[1].destination,RH_THEME_ROOT "icons/");
-    assert(rh_configure(&s,rules,2)==0);
+    strcpy(rules[2].source,"/resource/font/MiSans-Regular-All.ttf");
+    strcpy(rules[2].destination,RH_THEME_ROOT "font-generation-g1/FusionPixel.ttf");
+    assert(rh_configure(&s,rules,3)==0);
     assert(rh_resolve(&s,"/resource/icons/sub/a.bin",out)==1);
     assert(!strcmp(out,RH_THEME_ROOT "icons/sub/a.bin"));
+    assert(rh_resolve(&s,"/resource/font/MiSans-Regular-All.ttf",out)==1);
+    assert(!strcmp(out,RH_THEME_ROOT "font-generation-g1/FusionPixel.ttf"));
     assert(rh_resolve(&s,"/resource/icons-other/a.bin",out)==1);
     assert(!strcmp(out,RH_THEME_ROOT "base/icons-other/a.bin"));
     assert(rh_resolve(&s,"/resource2/a",out)==0);
@@ -43,7 +47,7 @@ int main(void) {
     strcpy(rules[1].destination,"/bad/");
     assert(rh_configure(&s,rules,2)<0);
     assert(!strcmp(before,s.rules[0].destination));
-    assert(s.count==2);
+    assert(s.count==3);
     assert(rh_install(&s,&s,&slot,wrapper)==0);
     assert(rh_reinstall_posix(&s,&s,&slot,original,wrapper)==0);
     s.original=0;

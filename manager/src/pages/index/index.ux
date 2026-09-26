@@ -1,17 +1,33 @@
 <template>
-  <div class="page">
-    <text class="title">设置图标主题测试</text>
-    <text class="hint">安装或删除后，点“重载资源”应用；模块约每秒检查一次。</text>
+  <list class="page">
+    <list-item type="header" class="section header">
+      <text class="title">主题资源管理</text>
+      <text class="hint">字体需新版 .155 实验模块。</text>
+    </list-item>
 
-    <div class="actions">
-      <input class="button install-button" type="button" value="安装测试" disabled="{{busy}}" onclick="installTestTheme" />
-      <input class="button delete-button" type="button" value="删除主题" disabled="{{busy}}" onclick="deleteTestTheme" />
-      <input class="button reload-button" type="button" value="重载资源" disabled="{{busy}}" onclick="requestReload" />
-    </div>
+    <list-item type="fonts" class="section">
+      <text class="section-title">固件字体</text>
+      <text class="hint">替换为简中像素字体，粗体也会变为 Regular。</text>
+      <input class="button primary" type="button" value="全部替换" disabled="{{busy}}" onclick="installAllFonts" />
+      <input class="button secondary" type="button" value="恢复默认" disabled="{{busy}}" onclick="restoreFirmwareFonts" />
+    </list-item>
 
-    <text class="status">{{ statusText }}</text>
-    <text class="footnote">Manager 只能写入重载信号，无法确认模块是否已应用。</text>
-  </div>
+    <list-item type="icons" class="section">
+      <text class="section-title">设置图标</text>
+      <input class="button primary" type="button" value="安装测试" disabled="{{busy}}" onclick="installTestTheme" />
+      <input class="button secondary" type="button" value="删除主题" disabled="{{busy}}" onclick="deleteTestTheme" />
+    </list-item>
+
+    <list-item type="reload" class="section">
+      <input class="button primary" type="button" value="重载资源" disabled="{{busy}}" onclick="requestReload" />
+    </list-item>
+
+    <list-item type="result" class="section footer">
+      <text class="section-title">操作结果</text>
+      <text class="status">{{ statusText }}</text>
+      <text class="hint footnote">可上下滑动。旧字体文件请保留。</text>
+    </list-item>
+  </list>
 </template>
 
 <script>
@@ -21,35 +37,72 @@ import { ThemeBridge } from "../../ts/theme-bridge"
 export default {
   private: {
     busy: false,
-    statusText: "准备就绪：安装或删除后，请点“重载资源”。",
-    bridge: null
+    statusText: "准备就绪。字体操作会自动重载；图标操作后点重载资源。",
+    bridge: null,
+    destroyed: false
   },
 
   onInit() {
     this.bridge = new ThemeBridge(file)
   },
 
+  onDestroy() {
+    this.destroyed = true
+    this.bridge.cancelWait()
+  },
+
   installTestTheme() {
     this.runOperation(
-      "正在安装设置图标主题…",
+      "正在安装设置图标…",
       () => this.bridge.installTestTheme(),
-      "测试主题已写入；现在点“重载资源”应用。"
+      "图标主题已写入，点重载资源应用。"
     )
   },
 
   deleteTestTheme() {
     this.runOperation(
-      "正在删除设置图标主题…",
+      "正在移除图标映射…",
       () => this.bridge.deleteTestTheme(),
-      "测试主题映射已移除；点“重载资源”恢复原始资源。"
+      "图标映射已移除，点重载资源恢复。"
+    )
+  },
+
+  waitForResult(revision) {
+    if (this.destroyed) throw new Error("页面已关闭。")
+    this.statusText = "信号已发送，等待模块确认…"
+    return this.bridge.waitForReload(revision, message => {
+      if (!this.destroyed) this.statusText = message
+    })
+  },
+
+  installAllFonts() {
+    this.runOperation(
+      "正在分块写入新字体，请稍候…",
+      async () => {
+        const result = await this.bridge.installAllFirmwareFonts()
+        return this.waitForResult(result.revision)
+      },
+      message => message
+    )
+  },
+
+  restoreFirmwareFonts() {
+    this.runOperation(
+      "正在恢复默认映射…",
+      async () => {
+        const result = await this.bridge.restoreFirmwareFonts()
+        const message = await this.waitForResult(result.revision)
+        return result.broaderDirectoryRule ? message + " 上级目录规则仍可能覆盖字体。" : message
+      },
+      message => message
     )
   },
 
   requestReload() {
     this.runOperation(
-      "正在写入重载信号…",
-      () => this.bridge.requestReload(),
-      revision => `重载信号 ${revision} 已写入；模块会在轮询时读取。`
+      "正在发送重载请求…",
+      async () => this.waitForResult(await this.bridge.requestReload()),
+      message => message
     )
   },
 
@@ -58,11 +111,12 @@ export default {
     this.busy = true
     this.statusText = startText
     Promise.resolve().then(operation).then(result => {
-      this.statusText = typeof successText === "function" ? successText(result) : successText
+      if (!this.destroyed)
+        this.statusText = typeof successText === "function" ? successText(result) : successText
     }).catch(error => {
-      this.statusText = `操作失败：${String(error)}`
+      if (!this.destroyed) this.statusText = `操作未完成：${String(error.message || error)}`
     }).then(() => {
-      this.busy = false
+      if (!this.destroyed) this.busy = false
     })
   }
 }
@@ -70,68 +124,77 @@ export default {
 
 <style>
 .page {
-  flex-direction: column;
-  justify-content: center;
   width: 100%;
   height: 100%;
-  padding: 10px;
-  box-sizing: border-box;
+  background-color: #000000;
+}
+
+.section {
+  flex-direction: column;
+  width: 100%;
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-bottom: 20px;
+}
+
+.header {
+  padding-top: 26px;
 }
 
 .title {
-  font-size: 17px;
+  width: 100%;
+  font-size: 24px;
   font-weight: bold;
-  margin-bottom: 4px;
+  color: #FFFFFF;
+  margin-bottom: 10px;
 }
 
-.hint, .footnote {
-  font-size: 11px;
-  color: #526078;
-}
-
-.hint {
+.section-title {
+  width: 100%;
+  font-size: 22px;
+  font-weight: bold;
+  color: #FFFFFF;
   margin-bottom: 8px;
 }
 
-.actions {
-  flex-direction: row;
+.hint {
   width: 100%;
-  height: 38px;
+  font-size: 18px;
+  line-height: 26px;
+  color: #E2E8F0;
 }
 
 .button {
-  flex: 1;
-  height: 36px;
-  margin-left: 4px;
-  padding-left: 0;
-  padding-right: 0;
-  border-radius: 7px;
-  font-size: 11px;
+  width: 100%;
+  height: 48px;
+  margin-top: 10px;
+  border-radius: 10px;
+  font-size: 20px;
+  font-weight: bold;
 }
 
-.install-button {
-  margin-left: 0;
+.primary {
   color: #FFFFFF;
   background-color: #2456B8;
 }
 
-.delete-button {
-  color: #8A2424;
-  background-color: #FBE9E9;
-}
-
-.reload-button {
-  color: #24344D;
-  background-color: #E7EDF5;
+.secondary {
+  color: #FFFFFF;
+  background-color: #303B4B;
 }
 
 .status {
-  margin-top: 8px;
-  font-size: 11px;
-  color: #17243A;
+  width: 100%;
+  font-size: 20px;
+  line-height: 28px;
+  color: #FFFFFF;
 }
 
 .footnote {
-  margin-top: 4px;
+  margin-top: 16px;
+}
+
+.footer {
+  padding-bottom: 30px;
 }
 </style>

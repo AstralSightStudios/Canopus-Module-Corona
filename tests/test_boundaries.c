@@ -54,6 +54,14 @@ int main(void) {
         strcpy(path, "/resource/x/"); path[10] = (char)i;
         rejected(path, RH_THEME_ROOT "base/");
     }
+    rule("/resource/font/MiSans-Regular-All.ttf",
+         RH_THEME_ROOT "current/font-generation-g1/FusionPixel.ttf");
+    assert(!rh_configure(&state, rules, 1));
+    assert(rh_resolve(&state, "/resource/font/MiSans-Regular-All.ttf", out) == 1);
+    assert(!strcmp(out, RH_THEME_ROOT "current/font-generation-g1/FusionPixel.ttf"));
+    assert(rh_resolve(&state, "/resource/font/MiSans-Regular-All.ttf.backup", out) == 0);
+    rejected("/resource/font/MiSans-Regular-All.ttf", RH_THEME_ROOT "current/font/");
+    rejected("/resource/font/", RH_THEME_ROOT "current/font-generation-g1/FusionPixel.ttf");
     rule("/resource/", RH_THEME_ROOT "base/");
     rules[1] = rules[0];
     assert(rh_configure(&state, rules, 2) == -3);

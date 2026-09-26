@@ -40,6 +40,7 @@ static uint32_t fonts_retargeted;
 #if RH_FONT_EXPERIMENT
 /* 1 = pending/busy, 0 = completed, negative = rejected/failed. */
 static int32_t font_result;
+static uint32_t font_last_changed;
 #endif
 static void *refresh_timer, *watch_timer;
 static struct rh_rule *rule_banks[2];
@@ -51,6 +52,7 @@ static char last_reload_signal[RH_RELOAD_SIGNAL_MAX];
 static uint32_t last_reload_signal_size;
 static unsigned last_reload_signal_valid;
 static unsigned refresh_pending, cache_dropped, images_done, fonts_done, refreshing;
+static void publish_current_result(void);
 
 /* Point every registered font family whose file falls under a mapping rule at
  * the themed file. A retargeted entry is re-added at the end of the registry, so
@@ -107,6 +109,7 @@ static void refresh_step(void *timer, unsigned ui_owner) {
         uint32_t changed = 0;
         int rc = rh_font_reload(&current, &changed);
         font_result = rc;
+        font_last_changed = changed;
         if (rc != 1) {
             /* A permanent font error does not stall unrelated image reloads.
              * It remains visible in RHQ1 v6 until an explicit new request. */
@@ -142,6 +145,7 @@ static void refresh_timer_step(void *timer) {
         return;
     }
     refresh_step(timer, 1u);
+    publish_current_result();
 }
 static int ensure_refresh_timer(void) {
     if (refresh_pending && !refresh_timer)
@@ -254,6 +258,65 @@ static int reload_signal_seen(const char *signal, uint32_t size) {
     for (i = 0; i < size; i++) if (signal[i] != last_reload_signal[i]) return 0;
     return 1;
 }
+/* Manager creates this app-scoped file before sending a revision. Use only
+ * O_WRONLY (2): no guessed create/truncate flags or vararg permissions.
+ * A fixed-size, checksummed record lets readers reject partial/torn writes. */
+#define RH_CONTROL_RESULT "/data/quickapp/files/ng.lst.corona/reload.result"
+#define RH_RESULT_BYTES 256u
+static char last_result[RH_RESULT_BYTES];
+static unsigned last_result_valid, result_written;
+static void flush_result(void) {
+    uint32_t used=0; int fd,n;
+    if(!last_result_valid || result_written) return;
+    fd=rh_platform_open(RH_CONTROL_RESULT,2);
+    if(fd<0) return;
+    while(used<RH_RESULT_BYTES) {
+        n=rh_platform_write(fd,last_result+used,RH_RESULT_BYTES-used);
+        if(n<=0 || (uint32_t)n>RH_RESULT_BYTES-used) break;
+        used+=(uint32_t)n;
+    }
+    rh_platform_close(fd);
+    result_written=used==RH_RESULT_BYTES;
+}
+static char *result_number(char *out, uint32_t n) {
+    char digits[10]; uint32_t count=0;
+    do { digits[count++]=(char)('0'+n%10u); n/=10u; } while(n);
+    while(count) *out++=digits[--count];
+    return out;
+}
+static void publish_result(const char *signal, uint32_t size, int32_t result,
+                           uint32_t pending, uint32_t changed) {
+    static const char prefix[]="RHRS1\t";
+    char buffer[RH_RESULT_BYTES], *p=buffer;
+    uint32_t i, hash=2166136261u;
+    if(!size || size>RH_RELOAD_SIGNAL_MAX) return;
+    for(i=0;i<RH_RESULT_BYTES;i++) ((volatile char *)buffer)[i]=0;
+    for(i=0;i<size;i++) *p++=signal[i];
+    for(i=0;i<sizeof(prefix)-1u;i++) *p++=prefix[i];
+    p=result_number(p,RH_FONT_EXPERIMENT ? 6u : 5u); *p++='\t';
+    if(result<0) *p++='-';
+    p=result_number(p,result<0 ? 0u-(uint32_t)result : (uint32_t)result); *p++='\t';
+    p=result_number(p,pending); *p++='\t';
+    p=result_number(p,changed); *p++='\n';
+    for(i=0;i<(uint32_t)(p-buffer);i++) hash=(hash^(unsigned char)buffer[i])*16777619u;
+    p=result_number(p,hash); *p++='\n';
+    if(last_result_valid) {
+        for(i=0;i<RH_RESULT_BYTES && buffer[i]==last_result[i];i++) {}
+        if(i==RH_RESULT_BYTES) { flush_result(); return; }
+    }
+    for(i=0;i<RH_RESULT_BYTES;i++) last_result[i]=buffer[i];
+    last_result_valid=1; result_written=0;
+    flush_result();
+}
+static void publish_current_result(void) {
+    if(!last_reload_signal_valid) return;
+#if RH_FONT_EXPERIMENT
+    publish_result(last_reload_signal,last_reload_signal_size,font_result,
+                   refresh_pending,font_last_changed);
+#else
+    publish_result(last_reload_signal,last_reload_signal_size,0,refresh_pending,0);
+#endif
+}
 static void poll_control_file(void) {
     char signal[RH_RELOAD_SIGNAL_MAX];
     uint32_t signal_size, count, active, inactive, old_count;
@@ -281,12 +344,14 @@ static void poll_control_file(void) {
     text = rh_platform_alloc(RH_CONFIG_BYTES);
     if (!text) {
         irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
+        publish_result(signal,signal_size,-2101,0,0);
         return;
     }
     fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
     if (fd < 0) {
         rh_platform_free(text);
         irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
+        publish_result(signal,signal_size,-2102,0,0);
         return;
     }
     rc = rh_read_staged_config(config_read, &fd, text, RH_CONFIG_BYTES,
@@ -295,6 +360,7 @@ static void poll_control_file(void) {
     rh_platform_free(text);
     if (rc) {
         irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
+        publish_result(signal,signal_size,-2103,0,0);
         return;
     }
 
@@ -304,6 +370,7 @@ static void poll_control_file(void) {
         irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
         remember_reload_signal(signal, signal_size);
 #if RH_FONT_EXPERIMENT
+        font_last_changed = 0;
         /* A new revision can explicitly retry a rejected font transaction even
          * when its mapping text is unchanged. Successful identical configs are
          * still no-ops; overwriting a font file in place is unsupported. */
@@ -318,6 +385,7 @@ static void poll_control_file(void) {
             (void)ensure_refresh_timer();
         }
 #endif
+        publish_current_result();
         return;
     }
 
@@ -347,19 +415,23 @@ static void poll_control_file(void) {
     fonts_done = RH_FONT_EXPERIMENT ? 0u : 1u;
 #if RH_FONT_EXPERIMENT
     font_result = 1;
+    font_last_changed = 0;
 #endif
     refresh_pending = 1;
     refresh_step(0, 1u);
     (void)ensure_refresh_timer();
+    publish_current_result();
 }
 static void watch_step(void *timer) {
     if (timer != watch_timer) {
         if (timer) rh_platform_timer_delete(timer);
         return;
     }
+    flush_result();
     if (refresh_pending) {
         refresh_step(0, 1u);
         (void)ensure_refresh_timer();
+        publish_current_result();
         return;
     }
     poll_control_file();

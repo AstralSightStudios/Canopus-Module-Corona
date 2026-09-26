@@ -1,3 +1,4 @@
-# Literal TAB separates the source and destination directories.
+# Literal TAB separates source and destination paths.
+# Directory paths end in '/'; source and destination file paths must both be exact.
 # Copy matching resource files into current/ before enabling the module.
 /resource/	/data/quickapp/files/ng.lst.corona/themes/current/

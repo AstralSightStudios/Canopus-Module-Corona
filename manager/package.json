@@ -10,6 +10,7 @@
     "build": "npm run typecheck && aiot build",
     "release": "npm run typecheck && aiot release",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node ../tests/test_theme_bridge.cjs",
     "ts:watch": "tsc --noEmit -p tsconfig.json --watch"
   },
   "devDependencies": {

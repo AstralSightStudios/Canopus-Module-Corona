@@ -2,6 +2,10 @@
 
 This is an opt-in implementation for `xiaomi-band-11-4.100.155`, not a production font reload guarantee. Default `.139` and `.155` builds retain the existing registry-only behavior. No automatic page rebuild, GPU wait/reset or global cache drop is added.
 
+## Device result
+
+On 2026-09-26, the user reported that the current `.155` experimental font-replacement/reload test passed on hardware after the dynamic-wrapper fix. Status: **USER_REPORTED_PASS**, limited to that test, not full hardware/fault acceptance. See the [device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md) for local artifact hashes, the device-driven fixes and untested cases. GPU recovery, framework restart, custom owners and endurance/memory-pressure testing remain outside this report.
+
 ## Build and target approval
 
 ```sh
@@ -32,10 +36,12 @@ Preparation and publication happen within one serialized UI timer callback, neve
 - Use a **new immutable destination filename/directory for every font generation**. Keep files unchanged and available. Overwriting `themes/current/font.ttf` is not supported. Non-stock generation paths cannot be selected again after leaving them; restoration of unchanged stock files is supported.
 - A target face already held outside the current preparation transaction is refused rather than borrowed from an unknown consumer. New staged descriptors may share a face with each other.
 - The baseline must be captured before legacy retargeting loses the originals. Switching a running legacy instance into this implementation cannot reconstruct missing original paths; use a clean framework/module lifetime.
-- Bounds: 32 registered families, 96 backing resources, 256 wrappers, 512 collected UI objects, 32 parent levels, 64 remembered non-stock family-path selections, and 8 MiB per fingerprinted font file. Exceeding a bound is a refusal, not partial publication. Persistent adapter state is approximately 42 KiB, plus bounded transaction scratch and staged native fonts/caches. File validation and font parsing run synchronously and may delay a UI tick.
+- Bounds: 32 registered families, 512 affected backing resources per transaction (the combined capacity of two 256-record active/idle scans), 96 interned file IDs, 4096 wrappers, 512 collected UI objects, 32 parent levels, 64 remembered non-stock family-path selections, and 32 MiB per fingerprinted font file. Exceeding a bound is a refusal, not partial publication. Persistent adapter state is approximately 42 KiB, plus bounded transaction scratch and staged native fonts/caches. File validation streams 2 KiB chunks rather than allocating whole files. It runs only after idle/ownership checks, deduplicates shared paths within a transaction, and accepts the 11,637,064-byte stock Regular-All font. Validation and parsing remain synchronous and may delay a UI tick.
 - Same mapping text after a successful request remains a no-op at module level. A new signal with unchanged mapping text retries a previously failed font transaction; it is not an in-place file replacement mechanism.
 
 For example, change a mapping destination from `themes/font-g1/` to `themes/font-g2/`, with the same font-relative paths in each immutable directory, then write a new reload-request revision. Removing that mapping restores the captured stock path. Do not reuse `font-g1` in this module lifetime.
+
+Manager 1.2.1 exposes a fixed `.155` Fusion Pixel replacement control for the nine `.ttf` files in the unpacked `/font` resource tree (`MiSansF-{Semibold,Medium,Demibold}.ttf`, `MiSans-Semibold.ttf`, `MiSans-Regular-All.ttf`, `MiSans-{Medium,Medium-All,Demibold,Demibold-All}.ttf`). The nine resource paths plus `/tmp/MiSans-{Regular,Medium,Demibold}.ttf` map to the same bundled Regular subset. The latter are native startup-copy destinations, registered when the copy succeeds; otherwise startup selects the corresponding `-All` resource. Medium/Semibold visual weight is intentionally lost for this test. It reads the bundled TTF in **32 KiB ranges** and writes each range by offset, avoiding a whole-font JS `ArrayBuffer`. Each install allocates a persisted generation ID and writes the bundled TTF to a new `themes/font-generations/g-<id>/` file, then adds twelve exact-file mappings and sends a reload signal. Restore removes those exact mappings and keeps every generation file. The Manager waits for a checksummed, revision-matched `reload.result` acknowledgement. It distinguishes committed families, no font changes, pending work, errors and missing acknowledgements. It does not read RHQ1 directly; “signal sent” alone is still not evidence of a commit. Use only with the opt-in `.155` module; the default module does not execute this adapter.
 
 ## Safety boundary
 
@@ -54,16 +60,61 @@ Default builds retain RHQ1 **v5 / 40 bytes** unchanged. The experimental build e
 | 40 | Signed font result: `0` completed/no-op, `1` pending/busy, negative rejected/failed |
 | 44 | `1` while the font stage is pending, otherwise `0` |
 
-The adapter currently uses `-1` for unsupported/invalid/lifecycle conditions and `-2` for preparation/allocation failure; `-2014` records the module's observed-restart latch before a subsequent adapter call. A post-commit owner-refresh failure can have a nonzero committed count; that is not a rollback. Consumers must check the version/length and error field rather than interpreting image redraw success as font success. No manager UI changes are included.
+The adapter retains generic `-1` and preparation/allocation `-2`; `-2014` records observed restart. Stage codes `-2201`/`-2202` identify roots/registry rejection, `-2204` the drawing boundary, `-2205` ownership, `-2206` missing audited exemplar, and `-2207` owner overflow. File codes `-2210`/`-2211`/`-2212`/`-2213` identify I/O, size limit, file-count limit and changed current-file contents. A post-commit owner-refresh failure can have a nonzero committed count; that is not a rollback. Consumers must check the version/length and error field rather than interpreting image redraw success as font success. Manager 1.2.1 displays the corresponding result via the file protocol below.
+
+### Ownership diagnostic codes (replacement for generic `-2205`)
+
+The diagnostic build preserves all refusal predicates and keeps outstanding holds as `1` (busy). It no longer collapses resource validation errors into `-2205`. Manager 1.2.2 already displays these signed codes; no Manager update is required. A code identifies a failed check, not evidence that its expected firmware layout is correct on every runtime path.
+
+Cache failures use `-(base + reason)`: base `2300` = face cache, `2400` = metrics cache, `2500` = outline cache. Reasons: `1` missing cache, `2` class, `3` payload size, `4` LRU element size, `5/6/7` comparator/create/destroy callback, `8` traversal bound, `9` previous link, `10/11` missing RB node/payload, `12` entry owner, `13` entry payload offset, `14` invalid entry, `15` invalid refcount, `18` tail, `19` count. Thus `-2406` specifically means the metrics-cache create callback differs. Vector checks use base `2800`, but the outer drawing-boundary stage still reports `-2204`.
+
+| Codes | Failed descriptor/manager check |
+| --- | --- |
+| `-2601` | Missing backing font |
+| `-2602/-2603/-2604` | Metrics / outline-acquire / glyph-release callback |
+| `-2605/-2606/-2607/-2608` | Descriptor placement / magic / context / self pointer |
+| `-2609/-2610/-2611` | Pixel size / render mode / original path |
+| `-2612/-2613/-2614/-2615` | Face / face-entry position / entry owner / entry offset |
+| `-2616/-2617/-2618/-2619` | Face hold / invalid entry / interned path identity / style-mode key |
+| `-2620/-2621` | Missing FT face / nonscalable face |
+| `-2701` | Face-cache capacity |
+| `-2703/-2704/-2705/-2706/-2707` | Active name / name length / inline name pointer / zero owners / record bound |
+| `-2708/-2709` | Active record size / style differs from backing descriptor |
+| `-2712` | Wrapper count versus record owners |
+| `-2730` through `-2736` | Wrapper copied word at byte offset `0,4,8,12,16,20,24` differs from backing font |
+| `-2714/-2715/-2716` | Idle name / name length / replacement bound |
+| `-2717/-2718/-2719/-2720` | Idle size / idle style / duplicate descriptor ownership / total bound |
+
+Whole-list diagnostics now use `-2741..-2744` (active), `-2751..-2754` (idle), and `-2761..-2764` (wrappers). The suffix is `1` payload-size mismatch, `2` traversal bound (including a cycle), `3` previous-link mismatch, `4` tail mismatch. These replace the ambiguous list errors `-2702`, `-2710` and `-2713`. `-2765` indicates wrapper count changed between validation and scanning; `-2766` indicates a captured affected wrapper disappeared or changed relative order before commit.
+
+The active/idle scan previously reused the 96-replacement limit even for unrelated records. Both scans now use their existing 256-element scratch capacity, matching the precommit scan. A subsequent device `-2707` established that more than 96 active backings are actually affected, not merely present. The replacement capacity is now 512, matching the combined active/idle scan bounds; wrapper, ownership and link checks remain unchanged. The separate interned-path limit remains 96 rather than growing with descriptor count. Host regression covers 100 unrelated active or idle records, oversized lists and broken links/tails. A large affected fixture additionally exercises 255 active backings, 256 wrappers and 256 idle backings (511 replacements), restoration, and allocation failures at the start, middle and end of a 521-allocation preparation, with unchanged old references and successful retry. The backing-array expansion adds 14,976 bytes of bounded heap storage, not a larger UI stack or full-file allocation. Real-device allocation latency and font parsing remain unverified. Exact native insert/remove instructions at `0x0c3a43b0`, `0x0c3a46a2` and `0x0c3a46dc` confirm head/tail at list+4/+8 and previous/next at node+size/+size+4. The device's former `-2702` alone does not prove whether capacity or a link check failed.
+
+A subsequent device `-2762` reached the old 256-wrapper limit. Wrapper cardinality is now independent of backing cardinality: validate/count up to 4096 wrappers without a stack array, then allocate `actual_count * sizeof(struct wrap)` bytes (16 bytes each, at most 64 KiB). Only affected wrappers are captured; membership is rechecked as an ordered subsequence of the live list before publication. Backing scans remain 256 each and replacement capacity remains 512. Snapshot allocation failure returns `-2` with no publication, and heap snapshots are freed on success, rollback, busy retry and lifecycle disable. Tests cover 303/1024/4096 wrappers, 4097 rejection before snapshot allocation, restoration, snapshot OOM/retry, unrelated wrappers and replacement of a captured wrapper identity. The same fixed `-2762` code now denotes the 4096 traversal bound; this is not unlimited support.
+
+The cache constructor, callback table and manager descriptor initialization were rechecked against the exact AP instructions at `0x0c3a998e`, `0x0c3a9e48`, `0x0c494380` and `0x0c4946a4`, plus callback table `0x2ca308e4`. This does not identify which predicate produced the device's former `-2205`; the next revision-matched result is needed for that. Host fault-injection tests assert individual codes, unchanged old fonts, no prevalidation file reads, and unchanged busy/retry behavior.
+
+## Manager acknowledgement protocol
+
+Before sending a new request, Manager 1.2.2 writes a nonempty `pending<TAB><revision><LF>` placeholder to `internal://files/reload.result`. Vela rejects an empty `writeText` argument with code 202. If preparing this optional acknowledgement file fails, Manager still sends the original reload signal and explicitly reports that the result cannot be confirmed; diagnostics must not block icon/font reload. The module opens the existing native file with NuttX write-only flag `2`; it does not create files or guess creation permissions. The response is a 256-byte NUL-padded record:
+
+```text
+resource-hook-reload-v1<TAB>ng.lst.corona<TAB><revision><LF>
+RHRS1<TAB><5-or-6><TAB><signed-result><TAB><refresh-pending><TAB><families-changed-this-request><LF>
+<unsigned-decimal-FNV1a-of-the-first-two-lines-including-LFs><LF>
+```
+
+The checksum detects torn/partial writes, not malicious changes. The module retries failed/short writes without rerunning a completed font transaction, and avoids rewriting unchanged results. Configuration failures use `-2101` (allocation), `-2102` (open), `-2103` (parse/read). Manager ignores wrong revisions, invalid checksums and unsupported schemas; after 30 polling attempts it reports no confirmation or continued pending work, never success. Page destruction cancels polling, not the native transaction. A negative result with nonzero changed count explicitly warns that publication occurred but refresh failed.
 
 ## Verification
+
+`cd manager && npm test` checks all twelve mappings, immutable generations, restoration, request ordering, checksums, stale/partial responses, errors, no-op, legacy modules, timeout and cancellation. Manager uses a native scrolling list, 18–24 px high-contrast text and 48 px full-width buttons; physical-device readability still requires acceptance.
 
 `build.sh` runs the existing host suite plus:
 
 - `tests/test_module.c --experimental-fonts` in a separately compiled opt-in binary: timer-only execution, busy retry, mapping-bank lifetime, permanent-error completion, same-config explicit retry, stock-removal dispatch, v6 capacity/status, and restart latch.
 - `tests/test_font_reload_155.c`: the actual transaction code against a 32-bit memory model with native leaves injected, including 13 single-family and 15 two-family allocation-failure positions and rollback, wrapper/fallback preservation, idle paths, file immutability, busy holds and owner deletion.
 
-`tests/firmware_font_barrier_155.py` separately executes selected native instructions. Neither suite runs the complete real FreeType parser or GPU, and neither is an on-device font reload acceptance test. Repeated real reload, memory-pressure behavior, visual layout and graphics-recovery validation remain required.
+`tests/firmware_font_barrier_155.py` separately executes selected native instructions. Neither suite runs the complete real FreeType parser or GPU, and neither is an on-device font reload acceptance test. The separate user-reported normal-path device pass is recorded above; repeated switching, memory-pressure behavior, comprehensive visual layout and graphics-recovery validation remain required.
 
 Integration results: default `.139` and `.155` builds pass, as does the opt-in `.155` build with strict target verification. The 33 selected font instruction probes and 19 `.155` image regression probes pass. Host sanitizer tests additionally cover the post-commit traversal-overflow latch and reject a misleading same-mapping success afterward.
 

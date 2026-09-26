@@ -31,9 +31,10 @@ static int valid(const char *s) {
 static int rule_ok(const struct rh_rule *r) {
     static const char root[] = RH_THEME_ROOT;
     uint32_t a = length(r->source), b = length(r->destination);
-    return valid(r->source) && valid(r->destination) &&
-           r->source[a-1] == '/' && r->destination[b-1] == '/' &&
-           prefix(r->destination, root, sizeof(root)-1);
+    if (!valid(r->source) || !valid(r->destination) ||
+        !prefix(r->destination, root, sizeof(root)-1)) return 0;
+    /* Directory rules append a suffix; file rules replace one exact path. */
+    return (r->source[a-1] == '/') == (r->destination[b-1] == '/');
 }
 
 int rh_validate_rules(const struct rh_rule *r, uint32_t n) {
@@ -76,7 +77,11 @@ int rh_resolve_view(const struct rh_mapping_view *view, const char *path,
     n = length(path);
     for (i = 0; i < view->count; i++) {
         uint32_t size = length(view->rules[i].source);
-        if (size > best && size <= n && prefix(path, view->rules[i].source, size)) {
+        int directory;
+        if (!size || size >= RH_PATH) continue;
+        directory = view->rules[i].source[size - 1u] == '/';
+        if (size > best && size <= n && (directory || size == n) &&
+            prefix(path, view->rules[i].source, size)) {
             best = size; selected = i;
         }
     }

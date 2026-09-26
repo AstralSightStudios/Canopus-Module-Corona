@@ -30,8 +30,10 @@ static uint32_t bump,nalloc,alloc_calls,fail_alloc,fail_parse,fail_size,fail_cac
 static uint32_t owner_list[8],owner_count,refresh_calls,vector_drops,mutate_owner,post_fail,post_overflow;
 static uint32_t mgr,ctx,cache,reg,record,record2,wrapper,wrapper2,wrapper3,old_dsc,idle_node;
 static uint32_t display,vg,glyph_queue,old_live,read_count,fail_temp;
+static uint32_t temp_calls,fail_temp_at,temp_live;
 static uint32_t stock_content,a_content,b_content,file_offset,lifecycle_in_prepare,busy_in_prepare;
 static int open_file;
+static uint32_t simulated_file_size, file_opens;
 static const char stock[]="/system/fonts/Regular.ttf";
 static const char path_a[]=RH_THEME_ROOT "g001/Regular.ttf";
 static const char path_b[]=RH_THEME_ROOT "g002/Regular.ttf";
@@ -164,10 +166,16 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
     default: fprintf(stderr,"Unexpected native call %08x\n",pc); abort();
     }
 }
-void *rh_platform_alloc(uint32_t n) { return fail_temp ? NULL : malloc(n); }
-void rh_platform_free(void *p) { free(p); }
+void *rh_platform_alloc(uint32_t n) {
+    void *p;
+    temp_calls++;
+    if(fail_temp || temp_calls==fail_temp_at) return NULL;
+    p=malloc(n); if(p) temp_live++;
+    return p;
+}
+void rh_platform_free(void *p) { assert(p && temp_live); temp_live--; free(p); }
 int rh_platform_open(const char *p,int mode) {
-    assert(mode==1); file_offset=0;
+    assert(mode==1); file_offset=0; file_opens++;
     if(eq(p,stock)) open_file=1;
     else if(eq(p,path_a)) open_file=2;
     else if(eq(p,path_b)) open_file=3;
@@ -175,10 +183,12 @@ int rh_platform_open(const char *p,int mode) {
     return open_file;
 }
 int rh_platform_read(int fd,void *out,uint32_t n) {
-    uint32_t v; assert(fd==open_file && n>=4);
-    if(file_offset) return 0;
-    file_offset=4; v=fd==1?stock_content:fd==2?a_content:b_content;
-    memcpy(out,&v,4); return 4;
+    uint32_t i,v; unsigned char *bytes=out;
+    assert(fd==open_file && n>=4);
+    if(n>simulated_file_size-file_offset) n=simulated_file_size-file_offset;
+    v=fd==1?stock_content:fd==2?a_content:b_content;
+    for(i=0;i<n;i++) bytes[i]=(unsigned char)(v>>(8u*((file_offset+i)%4u)));
+    file_offset+=n; return (int)n;
 }
 void rh_platform_close(int fd) { assert(fd==open_file); open_file=0; }
 /* Unused by mapping resolver; keep resource_hook.c linked as-is. */
@@ -203,11 +213,13 @@ static uint32_t fixture_wrapper(uint32_t rec) {
 }
 static void setup(void) {
     uint32_t ui,path,id,face,key[7]={0},d2,di,idle,gradient,imgq,gradq,sw,obj;
+    assert(temp_live==0); temp_calls=fail_temp_at=0;
     memset(&state,0,sizeof(state)); memset(memory,0,sizeof(memory)); memset(globals,0,sizeof(globals));
     memset(allocations,0,sizeof(allocations));
     bump=8; nalloc=alloc_calls=fail_alloc=fail_parse=fail_size=fail_cache_init=bitmap_only=0;
     owner_count=refresh_calls=vector_drops=mutate_owner=post_fail=post_overflow=fail_temp=lifecycle_in_prepare=busy_in_prepare=0;
     stock_content=11; a_content=22; b_content=33;
+    simulated_file_size=4; file_opens=0;
     ui=heap(64); mgr=heap(560); ctx=heap(28);
     wr(UIKIT_SLOT,ui); wr(ui+28,mgr); wr(CONTEXT_SLOT,ctx);
     wr(mgr,48); wr(mgr+12,40); wr(mgr+24,8);
@@ -237,11 +249,9 @@ static void setup(void) {
 }
 static int reload_path(const char *path,uint32_t *changed) {
     struct rh_rule rule; struct rh_mapping_view view={&rule,path?1u:0u};
-    memset(&rule,0,sizeof(rule)); strcpy(rule.source,"/system/fonts/");
-    if(path) {
-        strcpy(rule.destination,path);
-        rule.destination[strlen(path)-strlen("Regular.ttf")]=0;
-    } else view.rules=NULL;
+    memset(&rule,0,sizeof(rule)); strcpy(rule.source,stock);
+    if(path) strcpy(rule.destination,path);
+    else view.rules=NULL;
     return rh_font_reload(&view,changed);
 }
 static void unchanged(void) {
@@ -269,6 +279,180 @@ static void test_switch_restore(void) {
     assert(reload_path(path_a,&changed)<0 && changed==0); /* generation cannot be reused */
     assert(native_eq(rd(reg+4),stock));
 }
+static void test_large_stock_files(void) {
+    uint32_t changed; struct digest h;
+    setup(); simulated_file_size=11637064u;
+    assert(reload_path(path_a,&changed)==0); committed(path_a,changed);
+    assert(file_opens==2); /* stock=current read once; shared target once */
+    setup(); simulated_file_size=FILE_LIMIT;
+    assert(fingerprint(stock,&h)==0 && h.size==FILE_LIMIT);
+    setup(); simulated_file_size=FILE_LIMIT+1u;
+    assert(reload_path(path_a,&changed)==-2211 && !changed); unchanged();
+    assert(!open_file);
+}
+static void expect_diagnostic(uint32_t address_to_change, uint32_t value, int expected) {
+    uint32_t changed=99; int result;
+    wr(address_to_change,value);
+    result=reload_path(path_a,&changed);
+    if(result!=expected) fprintf(stderr,"diagnostic expected %d, got %d at %08x\n",expected,result,address_to_change);
+    assert(result==expected && changed==0);
+    unchanged();
+    assert(file_opens==0); /* These checks precede expensive file I/O. */
+}
+static void test_ownership_diagnostics(void) {
+    setup(); expect_diagnostic(cache,0,-2302);
+    setup(); expect_diagnostic(cache+4,32,-2303);
+    setup(); expect_diagnostic(cache+48,8,-2304);
+    setup(); expect_diagnostic(cache+16,0,-2305);
+    setup(); expect_diagnostic(cache+8,0,-2701);
+    setup(); expect_diagnostic(old_dsc+4,0,-2602);
+    setup(); expect_diagnostic(old_dsc+8,0,-2603);
+    setup(); expect_diagnostic(old_dsc+12,0,-2604);
+    setup(); expect_diagnostic(old_dsc,0,-2606);
+    setup(); expect_diagnostic(old_dsc+48,0,-2607);
+    setup(); expect_diagnostic(old_dsc+28,0,-2605);
+    setup(); expect_diagnostic(old_dsc+40,0,-2609);
+    setup(); expect_diagnostic(old_dsc+44,0,-2610);
+    setup(); expect_diagnostic(rd(old_dsc+52)+4,0,-2619);
+    setup(); expect_diagnostic(rd(rd(old_dsc+52)+12)+8,0,-2621);
+    setup(); expect_diagnostic(rd(rd(old_dsc+52)+16)+20,0,-2406);
+    setup(); expect_diagnostic(rd(rd(old_dsc+52)+20)+24,0,-2507);
+    setup(); expect_diagnostic(record+8,99,-2708);
+    setup(); expect_diagnostic(wrapper+12,99,-2733);
+    setup(); expect_diagnostic(record+44,3,-2712);
+    setup(); expect_diagnostic(idle_node+4,99,-2717);
+}
+static void add_unrelated_records(uint32_t head, uint32_t size, uint32_t count) {
+    uint32_t i;
+    for(i=0;i<count;i++) {
+        uint32_t p=heap(size+8),name=p+(size==48 ? 12u : 8u);
+        memcpy(address(name,10),"Unrelated",10);
+        wr(p+(size==48 ? 4u : 0u),name);
+        /* Opaque non-target family payload is not part of this transaction. */
+        append(head,p);
+    }
+    old_live=live_allocations();
+}
+static void test_resource_scan_limits(void) {
+    uint32_t changed;
+    setup(); add_unrelated_records(mgr,48,100);
+    assert(reload_path(path_a,&changed)==0); committed(path_a,changed);
+    setup(); add_unrelated_records(rd(mgr+556),44,100);
+    assert(reload_path(path_a,&changed)==0); committed(path_a,changed);
+    setup(); add_unrelated_records(mgr,48,BACKING_SCAN);
+    assert(reload_path(path_a,&changed)==-2742 && !changed); unchanged();
+    assert(!file_opens);
+    setup(); expect_diagnostic(record+48,1,-2743);
+    setup(); expect_diagnostic(mgr+8,0,-2744);
+    setup(); expect_diagnostic(idle_node+44,1,-2753);
+    setup(); expect_diagnostic(wrapper+40,1,-2763);
+}
+static void add_affected_records(uint32_t active_extra, uint32_t idle_extra) {
+    uint32_t i,size=1,face=rd(old_dsc+52),id=rd(ctx+8);
+    for(i=0;i<active_extra;i++) {
+        uint32_t d,rec;
+        while(size==20 || size==24 || size==30) size++;
+        d=fixture_dsc(size,face); rec=fixture_record(d,size++,1);
+        (void)fixture_wrapper(rec);
+    }
+    for(i=0;i<idle_extra;i++) {
+        uint32_t p=heap(52),d=fixture_dsc(257+i,face);
+        wr(p,p+8); memcpy(address(p+8,8),"Regular",8);
+        wr(p+4,257+i); wr(p+40,d+4); append(rd(mgr+556),p);
+    }
+    wr(face+32,rd(face+32)+active_extra+idle_extra);
+    wr(id+4,rd(id+4)+active_extra+idle_extra);
+    old_live=live_allocations(); alloc_calls=0;
+}
+static void assert_batch_commit(const char *path, uint32_t changed, uint32_t active_count) {
+    uint32_t nodes[WRAPPERS],n,i,d,face;
+    assert(changed==1 && native_eq(rd(reg+4),path));
+    assert(list(mgr,48,nodes,WRAPPERS,&n)==0 && n==active_count);
+    for(i=0;i<n;i++) {
+        d=rd(rd(nodes[i])+24);
+        assert(alive(d) && native_eq(rd(d+60),path));
+        assert(descriptor(d+4,ctx,path)==0);
+    }
+    d=rd(wrapper+24); face=rd(d+52);
+    assert(rd(face+32)==active_count);
+    assert(!rd(rd(mgr+556)+4)); /* All affected idle descriptors were evicted. */
+    assert(list(mgr+12,40,nodes,WRAPPERS,&n)==0 && n==active_count+1);
+    for(i=0;i<n;i++) assert(rd(nodes[i]+24)==rd(rd(rd(nodes[i]+36))+24));
+    assert(rd(wrapper+28)==wrapper3 && rd(wrapper+32)==0x76543210);
+}
+static void test_large_affected_transaction(void) {
+    uint32_t changed,calls,i,failures[3];
+    /* 255 active backings, 256 live wrappers and 256 idle backings. */
+    setup(); add_affected_records(253,255);
+    assert(reload_path(path_a,&changed)==0); calls=alloc_calls;
+    assert_batch_commit(path_a,changed,255);
+    assert(!alive(old_dsc) && !alive(idle_node));
+    assert(reload_path(NULL,&changed)==0); assert_batch_commit(stock,changed,255);
+    failures[0]=1; failures[1]=calls/2; failures[2]=calls;
+    for(i=0;i<3;i++) {
+        uint32_t before_face,before_path;
+        setup(); add_affected_records(253,255);
+        before_face=rd(rd(old_dsc+52)+32); before_path=rd(rd(ctx+8)+4);
+        fail_alloc=failures[i];
+        assert(reload_path(path_a,&changed)<0 && !changed); unchanged();
+        assert(rd(rd(old_dsc+52)+32)==before_face && rd(rd(ctx+8)+4)==before_path);
+        fail_alloc=0;
+        assert(reload_path(path_a,&changed)==0); assert_batch_commit(path_a,changed,255);
+    }
+    printf("511-backing transaction, restore and early/middle/late OOM rollback passed (%u allocations)\n",calls);
+}
+static uint32_t add_extra_wrappers(uint32_t count) {
+    uint32_t i,p=0;
+    for(i=0;i<count;i++) {
+        p=fixture_wrapper(record);
+        wr(p+28,wrapper3); wr(p+32,0x12345678u+i);
+    }
+    wr(record+44,rd(record+44)+count);
+    old_live=live_allocations(); alloc_calls=0;
+    return p;
+}
+static void assert_extra_wrappers(uint32_t extra, uint32_t last) {
+    uint32_t p,n=0;
+    assert(list(mgr+12,40,0,WRAPPERS,&n)==0 && n==extra+3);
+    for(p=rd(mgr+16);p;p=rd(p+44))
+        assert(rd(p+24)==rd(rd(rd(p+36))+24));
+    assert(rd(record+44)==extra+2);
+    assert(rd(last+28)==wrapper3 && rd(last+32)==0x12345678u+extra-1);
+    assert(temp_live==0);
+}
+static void test_dynamic_wrappers(void) {
+    uint32_t counts[]={300,1021,WRAPPERS-3},i,changed,last;
+    for(i=0;i<3;i++) {
+        setup(); last=add_extra_wrappers(counts[i]);
+        assert(reload_path(path_a,&changed)==0 && changed==1);
+        assert_extra_wrappers(counts[i],last);
+        assert(reload_path(NULL,&changed)==0 && changed==1);
+        assert_extra_wrappers(counts[i],last);
+    }
+    setup(); last=add_extra_wrappers(1000); fail_temp_at=2;
+    assert(reload_path(path_a,&changed)==-2 && !changed); unchanged();
+    assert(temp_live==0 && !file_opens);
+    fail_temp_at=0;
+    assert(reload_path(path_a,&changed)==0 && changed==1);
+    assert_extra_wrappers(1000,last);
+    setup(); add_extra_wrappers(WRAPPERS-2);
+    assert(reload_path(path_a,&changed)==-2762 && !changed); unchanged();
+    assert(temp_live==0 && temp_calls==1 && !file_opens);
+    puts("dynamic snapshots: 303/1024/4096 wrappers, restore, snapshot OOM and 4097 refusal passed");
+}
+static void test_wrapper_snapshot_membership(void) {
+    struct transaction *t; uint32_t manager,context,p;
+    setup(); assert(roots(&manager,&context)==0 && registry(manager,context)==0);
+    t=calloc(1,sizeof(*t)); assert(t); t->dirty[0]=1; t->count=1;
+    assert(resources(t,manager,context)==0 && t->nwrap==3);
+    p=heap(48); append(mgr+12,p); /* Unrelated wrapper need not be snapshotted. */
+    assert(revalidate(t,manager,context)==0);
+    unlink_node(mgr+12,p); free_heap(p);
+    unlink_node(mgr+12,wrapper2); free_heap(wrapper2);
+    (void)fixture_wrapper(record); /* Same owner count, different identity. */
+    assert(revalidate(t,manager,context)==-2766);
+    rh_platform_free(t->wrapper); free(t); assert(temp_live==0);
+}
 static void test_busy(void) {
     uint32_t changed;
     setup(); wr(vg+32,123); assert(reload_path(path_a,&changed)==1 && !changed); unchanged();
@@ -276,6 +460,7 @@ static void test_busy(void) {
     old_live=live_allocations(); assert(reload_path(path_a,&changed)==1); unchanged();
     wr(glyph_queue+8,0); wr(glyph_queue+20,heap(24)); wr(glyph_queue+28,1); wr(glyph_queue+24,1);
     old_live=live_allocations(); assert(reload_path(path_a,&changed)==1); unchanged();
+    assert(file_opens==0); /* Busy polling must not repeatedly hash large files. */
     wr(glyph_queue+24,0); assert(!reload_path(path_a,&changed)); committed(path_a,changed);
     setup(); wr(glyph_queue+4,heap(24)); wr(glyph_queue+12,1); old_live=live_allocations();
     busy_in_prepare=1; assert(reload_path(path_a,&changed)==1 && !changed); unchanged();
@@ -418,7 +603,7 @@ static void test_multi_family_atomicity(void) {
     printf("checked %u two-family allocation failure positions\n",calls);
 }
 int main(void) {
-    test_switch_restore(); test_busy(); test_failures(); test_paths_and_lifecycle(); test_unknown_and_owners();
+    test_wrapper_snapshot_membership(); test_dynamic_wrappers(); test_large_affected_transaction(); test_resource_scan_limits(); test_ownership_diagnostics(); test_large_stock_files(); test_switch_restore(); test_busy(); test_failures(); test_paths_and_lifecycle(); test_unknown_and_owners();
     test_postcommit_overflow_latches();
     test_holds_limits_and_external_faces(); test_idle_only_and_unowned_family();
     test_unchanged_primary_with_changed_fallback(); test_multi_family_atomicity();

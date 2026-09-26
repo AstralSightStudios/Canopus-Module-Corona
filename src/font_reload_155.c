@@ -33,12 +33,17 @@ void rh_font_reload_disable(void) {}
  * substitute for the immutable-file contract. Limits fail closed, not truncate.
  */
 #define FAMILIES 32u
-#define RESOURCES 96u
-#define WRAPPERS 256u
+#define BACKING_SCAN 256u
+#define WRAPPERS 4096u
+/* Backing records and wrapper references have independent cardinalities. */
+#define RESOURCES (2u * BACKING_SCAN)
+#define INTERN_IDS 96u
 #define OBJECTS 512u
 #define HISTORY 64u
 #define CACHE_NODES 1024u
-#define FILE_LIMIT (8u * 1024u * 1024u)
+/* Stock .155 MiSans-Regular-All.ttf is 11,637,064 bytes. Bound reads,
+ * not allocation: hashing streams the file and never loads it wholesale. */
+#define FILE_LIMIT (32u * 1024u * 1024u)
 #define MAGIC 1600079444u
 #define CNT_CLASS 0x2ca16934u
 #define SIZE_CLASS 0x2ca168b4u
@@ -100,17 +105,18 @@ static uint32_t duplicate(const char *s) {
 }
 struct digest { uint32_t a,b,size; };
 static int fingerprint(const char *path, struct digest *out) {
-    unsigned char buf[512]; uint32_t i; int n,fd;
+    unsigned char buf[2048]; uint32_t i; int n,fd;
     struct digest h={2166136261u,0x9e3779b9u,0};
     fd=rh_platform_open(path,1);
-    if(fd<0) return -1;
+    if(fd<0) return -2210;
     while((n=rh_platform_read(fd,buf,sizeof(buf)))>0) {
-        if(n>(int)sizeof(buf) || h.size>FILE_LIMIT-(uint32_t)n) { rh_platform_close(fd); return -1; }
+        if(n>(int)sizeof(buf)) { rh_platform_close(fd); return -2210; }
+        if(h.size>FILE_LIMIT-(uint32_t)n) { rh_platform_close(fd); return -2211; }
         for(i=0;i<(uint32_t)n;i++) { h.a=(h.a^buf[i])*16777619u; h.b=(h.b<<5 | h.b>>27)^buf[i]; h.b+=h.a; }
         h.size+=(uint32_t)n;
     }
     rh_platform_close(fd);
-    if(n<0 || !h.size) return -1;
+    if(n<0 || !h.size) return -2210;
     *out=h; return 0;
 }
 static int digest_eq(struct digest a, struct digest b) { return a.a==b.a && a.b==b.b && a.size==b.size; }
@@ -150,10 +156,12 @@ static int list(uint32_t head, uint32_t size, uint32_t *out, uint32_t max, uint3
     uint32_t p,prev=0,n=0;
     if(rd(head)!=size) return -1;
     for(p=rd(head+4);p;p=rd(p+size+4)) {
-        if(n==max || rd(p+size)!=prev) return -1;
-        out[n++]=p; prev=p;
+        if(n==max) return -2;
+        if(rd(p+size)!=prev) return -3;
+        if(out) out[n]=p;
+        n++; prev=p;
     }
-    if(rd(head+8)!=prev) return -1;
+    if(rd(head+8)!=prev) return -4;
     *count=n; return 0;
 }
 static int registry(uint32_t mgr, uint32_t ctx) {
@@ -183,29 +191,50 @@ static int registry(uint32_t mgr, uint32_t ctx) {
  * after release: invalid entries can be freed by that call. */
 static int cache_check(uint32_t cache, uint32_t clz, uint32_t size, int holds, int vector) {
     uint32_t p,prev=0,n=0;
-    if(!cache || rd(cache)!=clz || rd(cache+4)!=size || rd(cache+48)!=4) return -1;
+    /* Stable diagnostic ranges: face 23xx, metrics 24xx, outline 25xx,
+     * vector 28xx. Negative results remain refusals; held entries stay busy. */
+    int base=vector ? 2800 : size==28 ? 2300 : size==32 ? 2400 : 2500;
+    if(!cache) return -base-1;
+    if(rd(cache)!=clz) return -base-2;
+    if(rd(cache+4)!=size) return -base-3;
+    if(rd(cache+48)!=4) return -base-4;
     if(clz==CNT_CLASS) {
         uint32_t compare,create,destroy;
         if(size==28) { compare=0x0c396785u; create=0x0c3967b5u; destroy=0x0c396b25u; }
         else if(size==32) { compare=0x0c39fd9bu; create=0x0c3a5ef1u; destroy=0x0c39fd95u; }
         else if(size==8) { compare=0x0c39fdcdu; create=0x0c3a8bb9u; destroy=0x0c3a09f5u; }
-        else return -1;
-        if(rd(cache+16)!=compare || rd(cache+20)!=create || rd(cache+24)!=destroy) return -1;
-    } else if(!vector || rd(cache+16)!=0x0c69feb1u || rd(cache+20) || rd(cache+24)!=0x0c6a12d5u) return -1;
+        else return -base-20;
+        if(rd(cache+16)!=compare) return -base-5;
+        if(rd(cache+20)!=create) return -base-6;
+        if(rd(cache+24)!=destroy) return -base-7;
+    } else {
+        if(!vector) return -base-20;
+        if(rd(cache+16)!=0x0c69feb1u) return -base-5;
+        if(rd(cache+20)) return -base-6;
+        if(rd(cache+24)!=0x0c6a12d5u) return -base-7;
+    }
     for(p=rd(cache+52);p;p=rd(p+8)) {
         uint32_t tree,data,entry,k;
-        if(++n>CACHE_NODES || rd(p+4)!=prev || !(tree=rd(p)) || !(data=rd(tree+16))) return -1;
+        if(++n>CACHE_NODES) return -base-8;
+        if(rd(p+4)!=prev) return -base-9;
+        if(!(tree=rd(p))) return -base-10;
+        if(!(data=rd(tree+16))) return -base-11;
         entry=data+size;
-        if(rd(entry)!=cache || rd(entry+8)!=size || rb(entry+12) || rd(entry+4)>=0x7ffffffeu) return -1;
+        if(rd(entry)!=cache) return -base-12;
+        if(rd(entry+8)!=size) return -base-13;
+        if(rb(entry+12)) return -base-14;
+        if(rd(entry+4)>=0x7ffffffeu) return -base-15;
         if(holds && rd(entry+4)) return 1;
         if(vector) {
             uint32_t paths=rd(data+8),count=rd(data+12);
-            if(count>1024 || (count && !paths)) return -1;
-            for(k=0;k<count;k++) { uint32_t path=rd(paths+20*k); if(!path || (rb(path+36)&1)) return -1; }
+            if(count>1024 || (count && !paths)) return -base-16;
+            for(k=0;k<count;k++) { uint32_t path=rd(paths+20*k); if(!path || (rb(path+36)&1)) return -base-17; }
         }
         prev=p;
     }
-    return rd(cache+56)==prev && (clz!=CNT_CLASS || rd(cache+12)==n) ? 0 : -1;
+    if(rd(cache+56)!=prev) return -base-18;
+    if(clz==CNT_CLASS && rd(cache+12)!=n) return -base-19;
+    return 0;
 }
 static int queue(uint32_t p, uint32_t element, uint32_t cb) {
     uint32_t i;
@@ -253,9 +282,14 @@ static int boundary(void) {
 struct replacement { uint32_t family,node,font,dsc,fresh,refs,idle,size,style; };
 struct wrap { uint32_t ptr,record,fallback,user; };
 struct transaction {
+    /* Deduplicate stock/current and shared generation reads within this turn.
+     * Paths refer to stable family/transaction storage until commit. */
+    uint32_t file_count;
+    struct { const char *path; struct digest hash; } files[FAMILIES * 3u];
     uint32_t path[FAMILIES],dirty[FAMILIES],count,nres,nwrap,nobj;
     char target[FAMILIES][RH_PATH]; struct digest hash[FAMILIES];
-    struct replacement res[RESOURCES]; struct wrap wrapper[WRAPPERS];
+    struct replacement res[RESOURCES];
+    struct wrap *wrapper; /* Actual list count, at most WRAPPERS, on the heap. */
     uint32_t objects[OBJECTS],overflow;
 };
 static int family_index(const char *name) {
@@ -264,70 +298,104 @@ static int family_index(const char *name) {
 }
 static int descriptor(uint32_t font, uint32_t ctx, const char *path) {
     uint32_t d,face,e; int r;
-    if(!font || rd(font)!=METRICS || rd(font+4)!=OUTLINE || rd(font+8)!=RELEASE) return -1;
+    if(!font) return -2601;
+    if(rd(font)!=METRICS) return -2602;
+    if(rd(font+4)!=OUTLINE) return -2603;
+    if(rd(font+8)!=RELEASE) return -2604;
     d=rd(font+24);
-    if(!d || font!=d+4 || rd(d)!=MAGIC || rd(d+48)!=ctx || rd(d+28)!=d ||
-       !rd(d+40) || rd(d+40)>512 || rb(d+46)!=1 || rb(d+47)!=0 ||
-       !native_eq(rd(d+60),path)) return -1;
+    if(!d || font!=d+4) return -2605;
+    if(rd(d)!=MAGIC) return -2606;
+    if(rd(d+48)!=ctx) return -2607;
+    if(rd(d+28)!=d) return -2608;
+    if(!rd(d+40) || rd(d+40)>512) return -2609;
+    if(rb(d+46)!=1 || rb(d+47)!=0) return -2610;
+    if(!native_eq(rd(d+60),path)) return -2611;
     face=rd(d+52); e=rd(d+56);
-    if(!face || !e || e!=face+28 || rd(e)!=rd(ctx+24) || rd(e+8)!=28 ||
-       !rd(e+4) || rb(e+12) || rd(face)!=rd(d+60) ||
-       rd(face+4)!=rd(d+44) || !rd(face+12) || !(rd(rd(face+12)+8)&1u)) return -1;
+    if(!face) return -2612;
+    if(!e || e!=face+28) return -2613;
+    if(rd(e)!=rd(ctx+24)) return -2614;
+    if(rd(e+8)!=28) return -2615;
+    if(!rd(e+4)) return -2616;
+    if(rb(e+12)) return -2617;
+    if(rd(face)!=rd(d+60)) return -2618;
+    if(rd(face+4)!=rd(d+44)) return -2619;
+    if(!rd(face+12)) return -2620;
+    if(!(rd(rd(face+12)+8)&1u)) return -2621;
     if((r=cache_check(rd(face+16),CNT_CLASS,32,1,0))!=0) return r;
     return cache_check(rd(face+20),CNT_CLASS,8,1,0);
 }
 static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
-    uint32_t nodes[WRAPPERS],n,i,j,idle=rd(mgr+556); char name[RH_PATH]; int f,r;
-    if(cache_check(rd(ctx+24),CNT_CLASS,28,0,0) || rd(rd(ctx+24)+8)!=0x7fffffffu) return -1;
-    if(list(mgr,48,nodes,RESOURCES,&n)) return -1;
+    uint32_t nodes[BACKING_SCAN],n,i,j,p,idle=rd(mgr+556); char name[RH_PATH]; int f,r;
+    r=cache_check(rd(ctx+24),CNT_CLASS,28,0,0); if(r) return r;
+    if(rd(rd(ctx+24)+8)!=0x7fffffffu) return -2701;
+    /* Scan all records, including unrelated families, with the existing
+     * scratch capacity. RESOURCES bounds replacements, not registry occupancy. */
+    r=list(mgr,48,nodes,BACKING_SCAN,&n); if(r) return -2740+r;
     for(i=0;i<n;i++) {
         uint32_t p=nodes[i];
-        if(!string(rd(p+4),name)) return -1;
+        if(!string(rd(p+4),name)) return -2703;
         f=family_index(name);
         if(f<0 || !t->dirty[f]) continue;
-        if(length(name)>=32 || rd(p+4)!=p+12 || !rd(p+44) || t->nres==RESOURCES) return -1;
+        if(length(name)>=32) return -2704;
+        if(rd(p+4)!=p+12) return -2705;
+        if(!rd(p+44)) return -2706;
+        if(t->nres==RESOURCES) return -2707;
         r=descriptor(rd(p),ctx,state.family[f].current); if(r) return r;
-        if(rd(rd(rd(p)+24)+40)!=(rd(p+8)&65535u) ||
-           (rd(rd(rd(p)+24)+44)&65535u)!=(rd(p+8)>>16)) return -1;
+        if(rd(rd(rd(p)+24)+40)!=(rd(p+8)&65535u)) return -2708;
+        if((rd(rd(rd(p)+24)+44)&65535u)!=(rd(p+8)>>16)) return -2709;
         t->res[t->nres++]=(struct replacement){(uint32_t)f,p,rd(p),rd(rd(p)+24),0,rd(p+44),0,
             rd(p+8)&65535u,rd(p+8)>>16};
     }
-    if(list(mgr+12,40,nodes,WRAPPERS,&n)) return -1;
+    r=list(mgr+12,40,0,WRAPPERS,&n); if(r) return -2760+r;
+    if(n) {
+        t->wrapper=rh_platform_alloc(n*sizeof(*t->wrapper));
+        if(!t->wrapper) return -2;
+    }
+    p=rd(mgr+16);
     for(i=0;i<n;i++) {
-        uint32_t p=nodes[i],rec=rd(p+36);
+        uint32_t rec;
+        if(!p) return -2765;
+        rec=rd(p+36);
         for(j=0;j<t->nres;j++) if(rec==t->res[j].node) {
             uint32_t k;
-            for(k=0;k<28;k+=4) if(rd(p+k)!=rd(t->res[j].font+k)) return -1;
+            /* Identify the exact differing copied word without overwriting
+             * wrapper-specific state merely to make validation pass. */
+            for(k=0;k<28;k+=4) if(rd(p+k)!=rd(t->res[j].font+k)) return -2730-(int)(k/4u);
             t->wrapper[t->nwrap++]=(struct wrap){p,rec,rd(p+28),rd(p+32)};
+            break;
         }
+        p=rd(p+44);
     }
+    if(p) return -2765;
     for(i=0;i<t->nres;i++) {
         uint32_t count=0;
         for(j=0;j<t->nwrap;j++) if(t->wrapper[j].record==t->res[i].node) count++;
-        if(count!=t->res[i].refs) return -1;
+        if(count!=t->res[i].refs) return -2712;
     }
     if(idle) {
-        if(list(idle,44,nodes,RESOURCES,&n)) return -1;
+        r=list(idle,44,nodes,BACKING_SCAN,&n); if(r) return -2750+r;
         for(i=0;i<n;i++) {
             uint32_t p=nodes[i];
-            if(!string(rd(p),name)) return -1;
+            if(!string(rd(p),name)) return -2714;
             f=family_index(name);
             if(f<0 || !t->dirty[f]) continue;
-            if(length(name)>=32 || t->nres==RESOURCES) return -1;
+            if(length(name)>=32) return -2715;
+            if(t->nres==RESOURCES) return -2716;
             r=descriptor(rd(p+40),ctx,state.family[f].current); if(r) return r;
-            if(rd(rd(rd(p+40)+24)+40)!=(rd(p+4)&65535u) ||
-               (rd(rd(rd(p+40)+24)+44)&65535u)!=(rd(p+4)>>16)) return -1;
+            if(rd(rd(rd(p+40)+24)+40)!=(rd(p+4)&65535u)) return -2717;
+            if((rd(rd(rd(p+40)+24)+44)&65535u)!=(rd(p+4)>>16)) return -2718;
             t->res[t->nres++]=(struct replacement){(uint32_t)f,p,rd(p+40),rd(rd(p+40)+24),0,0,1,
                 rd(rd(rd(p+40)+24)+40),rd(rd(rd(p+40)+24)+44)&65535u};
         }
     }
     /* One descriptor must have exactly one manager backing owner. */
-    for(i=0;i<t->nres;i++) for(j=0;j<i;j++) if(t->res[i].dsc==t->res[j].dsc) return -1;
+    for(i=0;i<t->nres;i++) for(j=0;j<i;j++) if(t->res[i].dsc==t->res[j].dsc) return -2719;
     for(i=0;i<state.count;i++) if(t->dirty[i]) {
         struct family *f=&state.family[i];
         for(j=0;j<t->nres && t->res[j].family!=i;j++) {}
         if(j==t->nres) {
-            if(!f->audited || t->nres==RESOURCES) return -1;
+            if(!f->audited) return -2206;
+            if(t->nres==RESOURCES) return -2720;
             t->res[t->nres++]=(struct replacement){i,0,0,0,0,0,2,f->size,f->style};
         } else {
             f->audited=1; f->size=t->res[j].size; f->style=t->res[j].style;
@@ -339,13 +407,13 @@ static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
  * Preallocate both node and string, then append without unchecked native list
  * allocation. Payload=8, prev=+8, next=+12, list at context+4. */
 static uint32_t intern(uint32_t ctx, const char *path) {
-    uint32_t nodes[RESOURCES],n,i,p,s,tail;
-    if(list(ctx+4,8,nodes,RESOURCES,&n)) return 0;
+    uint32_t nodes[INTERN_IDS],n,i,p,s,tail;
+    if(list(ctx+4,8,nodes,INTERN_IDS,&n)) return 0;
     for(i=0;i<n;i++) if(native_eq(rd(nodes[i]),path)) {
         p=nodes[i]; if(!rd(p+4) || rd(p+4)>=0x7ffffffeu) return 0;
         wr(p+4,rd(p+4)+1); return rd(p);
     }
-    if(n==RESOURCES) return 0;
+    if(n==INTERN_IDS) return 0;
     s=duplicate(path); if(!s) return 0;
     p=alloc(16); if(!p) { release_mem(s); return 0; }
     wr(p,s); wr(p+4,1); tail=rd(ctx+12); wr(p+8,tail);
@@ -453,23 +521,42 @@ static int refresh(struct transaction *t) {
     }
     return 0;
 }
-static int plan(struct transaction *t, const struct rh_mapping_view *mapping) {
-    uint32_t i,j,needed=0;
+static int file_digest(struct transaction *t, const char *path, struct digest *out) {
+    uint32_t i; int r;
+    for(i=0;i<t->file_count;i++) if(eq(path,t->files[i].path)) {
+        *out=t->files[i].hash; return 0;
+    }
+    if(t->file_count==FAMILIES*3u) return -2212;
+    r=fingerprint(path,out); if(r) return r;
+    t->files[t->file_count].path=path;
+    t->files[t->file_count++].hash=*out;
+    return 0;
+}
+static int select_paths(struct transaction *t, const struct rh_mapping_view *mapping) {
+    uint32_t i;
     for(i=0;i<state.count;i++) {
-        struct family *f=&state.family[i]; struct digest h; int r;
-        r=mapping->count ? rh_resolve_view(mapping,f->stock,t->target[i]) : 0;
+        struct family *f=&state.family[i];
+        int r=mapping->count ? rh_resolve_view(mapping,f->stock,t->target[i]) : 0;
         if(r<0) return -1;
         if(!r) copy(t->target[i],f->stock);
         if(!eq(t->target[i],f->current)) { t->dirty[i]=1; t->count++; }
+    }
+    return 0;
+}
+static int plan(struct transaction *t) {
+    uint32_t i,j,needed=0;
+    for(i=0;i<state.count;i++) {
+        struct family *f=&state.family[i]; struct digest h; int r;
         if(!t->dirty[i] && !f->hashed) continue;
         if(!f->hashed) {
-            if(fingerprint(f->stock,&f->stock_hash)) return -1;
+            r=file_digest(t,f->stock,&f->stock_hash); if(r) return r;
             f->current_hash=f->stock_hash; f->hashed=1;
         }
-        if(fingerprint(f->current,&h) || !digest_eq(h,f->current_hash)) return -1;
+        r=file_digest(t,f->current,&h); if(r) return r;
+        if(!digest_eq(h,f->current_hash)) return -2213;
         if(!t->dirty[i]) continue;
         if(length(f->name)>=32) return -1;
-        if(fingerprint(t->target[i],&t->hash[i])) return -1;
+        r=file_digest(t,t->target[i],&t->hash[i]); if(r) return r;
         if(eq(t->target[i],f->stock)) {
             if(!digest_eq(t->hash[i],f->stock_hash)) return -1;
         } else {
@@ -483,8 +570,8 @@ static int plan(struct transaction *t, const struct rh_mapping_view *mapping) {
 }
 /* Re-establish membership before dereferencing any transaction snapshot. */
 static int revalidate(struct transaction *t,uint32_t mgr,uint32_t ctx) {
-    uint32_t nodes[WRAPPERS],n,i,j,k; int r;
-    if(list(mgr,48,nodes,WRAPPERS,&n)) return -1;
+    uint32_t nodes[BACKING_SCAN],n,i,j,k,p; int r;
+    r=list(mgr,48,nodes,BACKING_SCAN,&n); if(r) return -2740+r;
     for(i=0;i<t->nres;i++) if(!t->res[i].idle) {
         struct replacement *v=&t->res[i];
         for(j=0;j<n && nodes[j]!=v->node;j++) {}
@@ -492,7 +579,7 @@ static int revalidate(struct transaction *t,uint32_t mgr,uint32_t ctx) {
         r=descriptor(v->font,ctx,state.family[v->family].current); if(r) return r;
     }
     if(rd(mgr+556)) {
-        if(list(rd(mgr+556),44,nodes,WRAPPERS,&n)) return -1;
+        r=list(rd(mgr+556),44,nodes,BACKING_SCAN,&n); if(r) return -2750+r;
     } else n=0;
     for(i=0;i<t->nres;i++) if(t->res[i].idle==1) {
         struct replacement *v=&t->res[i];
@@ -500,13 +587,21 @@ static int revalidate(struct transaction *t,uint32_t mgr,uint32_t ctx) {
         if(j==n || rd(v->node+40)!=v->font) return -1;
         r=descriptor(v->font,ctx,state.family[v->family].current); if(r) return r;
     }
-    if(list(mgr+12,40,nodes,WRAPPERS,&n)) return -1;
-    for(i=0;i<t->nwrap;i++) {
-        struct wrap *w=&t->wrapper[i];
-        for(j=0;j<n && nodes[j]!=w->ptr;j++) {}
-        if(j==n || rd(w->ptr+36)!=w->record || rd(w->ptr+28)!=w->fallback || rd(w->ptr+32)!=w->user) return -1;
-        for(k=0;k<28;k+=4) if(rd(w->ptr+k)!=rd(rd(w->record)+k)) return -1;
+    r=list(mgr+12,40,0,WRAPPERS,&n); if(r) return -2760+r;
+    /* Captured affected wrappers form an ordered subsequence of the live list.
+     * Re-establish membership without a large stack array or stale dereference. */
+    p=rd(mgr+16); j=0;
+    for(i=0;i<n;i++) {
+        if(!p) return -2765;
+        if(j<t->nwrap && p==t->wrapper[j].ptr) {
+            struct wrap *w=&t->wrapper[j++];
+            if(rd(p+36)!=w->record || rd(p+28)!=w->fallback || rd(p+32)!=w->user) return -1;
+            for(k=0;k<28;k+=4) if(rd(p+k)!=rd(rd(w->record)+k)) return -1;
+        }
+        p=rd(p+44);
     }
+    if(p) return -2765;
+    if(j!=t->nwrap) return -2766;
     return 0;
 }
 int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
@@ -514,15 +609,19 @@ int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
     if(changed) *changed=0;
     if(!changed || !mapping || rh_validate_rules(mapping->rules,mapping->count)) return -1;
     if(state.running) return 1;
-    if((r=roots(&mgr,&ctx))!=0) return r;
-    if(registry(mgr,ctx)) return -1;
+    if((r=roots(&mgr,&ctx))!=0) return r<0 ? -2201 : r;
+    if(registry(mgr,ctx)) return -2202;
     t=rh_platform_alloc(sizeof(*t)); if(!t) return -2;
     state.running=1;
     zero(t,sizeof(*t));
-    r=plan(t,mapping); if(r || !t->count) goto done;
-    r=boundary(); if(r) goto done;
+    r=select_paths(t,mapping); if(r) goto done;
+    if(!t->count) { r=plan(t); goto done; }
+    r=boundary(); if(r) { if(r<0) r=-2204; goto done; }
     r=resources(t,mgr,ctx); if(r) goto done;
-    walk(collect,t); if(t->overflow) { r=-1; goto done; }
+    walk(collect,t); if(t->overflow) { r=-2207; goto done; }
+    /* Do not stream large font files on every busy 50 ms retry. First prove
+     * an idle boundary and known ownership, then hash each unique file once. */
+    r=plan(t); if(r) goto done;
     for(i=0;i<state.count;i++) if(t->dirty[i]) {
         t->path[i]=duplicate(t->target[i]); if(!t->path[i]) { r=-2; goto done; }
     }
@@ -541,6 +640,7 @@ int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
         /* Unexpected lifecycle change inside native leaves: old allocations
          * may already be gone. Leak the bounded staged set rather than walk
          * stale native ownership. The disabled latch prevents further work. */
+        if(t->wrapper) rh_platform_free(t->wrapper);
         state.running=0; rh_platform_free(t); return disable();
     }
     if(registry(mgr,ctx)) { r=-1; goto done; }
@@ -581,6 +681,7 @@ done:
     /* Reverse descriptor acquisition order handles shared staged faces. */
     for(i=t->nres;i>0;i--) if(t->res[i-1].fresh) destroy_descriptor(t->res[i-1].fresh);
     for(i=0;i<state.count;i++) release_mem(t->path[i]);
+    if(t->wrapper) rh_platform_free(t->wrapper);
     state.running=0; rh_platform_free(t); return r;
 }
 #endif

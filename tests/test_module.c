@@ -11,6 +11,9 @@ static const char *input = config, *control_config, *control_signal;
 static unsigned position, control_position, signal_position;
 static unsigned config_opens, control_opens, signal_opens, closes, allocations, frees, persistent_allocs, registrations;
 static int watcher_scheduled;
+static char result_record[256];
+static unsigned result_position, result_writes;
+static int fail_result_write;
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
 static int fail_timer, reject_redraw, reject_metadata, unsupported;
@@ -30,7 +33,7 @@ int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
     assert(in_ui_timer && !locked && current && changed);
     font_calls++;
     last_font_path[0] = 0;
-    (void)rh_resolve_view(current, "/resource/font/MiSans-Regular.ttf", last_font_path);
+    (void)rh_resolve_view(current, "/resource/font/MiSans-Regular-All.ttf", last_font_path);
     *changed = !font_disabled && !font_rc ? font_changes : 0;
     return font_disabled ? -2099 : font_rc;
 }
@@ -46,6 +49,9 @@ static rh_open_fn slot = backend;
 int rh_platform_open(const char *path, int mode) {
     assert(!locked);
     if (!strcmp(path, "/dev/canopus")) { assert(mode == 2); return 10; }
+    if (!strcmp(path, "/data/quickapp/files/ng.lst.corona/reload.result")) {
+        assert(mode == 2); result_position=0; return 14;
+    }
     assert(mode == 1);
     if (!strcmp(path, RH_RELOAD_SIGNAL_PATH)) {
         signal_opens++;
@@ -87,13 +93,26 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
 }
 int rh_platform_write(int fd, const void *data, uint32_t size) {
     const struct canopus_module_registration_v1 *r = data;
+    if(fd==14) {
+        assert(!locked);
+        if(fail_result_write) return -1;
+        if(size>7) size=7; /* Exercise short-write completion. */
+        assert(result_position+size<=sizeof(result_record));
+        memcpy(result_record+result_position,data,size);
+        result_position+=size; result_writes++;
+        return (int)size;
+    }
     assert(!locked && fd == 10 && size == sizeof(*r));
     assert(r->magic == CANOPUS_MODULE_REGISTRATION_MAGIC);
     assert(!strcmp((const char *)r->module_id, "resource_hook"));
     registrations++;
     return (int)size;
 }
-void rh_platform_close(int fd) { assert(!locked && (fd == 10 || fd == 11 || fd == 12 || fd == 13)); closes++; }
+void rh_platform_close(int fd) {
+    assert(!locked);
+    if(fd==14) return;
+    assert(fd == 10 || fd == 11 || fd == 12 || fd == 13); closes++;
+}
 void *rh_platform_alloc(uint32_t size) {
     assert(!locked && (size == sizeof(struct rh_rule) * RH_RULES + RH_CONFIG_BYTES ||
                        size == sizeof(struct rh_rule) * RH_RULES));
@@ -126,7 +145,7 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
     int new_match;
     assert(!locked && current && current->rules && current->count <= 1);
     new_match = rh_resolve_view(current, "/resource/icon.bin", mapped);
-    assert(old_match == 1 || new_match == 1 || (!previous && !current->count));
+    assert(old_match >= 0 && new_match >= 0); /* Font-only exact rules need no image owner. */
     if (unsupported) return 1;
     if (reject_metadata) return -1;
     metadata_refreshes++;
@@ -179,7 +198,7 @@ static unsigned active_timers(uint32_t interval) {
 /* Two registered families: one whose file falls under a mapping rule, one that
  * does not. Once retargeted the first resolves to the themed file, so it stops
  * matching and the walk terminates. */
-#define THEMED_FONT RH_THEME_ROOT "current/font/MiSans-Regular.ttf"
+#define THEMED_FONT RH_THEME_ROOT "current/font/MiSans-Regular-All.ttf"
 int rh_platform_font_path_get(uint32_t index, char *name, char *path) {
     assert(!locked && name && path);
     if (index >= 2u) return -1;
@@ -188,7 +207,7 @@ int rh_platform_font_path_get(uint32_t index, char *name, char *path) {
         strcpy(path, "/system/fonts/Other.ttf");
     } else {
         strcpy(name, "MiSans-Regular");
-        strcpy(path, font_retargeted ? THEMED_FONT : "/resource/font/MiSans-Regular.ttf");
+        strcpy(path, font_retargeted ? THEMED_FONT : "/resource/font/MiSans-Regular-All.ttf");
     }
     return 0;
 }
@@ -259,6 +278,14 @@ static void font_status(int32_t result, uint32_t pending, uint32_t changed) {
     assert(!canopus_status_writer_init(&w, status, 47));
     assert(canopus_module_descriptor.query(&w) == -1 && !w.used);
 }
+static void assert_result(const char *signal, const char *row) {
+    uint32_t hash=2166136261u; unsigned i,n=(unsigned)(strlen(signal)+strlen(row));
+    assert(result_position==sizeof(result_record));
+    assert(!memcmp(result_record,signal,strlen(signal)));
+    assert(!memcmp(result_record+strlen(signal),row,strlen(row)));
+    for(i=0;i<n;i++) hash=(hash^(unsigned char)result_record[i])*16777619u;
+    assert(strtoul(result_record+n,NULL,10)==hash);
+}
 static int test_experimental_font_integration(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned before;
@@ -280,18 +307,21 @@ static int test_experimental_font_integration(void) {
     fire_timers(1000u);
     assert(active_timers(1000u) == 1);
 
-    control_config = "/resource/\t" RH_THEME_ROOT "font-g2/\n";
+    control_config = "/resource/font/MiSans-Regular-All.ttf\t" RH_THEME_ROOT
+        "font-g2/FusionPixel.ttf\n";
     control_signal = "resource-hook-reload-v1\tfont-g2\n";
     font_rc = 1;
     fire_timers(1000u);
     font_status(1, 1, 3);
-    assert(strstr(last_font_path, "/font-g2/") != NULL);
+    assert_result(control_signal,"RHRS1\t6\t1\t1\t0\n");
+    assert(!strcmp(last_font_path, RH_THEME_ROOT "font-g2/FusionPixel.ttf"));
     before = control_opens;
     fire_timers(1000u);
     assert(control_opens == before); /* pending keeps the mapping bank pinned */
     font_rc = -2090;
     fire_timers(50u);
     font_status(-2090, 0, 3);
+    assert_result(control_signal,"RHRS1\t6\t-2090\t0\t0\n");
     assert(!active_timers(50u));
 
     /* A distinct signal retries a rejected transaction without re-retiring
@@ -302,10 +332,16 @@ static int test_experimental_font_integration(void) {
     fire_timers(1000u);
     assert(image_drops == before);
     font_status(0, 0, 4);
+    assert_result(control_signal,"RHRS1\t6\t0\t0\t1\n");
     before = font_calls;
     control_signal = "resource-hook-reload-v1\tunchanged-font-g2\n";
+    fail_result_write=1;
     fire_timers(1000u);
+    assert(result_position==0);
+    fail_result_write=0;
+    fire_timers(1000u); /* Completed result retries I/O without reloading fonts. */
     assert(font_calls == before);
+    assert_result(control_signal,"RHRS1\t6\t0\t0\t0\n");
 
     control_config = "# restore stock\n";
     control_signal = "resource-hook-reload-v1\trestore-fonts\n";

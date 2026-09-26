@@ -164,8 +164,8 @@ RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
 旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
 miwear。
 
-当前 Manager 仅提供固定设置图标测试主题的安装/删除/重载按钮，不是通用主题选择器或资源上传页面，也没有展示模块 RHQ1 计数器
-（“立即激活”只负责加载激活模块，不负责传输主题文件）。
+当前 Manager 提供固定设置图标测试操作，以及仅供 `.155` 实验模块使用的 Fusion Pixel 字体替换/恢复按钮；不是通用主题选择器或资源上传页面，也不直接展示模块 RHQ1 计数器
+（“立即激活”只负责加载激活模块，不负责传输任意主题文件）。Manager 1.2.2 通过请求关联的文件回执确认模块结果；回执不可用时明确提示未确认，不阻断重载信号。当前字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，未覆盖 GPU 故障恢复或框架重启。
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
@@ -210,13 +210,13 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 
 ## 配置规则
 
-- 每行 `源目录<TAB>目标目录`，必须使用真实制表符；没有 `\\t` 转义语法。
+- 每行 `源路径<TAB>目标路径`，必须使用真实制表符；没有 `\\t` 转义语法。
 - LF 或 CRLF；允许末行无换行；空行以及首字节 `#` 的注释行被忽略。
 - 最多 64 条；文件最多 32768 字节；每个路径最多 255 字节（不含 NUL）。
-- 源和目标必须是绝对目录前缀，末尾 `/` 不可省略。
+- 目录映射的源和目标必须都是绝对目录路径，且都以 `/` 结尾；文件映射的源和目标都不以 `/` 结尾，并且只匹配完整路径。
 - 目标必须位于 `/data/quickapp/files/ng.lst.corona/themes/`；拒绝 `.`、`..`、重复分隔符、
   反斜杠、冒号、ASCII 控制字符和 DEL。重复源前缀也会拒绝整份配置。
-- 最长源前缀优先；拼接结果超过 255 字节时保持原始路径；不递归映射。
+- 最长匹配优先：目录规则按最长前缀匹配，精确文件规则只匹配完整路径；映射结果超过 255 字节时保持原始路径；不递归映射。
 - 只重定向 LVGL POSIX driver 的读模式（mode=2），不改变写入/读写操作。
 - 路径约束是**词法约束**，不是文件系统沙箱；不要在主题树下放置指向其他
   位置的符号链接。配置、主题文件及其父目录只应允许可信主体修改。
@@ -228,9 +228,9 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 新配置必须完整读取并通过校验；运行时允许 0 条规则以清除全部映射。零规则配置会保持透明 hook 和轮询器常驻。读取失败或非法配置会保留 last-known-good，并在后续轮询重试。更新使用双规则 bank 原子切换，并在定向刷新中同时
 考虑旧、新规则，因此删除映射也会刷新回原始资源。第二份规则 bank 增加 32 KiB 常驻
 Umem；每次解析变更配置最多另需 32 KiB scratch，分配失败会保留当前规则并在后续轮询重试。
-运行时规则更新不会重新映射字体注册表，不代表完整 UI/字体热重载。
+默认构建仅改写字体注册路径，不能替换页面已持有的字体对象，不代表完整 UI/字体热重载；仅 `.155` opt-in 实验构建支持受限字体事务，详见 [字体实验说明](FONT_RELOAD_EXPERIMENT.md)。
 
-Manager 的三个按钮会把 `settings-launcher.bin` 写到 `internal://files/themes/current/app/settings/launcher.bin`，安装或删除 `/resource/app/settings/` 对应映射，并由“重载资源”按钮写入 `internal://files/reload.request`。该页面只管理这个固定测试主题，不是通用配置编辑器或资源上传器；重载按钮也无法确认模块是否已应用。模块侧使用 native 绝对路径，Manager 侧使用
+图标按钮会把 `settings-launcher.bin` 写到 `internal://files/themes/current/app/settings/launcher.bin`，安装或删除 `/resource/app/settings/` 对应映射，再由“重载资源”按钮写入 `internal://files/reload.request`。字体按钮仅适用于 `.155` opt-in 实验模块：它把 Fusion Pixel 子集以 32 KiB 分块写入新的 `font-generations/g-<id>/` 不可变目录，并将解包固件 `/font/` 下的 9 个 `.ttf` 源路径分别以精确文件规则指向同一代文件；替换/恢复会自动发重载信号。分块读写避免把完整 6 MiB 字体装入 JS Buffer。旧字体代次不会删除，避免模块仍持有其路径或 face 时文件消失。Manager 1.2.2 另含 3 个 `/tmp/MiSans-{Regular,Medium,Demibold}.ttf` 启动复制路径规则，并等待与本次请求关联的 `reload.result` 回执，显示实际更新数、失败原因或超时；它不直接读取 RHQ1，仍不是通用配置编辑器或资源上传器。需要同步安装新版实验 ELF 和 Manager，旧模块没有回执时不能判断为成功。模块侧使用 native 绝对路径，Manager 侧使用
 `internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
 stop/deactivate 仍需完整重启卸载，不支持热卸载。
 

@@ -1,5 +1,6 @@
 #include "resource_hook.h"
-/* Format: source directory TAB destination directory LF. # starts a comment
+/* Format: source path TAB destination path LF. Directory paths end in '/'
+ * and append their unmatched suffix; file paths map exactly. # starts a comment
  * only at the beginning of a line. No escape syntax, truncation, partial apply
  * or silently ignored malformed rule is allowed. Caller provides staging. */
 int rh_parse_config(const char *text, uint32_t size, struct rh_rule *staging,

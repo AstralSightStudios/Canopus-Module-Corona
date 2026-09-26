@@ -3,13 +3,14 @@
 **0.3.0 · Xiaomi Band 11 / 4.100.139、4.100.155 · 资源路径重定向**
 
 两个目标使用独立 ELF、地址配置和签名收据，不能混用；`.139` 仍是默认构建目标。
-**.155 已有用户报告的单项实机成功：签名模块安装、主题路径配置及自定义设置启动器图标可见。**
+**.155 已有用户报告的实机成功：签名模块安装、自定义设置启动器图标，以及实验版字体替换/重载。**
+字体测试的产物哈希、修复经过和验证范围见 [字体实机记录](targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)。
 这不是全部资源 owner 的硬件验收；`.139` 仍为 **NOT_PROBED**。流程与证据边界见
 [实机记录](docs/INSTALL.md#155-用户报告的单项实机记录)。宿主测试和固件指令仿真不替代设备验收。
 
 ## 已实现
 
-- 最多 64 条最长前缀目录映射，从快应用私有文件根目录
+- 最多 64 条目录前缀或精确文件映射，最长匹配优先，从快应用私有文件根目录
   `/data/quickapp/files/ng.lst.corona/mappings.tsv` 完整校验后提交。路径最多 255 字节，
   配置最多 32 KiB。替代资源限于同根目录的 `themes/` 子树；拒绝路径穿越、重复规则和非法
   前缀，主题树不得含逃逸符号链接。Manager 对应 URI 根目录为 `internal://files/`。
@@ -60,7 +61,7 @@ RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.155
 独立产物为 `build/resource-hook-font-experimental.elf`，状态为 RHQ1 **v6 / 48 字节**。
 仍须通过 Canopus 精确目标包的地址白名单校验；尚未批准新字体接口的目标包会拒绝构建验证。
 **不能绕过校验安装，不能把空队列当作 GPU 故障后的安全证明。** GPU 异常、未观察到的框架
-重启、自定义文字 owner 和实机表现仍未验证；标准签名交付脚本拒绝此实验选项。
+重启、自定义文字 owner 仍未验证；当前字体替换/重载已有用户报告的实机通过，不等于完整故障场景验收。标准签名交付脚本仍拒绝此实验选项；独立实验安装表盘构建脚本为 `scripts/build-font-experimental-watchface.py`，不绕过签名或目标校验。
 详见 [实验开关、限制与验证说明](docs/FONT_RELOAD_EXPERIMENT.md)。
 
 ## 生命周期边界
@@ -198,9 +199,9 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 不能单凭“使用包内公钥验签成功”确认发布来源。
 
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
-启动配置文件不存在、为空或仅含注释时，模块以零规则启动 pass-through hook 和轮询器，不重定向资源或刷新 UI；之后写入映射并更新信号即可加载主题。模块运行后也可用 0 条规则清除全部映射。非法配置及其他读取错误会保留
+目录映射的源/目标都以 `/` 结尾并追加剩余路径；文件映射两端都不以 `/` 结尾，只匹配完整路径。启动配置文件不存在、为空或仅含注释时，模块以零规则启动 pass-through hook 和轮询器，不重定向资源或刷新 UI；之后写入映射并更新信号即可加载主题。模块运行后也可用 0 条规则清除全部映射。非法配置及其他读取错误会保留
 last-known-good。控制目录的变更标记格式为
-`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。字体注册表不跟随运行时规则更新。Manager 现在提供三个测试按钮：安装内置设置图标、删除该测试映射与图标、写入重载信号；安装/删除后需手动点重载，且 Manager 无法确认模块是否已应用。它通过 `internal://files/` 访问同一 app-scoped 文件区，仍不是通用配置编辑器或资源上传器。构建需要含已批准 errno veneer
+`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 提供设置图标测试操作，以及仅供 `.155` 实验模块使用的全字体替换/恢复测试；固件 `/font/` 下 9 个 `.ttf` 路径指向同一简中 Regular 子集，按 32 KiB 分块写入新不可变代次并发送重载信号。Manager 1.2.2 还覆盖 3 个 `/tmp/MiSans-*.ttf` 启动复制路径，并通过带请求编号与校验的 `reload.result` 显示真实事务结果、失败原因或等待超时；不直接读取 RHQ1。界面使用 18–24 px 高对比文字、单列大按钮和滚动列表。必须同时更新 Manager 与实验模块，不能只更新应用。它仍不是通用配置编辑器或资源上传器。它通过 `internal://files/` 访问同一 app-scoped 文件区。构建需要含已批准 errno veneer
 的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、
