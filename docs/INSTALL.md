@@ -67,10 +67,10 @@ shasum -a 256 -c SHA256SUMS
    `/data/quickapp/files/ng.lst.corona/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
    不意味着固件的所有字体和图片都经过这个目录。
 4. 使用兼容 Manager 的已验签安装流程导入 ELF 和 receipt；对应的 inbox
-   文件名为 `resource_hook.ko` 和 `resource_hook.cmi`，目录是
+   文件名为 `corona.ko` 和 `corona.cmi`，目录是
    `/data/canopus/inbox/`。**仅复制文件不等于完成安装**，还必须执行 Manager
    的 install 操作。不要直接编辑 registry.bin，也不要直接调用 ELF。
-5. 在 Manager 的模块列表打开 `resource_hook` 详情，点击“启用”并确认。
+5. 在 Manager 的模块列表打开 `corona` 详情，点击“启用”并确认。
    “启用”只保存下次启动的启用意图，**不**立即安装 Hook；“已启用”
    不能作为已经生效的证明。
 6. 想本次运行就生效，在同一详情页点击**“立即激活”**并确认：它会当场加载并
@@ -279,10 +279,9 @@ stop/deactivate 在安装后返回 SDK 的 `CANOPUS_RESULT_REBOOT_REQUIRED`。
 - 若 UI 异常，使用预先验证的 Supervisor safe-mode/设备恢复路径；不要继续
   用损坏主题尝试重启 miwear。没有可用恢复手段时，不进行首次实机安装。
 - `scripts/restart_miwear.sh` 故意退出 78；不要替换成 kill + sleep + start。
-- 旧模块运行时 ID `manager_resource_hook` 与新 ID `resource_hook` 不同。
+- 旧模块运行时 ID（如 `manager_resource_hook` 或 `resource_hook`）与新 ID `corona` 不同。
   先禁用旧模块并完整重启，确认它不再恢复后再安装新模块；不能同时启用两者。
-- 项目/Manager 包标识为 `ng.lst.corona`；registration、receipt、registry 的
-  运行时模块 ID 仍为 `resource_hook`，两者不能混用。
+- 项目/Manager 包标识与 registration、receipt、registry 的运行时模块 ID 统一为 `corona`（包名为 `ng.lst.corona`）。
 - semver 为 0.3.0，CMI1 模块整数版本为 3，CMI1 格式版本仍为 1。
   当前 Supervisor 不保证防降级，升级策略应由发布/安装流程另行控制。
 

@@ -114,7 +114,7 @@ def main():
             for name in ('evidence.json', 'ui-reload-audit.md', 'lifecycle-recovery.json'):
                 shutil.copyfile(ROOT / 'targets' / target / name, destination / name)
         (stage / 'validation.json').write_text(json.dumps({
-            'module': 'resource_hook', 'version': module_version,
+            'module': 'corona', 'version': module_version,
             'project_id': project_id,
             **({'target': targets[0]} if len(targets) == 1 else {}),
             'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},

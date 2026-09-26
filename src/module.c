@@ -11,7 +11,7 @@
 #define RH_FONT_EXPERIMENT 0
 #endif
 
-#define RH_MODULE_ID "resource_hook"
+#define RH_MODULE_ID "corona"
 #define RH_VERSION "0.3.0"
 /* `internal://files/` resolves to this app-scoped native path on Band 11. */
 #define RH_CONTROL_CONFIG RH_CONFIG_PATH

@@ -13,7 +13,7 @@ TARGETS = {
     "xiaomi-band-11-4.100.155": "ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f",
 }
 FIRMWARE = TARGETS[TARGET]  # Backward-compatible .139 default.
-MODULE_ID = "resource_hook"
+MODULE_ID = "corona"
 MODULE_VERSION = 3
 MAX_ARTIFACT = 393216
 

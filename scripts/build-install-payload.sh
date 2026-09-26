@@ -36,7 +36,7 @@ trap 'rm -rf -- "$STAGE"' EXIT HUP INT TERM
 cp "$ROOT/build/resource-hook.elf" "$STAGE/resource-hook.elf"
 python3 "$CANOPUS/scripts/build-module-installer-receipt.py" \
     --module "$STAGE/resource-hook.elf" \
-    --module-id resource_hook --version 3 --lifecycle 1 \
+    --module-id corona --version 3 --lifecycle 1 \
     --target-id "$TARGET_ID" \
     --firmware-sha256 "$FIRMWARE" \
     --private-key "$KEY" --output "$STAGE/receipt.bin"
@@ -55,7 +55,7 @@ p = Path(sys.argv[1])
 manifest = tomllib.loads(Path(sys.argv[4]).read_text())
 metadata = {
     "name": "Canopus-Module-Resource-Hook", "version": manifest['module']['version'],
-    "project_id": manifest['module']['id'], "runtime_id": "resource_hook",
+    "project_id": manifest['module']['id'], "runtime_id": "corona",
     "receipt_module_version": 3, "receipt_format_version": 1,
     "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi1",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",

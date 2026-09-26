@@ -104,7 +104,7 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
     }
     assert(!locked && fd == 10 && size == sizeof(*r));
     assert(r->magic == CANOPUS_MODULE_REGISTRATION_MAGIC);
-    assert(!strcmp((const char *)r->module_id, "resource_hook"));
+    assert(!strcmp((const char *)r->module_id, "corona"));
     registrations++;
     return (int)size;
 }
@@ -391,7 +391,7 @@ int main(int argc, char **argv) {
     assert(!strcmp(RH_THEME_ROOT, "/data/quickapp/files/ng.lst.corona/themes/"));
     assert(registrations == 1 && closes == 1);
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
-    assert(!strcmp((const char *)d->module_id, "resource_hook"));
+    assert(!strcmp((const char *)d->module_id, "corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
 #if defined(RH_TARGET_155) && RH_TARGET_155
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.155"));

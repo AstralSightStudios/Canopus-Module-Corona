@@ -38,18 +38,18 @@ class Rebind(unittest.TestCase):
             self.fail(f'build the signed {TARGET} payload in {PAYLOAD} before running firmware_rebind.py')
         elf, receipt = elf_path.read_bytes(), receipt_path.read_bytes()
         self.assertEqual(len(receipt), 256)
-        self.assertEqual(receipt[32:64].split(b'\0')[0], b'resource_hook')
+        self.assertEqual(receipt[32:64].split(b'\0')[0], b'corona')
         self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'),
                          'fixture receipt must match RESOURCE_HOOK_TARGET')
         self.assertEqual(receipt[112:144], bytes.fromhex(FIRMWARE_SHA256[TARGET]),
                          'fixture firmware fingerprint must match selected target')
         lifecycle, version = struct.unpack_from('<2I', receipt, 16)
         self.m = m = Machine()
-        record = bytearray(registry('resource_hook', lifecycle, version))
+        record = bytearray(registry('corona', lifecycle, version))
         struct.pack_into('<I', record, 60, int(enabled))
         m.disk['/data/canopus/registry.bin'] = bytes(record)
-        m.disk['/data/canopus/inbox/resource_hook.cmi'] = receipt
-        m.disk['/data/canopus/inbox/resource_hook.ko'] = elf
+        m.disk['/data/canopus/inbox/corona.cmi'] = receipt
+        m.disk['/data/canopus/inbox/corona.ko'] = elf
         m.disk[CONFIG_PATH] = f'/resource/\t{THEME_ROOT}current/\n'.encode()
         m.disk[THEME_ROOT + 'current/a.bin'] = b'mapped file'
         self.descriptor = None

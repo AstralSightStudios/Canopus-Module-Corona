@@ -121,7 +121,7 @@ def main():
         shutil.copyfile(elf, module)
         receipt = payload / 'receipt.bin'
         run([sys.executable, RECEIPT_BUILDER,
-             '--module', module, '--module-id', 'resource_hook', '--version', 3,
+             '--module', module, '--module-id', 'corona', '--version', 3,
              '--lifecycle', 1, '--target-id', TARGET, '--firmware-sha256', firmware,
              '--private-key', private_key, '--output', receipt])
         run([sys.executable, ROOT / 'scripts/verify-payload.py', payload,

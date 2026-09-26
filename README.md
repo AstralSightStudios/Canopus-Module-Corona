@@ -79,8 +79,8 @@ RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.155
 - 不自动重启 miwear，不保证 Hook 早于首次资源读取，没有主题选择器/资源上传 UI。
   `restart_miwear.sh` 故意退出 78；stop/deactivate 的 reboot-required 不表示已拆除 Hook。
 
-项目/管理器包标识为 `ng.lst.corona`；运行时/收据标识仍为 `resource_hook`。
-旧 `manager_resource_hook` 不会自动迁移：先禁用并完整重启，再安装新模块，不能同时启用。
+项目/管理器包标识为 `ng.lst.corona`；运行时/收据标识为 `corona`。
+旧 `manager_resource_hook` / `resource_hook` 不会自动迁移：先禁用并完整重启，再安装新模块，不能同时启用。
 
 新适配器的可重复验证：
 
