@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'resource-hook-manager-'));
+const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'resource-hook-manager-')));
 const realTimeout = global.setTimeout;
 
 function record(revision, result = 0, pending = 0, changed = 2, version = 6) {
@@ -35,18 +35,27 @@ function files() {
     delete(o) { sizes.delete(o.uri); text.delete(o.uri); o.success(); }
   };
 }
+function loadBridge(nativeFile) {
+  const boundary = path.join(temporary, 'system-file.js');
+  require.cache[boundary] = { id: boundary, filename: boundary, loaded: true,
+    exports: { __esModule: true, default: nativeFile } };
+  delete require.cache[path.join(temporary, 'file.js')];
+  delete require.cache[path.join(temporary, 'theme-bridge.js')];
+  return require(path.join(temporary, 'theme-bridge.js'));
+}
 async function main() {
   execFileSync(path.join(root, 'manager/node_modules/.bin/tsc'), [
     path.join(root, 'manager/src/ts/theme-bridge.ts'), '--outDir', temporary,
-    '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck'
+    '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck', '--allowJs'
   ], { stdio: 'inherit' });
-  const { ThemeBridge, parseReloadResult } = require(path.join(temporary, 'theme-bridge.js'));
+  const file = files();
+  const { ThemeBridge, parseReloadResult } = loadBridge(file);
   assert.deepEqual(parseReloadResult(record('g1'), 'g1'), { version: 6, result: 0, pending: false, changed: 2 });
   assert.equal(parseReloadResult(record('old'), 'new'), null);
   assert.equal(parseReloadResult(record('g1').slice(0, 50), 'g1'), null);
   assert.equal(parseReloadResult(record('g1').replace('RHRS1\t6\t0', 'RHRS1\t6\t1'), 'g1'), null);
   assert.equal(parseReloadResult(record('g1', 0, 0, 2, 7), 'g1'), null);
-  const file = files(), bridge = new ThemeBridge(file);
+  const bridge = new ThemeBridge();
   await assert.rejects(new Promise((resolve, reject) => file.writeText({
     uri: 'internal://files/reload.result', text: '', success: resolve,
     fail: (message, code) => reject(new Error(`${code}: ${message}`))
@@ -69,7 +78,9 @@ async function main() {
   assert.equal(file.sizes.size, 2); // Never unlink referenced generations.
 
   // Failure of diagnostics must not stop the image/resource reload signal.
-  const broken = files(), fallback = new ThemeBridge(broken);
+  const broken = files();
+  const { ThemeBridge: FallbackBridge } = loadBridge(broken);
+  const fallback = new FallbackBridge();
   const write = broken.writeText.bind(broken);
   broken.writeText = o => o.uri.endsWith('/reload.result') ? o.fail('invalid text', 202) : write(o);
   const revision = await fallback.requestReload();

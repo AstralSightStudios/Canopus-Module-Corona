@@ -31,7 +31,6 @@
 </template>
 
 <script>
-import file from "@system.file"
 import { ThemeBridge } from "../../ts/theme-bridge"
 
 export default {
@@ -43,7 +42,7 @@ export default {
   },
 
   onInit() {
-    this.bridge = new ThemeBridge(file)
+    this.bridge = new ThemeBridge()
   },
 
   onDestroy() {

@@ -1,56 +1,9 @@
-export interface FileApi {
-  readText(options: {
-    uri: string
-    encoding?: string
-    success: (data: { text: string }) => void
-    fail: (data: unknown, code: number) => void
-  }): void
-  writeText(options: {
-    uri: string
-    text: string
-    encoding?: string
-    success: () => void
-    fail: (data: unknown, code: number) => void
-  }): void
-  readArrayBuffer(options: {
-    uri: string
-    position?: number
-    length?: number
-    success: (data: { buffer: Uint8Array }) => void
-    fail: (data: unknown, code: number) => void
-  }): void
-  writeArrayBuffer(options: {
-    uri: string
-    buffer: Uint8Array
-    position?: number
-    success: () => void
-    fail: (data: unknown, code: number) => void
-  }): void
-  get(options: {
-    uri: string
-    success: (data: { length: number; type?: string }) => void
-    fail: (data: unknown, code: number) => void
-  }): void
-  mkdir(options: {
-    uri: string
-    recursive?: boolean
-    success: () => void
-    fail: (data: unknown, code: number) => void
-  }): void
-  delete(options: {
-    uri: string
-    success: () => void
-    fail: (data: unknown, code: number) => void
-  }): void
-}
+import * as file from "./file"
+import type { FileOperationError } from "./file"
 
 /** Native filesystem root backing this Manager's app-scoped files URI. */
 export const NATIVE_SHARED_PATH = "/data/quickapp/files/ng.lst.corona/"
 export const QUICKAPP_FILES_URI = "internal://files/"
-
-interface FileOperationError extends Error {
-  code?: number
-}
 
 const MAPPINGS_URI = `${QUICKAPP_FILES_URI}mappings.tsv`
 const RELOAD_URI = `${QUICKAPP_FILES_URI}reload.request`
@@ -87,12 +40,6 @@ const MAX_CONFIG_BYTES = 32768
 const MAX_RULES = 64
 const MAX_PATH_BYTES = 256
 const RELOAD_PREFIX = "resource-hook-reload-v1\tng.lst.corona\t"
-
-function fileError(operation: string, uri: string, code: number, data: unknown): FileOperationError {
-  const error = new Error(`${operation} ${uri} 失败（code ${code}）：${String(data)}`) as FileOperationError
-  error.code = code
-  return error
-}
 
 function utf8Length(value: string): number {
   let size = 0
@@ -287,30 +234,28 @@ export class ThemeBridge {
 
   cancelWait(): void { this.waitEpoch++ }
 
-  constructor(private readonly file: FileApi) {}
-
   async installTestTheme(): Promise<void> {
     const oldConfig = await this.readMappings()
     const nextConfig = updateTestMapping(oldConfig, true)
-    const asset = await this.readArrayBuffer(THEME_ASSET_URI)
+    const asset = await file.readArrayBuffer(THEME_ASSET_URI)
     validateSettingsIcon(asset)
-    const existing = await this.readOptionalArrayBuffer(THEME_FILE_URI)
+    const existing = await file.readOptionalArrayBuffer(THEME_FILE_URI)
     if (!existing || !sameBytes(asset, existing)) {
-      if (existing) await this.deleteFile(THEME_FILE_URI)
+      if (existing) await file.deleteFile(THEME_FILE_URI)
       // Some Vela builds report EEXIST for an existing directory; write/readback is authoritative.
-      await this.makeDirectory(THEME_DIRECTORY_URI).catch(() => undefined)
-      await this.writeArrayBuffer(THEME_FILE_URI, asset)
+      await file.makeDirectory(THEME_DIRECTORY_URI).catch(() => undefined)
+      await file.writeArrayBuffer(THEME_FILE_URI, asset)
     }
-    const written = await this.readArrayBuffer(THEME_FILE_URI)
+    const written = await file.readArrayBuffer(THEME_FILE_URI)
     if (!sameBytes(asset, written)) throw new Error("设置图标写入后校验失败")
-    if (nextConfig !== oldConfig) await this.writeText(MAPPINGS_URI, nextConfig)
+    if (nextConfig !== oldConfig) await file.writeText(MAPPINGS_URI, nextConfig)
   }
 
   async deleteTestTheme(): Promise<void> {
     const oldConfig = await this.readMappings()
     const nextConfig = updateTestMapping(oldConfig, false)
-    if (nextConfig !== oldConfig) await this.writeText(MAPPINGS_URI, nextConfig)
-    if (await this.readOptionalArrayBuffer(THEME_FILE_URI)) await this.deleteFile(THEME_FILE_URI)
+    if (nextConfig !== oldConfig) await file.writeText(MAPPINGS_URI, nextConfig)
+    if (await file.readOptionalArrayBuffer(THEME_FILE_URI)) await file.deleteFile(THEME_FILE_URI)
   }
 
   async installAllFirmwareFonts(): Promise<{ generation: string; revision: string }> {
@@ -323,18 +268,18 @@ export class ThemeBridge {
     const uri = `${FONT_GENERATION_ROOT_URI}${generationDirectory}/${FONT_ASSET_NAME}`
     const nextConfig = updateFontMappings(oldConfig, true, destination)
     await this.ensureFontPathUnused(uri)
-    await this.makeDirectory(`${FONT_GENERATION_ROOT_URI}${generationDirectory}/`).catch(() => undefined)
+    await file.makeDirectory(`${FONT_GENERATION_ROOT_URI}${generationDirectory}/`).catch(() => undefined)
     try {
       await this.writeMiSansFont(uri)
-      const fileInfo = await this.readFileInfo(uri)
+      const fileInfo = await file.readFileInfo(uri)
       if ((fileInfo.type && fileInfo.type !== "file") || fileInfo.length !== FONT_ASSET_SIZE)
         throw new Error("字体写入后长度校验失败；映射尚未更新。")
     } catch (error) {
       // This generation is not yet referenced by mappings.tsv, so a partial copy is disposable.
-      await this.deleteFile(uri).catch(() => undefined)
+      await file.deleteFile(uri).catch(() => undefined)
       throw error
     }
-    if (nextConfig !== oldConfig) await this.writeText(MAPPINGS_URI, nextConfig)
+    if (nextConfig !== oldConfig) await file.writeText(MAPPINGS_URI, nextConfig)
     const revision = await this.requestReload()
     return { generation: generationDirectory, revision }
   }
@@ -342,7 +287,7 @@ export class ThemeBridge {
   async restoreFirmwareFonts(): Promise<{ revision: string; broaderDirectoryRule: boolean }> {
     const oldConfig = await this.readMappings()
     const nextConfig = updateFontMappings(oldConfig, false, "")
-    if (nextConfig !== oldConfig) await this.writeText(MAPPINGS_URI, nextConfig)
+    if (nextConfig !== oldConfig) await file.writeText(MAPPINGS_URI, nextConfig)
     // Keep all generations immutable; live or retained native objects may still reference them.
     const revision = await this.requestReload()
     return { revision, broaderDirectoryRule: hasBroaderDirectoryMapping(nextConfig, FONT_SOURCES) }
@@ -352,17 +297,17 @@ export class ThemeBridge {
     let position = 0
     while (position < FONT_ASSET_SIZE) {
       const length = Math.min(FONT_CHUNK_SIZE, FONT_ASSET_SIZE - position)
-      const chunk = await this.readArrayBuffer(FONT_ASSET_URI, position, length)
+      const chunk = await file.readArrayBuffer(FONT_ASSET_URI, position, length)
       if (chunk.length !== length) throw new Error(`字体资源分块读取不完整（${position}）。`)
       if (position === 0) validateMiSansSubsetHeader(chunk)
-      await this.writeArrayBuffer(uri, chunk, position)
+      await file.writeArrayBuffer(uri, chunk, position)
       position += chunk.length
     }
   }
 
   private async ensureFontPathUnused(uri: string): Promise<void> {
     try {
-      await this.readFileInfo(uri)
+      await file.readFileInfo(uri)
       throw new Error("字体代次路径已存在；为保持文件不可变，拒绝覆盖。")
     } catch (error) {
       const code = (error as FileOperationError).code
@@ -372,7 +317,7 @@ export class ThemeBridge {
   }
 
   private async nextFontGeneration(): Promise<string> {
-    const savedText = await this.readOptionalText(FONT_GENERATION_COUNTER_URI)
+    const savedText = await file.readOptionalText(FONT_GENERATION_COUNTER_URI)
     let saved = 0
     if (savedText !== null) {
       const value = savedText.trim()
@@ -383,7 +328,7 @@ export class ThemeBridge {
     }
     const next = Math.max(Date.now(), saved + 1, this.fontGeneration + 1)
     if (!Number.isSafeInteger(next)) throw new Error("无法分配唯一字体代次。")
-    await this.writeText(FONT_GENERATION_COUNTER_URI, String(next))
+    await file.writeText(FONT_GENERATION_COUNTER_URI, String(next))
     this.fontGeneration = next
     const random = Math.floor(Math.random() * 0x100000000).toString(36)
     return `${next.toString(36)}-${random}`
@@ -397,11 +342,11 @@ export class ThemeBridge {
     // but never let optional diagnostics block the original reload operation.
     this.resultSetupFailure = null
     try {
-      await this.writeText(RESULT_URI, `pending\t${revision}\n`)
+      await file.writeText(RESULT_URI, `pending\t${revision}\n`)
     } catch (error) {
       this.resultSetupFailure = { revision, message: String(error) }
     }
-    await this.writeText(RELOAD_URI, `${RELOAD_PREFIX}${revision}\n`)
+    await file.writeText(RELOAD_URI, `${RELOAD_PREFIX}${revision}\n`)
     return revision
   }
 
@@ -414,7 +359,7 @@ export class ThemeBridge {
       if (epoch !== this.waitEpoch) throw new Error("已停止等待模块回执。")
       let text: string | null
       try {
-        text = await this.readOptionalText(RESULT_URI)
+        text = await file.readOptionalText(RESULT_URI)
       } catch (error) {
         throw new Error(`重载请求已发送，但读取回执失败，无法确认结果。${String(error)}`)
       }
@@ -443,144 +388,6 @@ export class ThemeBridge {
   }
 
   private async readMappings(): Promise<string> {
-    return (await this.readOptionalText(MAPPINGS_URI)) || ""
-  }
-
-  private async readOptionalText(uri: string): Promise<string | null> {
-    try {
-      return await this.readText(uri)
-    } catch (error) {
-      if ((error as FileOperationError).code === 301) return null
-      throw error
-    }
-  }
-
-  private async readOptionalArrayBuffer(uri: string): Promise<Uint8Array | null> {
-    try {
-      return await this.readArrayBuffer(uri)
-    } catch (error) {
-      if ((error as FileOperationError).code === 301) return null
-      throw error
-    }
-  }
-
-  private readText(uri: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.file.readText({
-          uri,
-          encoding: "UTF-8",
-          success: result => resolve(result.text),
-          fail: (data, code) => reject(fileError("读取", uri, code, data))
-        })
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  private writeText(uri: string, text: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.file.writeText({
-          uri,
-          text,
-          encoding: "UTF-8",
-          success: resolve,
-          fail: (data, code) => reject(fileError("写入", uri, code, data))
-        })
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  private readArrayBuffer(uri: string, position?: number, length?: number): Promise<Uint8Array> {
-    return new Promise((resolve, reject) => {
-      const options: {
-        uri: string
-        position?: number
-        length?: number
-        success: (data: { buffer: Uint8Array }) => void
-        fail: (data: unknown, code: number) => void
-      } = {
-        uri,
-        success: result => resolve(result.buffer),
-        fail: (data, code) => reject(fileError("读取", uri, code, data))
-      }
-      if (position !== undefined) options.position = position
-      if (length !== undefined) options.length = length
-      try {
-        this.file.readArrayBuffer(options)
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  private writeArrayBuffer(uri: string, buffer: Uint8Array, position?: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const options: {
-        uri: string
-        buffer: Uint8Array
-        position?: number
-        success: () => void
-        fail: (data: unknown, code: number) => void
-      } = {
-        uri,
-        buffer,
-        success: resolve,
-        fail: (data, code) => reject(fileError("写入", uri, code, data))
-      }
-      if (position !== undefined) options.position = position
-      try {
-        this.file.writeArrayBuffer(options)
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  private readFileInfo(uri: string): Promise<{ length: number; type?: string }> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.file.get({
-          uri,
-          success: result => resolve({ length: result.length, type: result.type }),
-          fail: (data, code) => reject(fileError("检查文件", uri, code, data))
-        })
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  private makeDirectory(uri: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.file.mkdir({
-          uri,
-          recursive: true,
-          success: resolve,
-          fail: (data, code) => reject(fileError("创建目录", uri, code, data))
-        })
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  private deleteFile(uri: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.file.delete({
-          uri,
-          success: resolve,
-          fail: (data, code) => reject(fileError("删除", uri, code, data))
-        })
-      } catch (error) {
-        reject(error)
-      }
-    })
+    return (await file.readOptionalText(MAPPINGS_URI)) || ""
   }
 }

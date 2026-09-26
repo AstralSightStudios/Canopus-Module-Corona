@@ -2,7 +2,7 @@
 
 - Recorded: 2026-09-26 (UTC).
 - Device/firmware: Xiaomi Band 11, 4.100.155, as identified by the user during this session.
-- Result: **USER_REPORTED_PASS** for the current experimental font-replacement/reload test through Manager.
+- Result: **USER_REPORTED_PASS** for the experimental font-replacement/reload test through Manager. A later stock-restoration attempt is **USER_REPORTED_FAIL** (`-2`); see the follow-up below.
 - Evidence: after testing the wrapper-capacity fix, the user reported: “实机验证通过，记录并commit”.
 - This is a user report, not an independently observed hardware trace. No screenshot, device memory dump, measured resource counts, or device-side artifact hash was supplied.
 
@@ -43,8 +43,16 @@ Manager also uses larger 18–24 px high-contrast text, full-width buttons and a
 
 These tests model native leaves; they are not full FreeType/GPU/device fault-injection tests.
 
+## Follow-up: restoring stock fonts fails
+
+Later in the same session the user reported: “字体替换生效之后，再按恢复默认会显示-2”. This narrows the positive result to replacement/reload only; stock restoration is now a reported failure, not merely untested. The device-specific cause remains unresolved because the tested build merged several preparation failures into `-2`.
+
+The diagnostic update separates allocation, intern-list, target-face ownership and native preparation failures into `-29xx` codes, without relaxing refusal or rollback checks. A host fixture reproduces successful replacement followed by refused restoration when another consumer retains the stock face (`-2908`); this is a possible cause, not proof of the device's failure path. It also covers 12 native allocation-failure positions during restoration, unchanged replacement references and successful retry after removing the injected failure. These tests are not a device restoration pass.
+
+The hashes above identify the original reported test artifacts, **not** later rebuilt diagnostic/refactored artifacts.
+
 ## Unchanged exclusions
 
-This pass does **not** establish GPU timeout/reset recovery, framework restart safety, unknown/custom text-owner support, arbitrary font compatibility, repeated switching endurance, memory-pressure behavior on hardware, or a separate hardware stock-restoration test. Those cases were not explicitly reported as tested. `.139` font hot reload is not enabled by this result.
+This pass does **not** establish GPU timeout/reset recovery, framework restart safety, unknown/custom text-owner support, arbitrary font compatibility, repeated switching endurance, memory-pressure behavior on hardware, or successful hardware stock restoration. The other cases were not explicitly reported as tested; restoration was subsequently reported as failing, as recorded above. `.139` font hot reload is not enabled by this result.
 
 Keep the feature opt-in, retain immutable generation files, and do not bypass ownership, allocation, signature or exact-target checks. Installer builders should not automatically label newly generated artifacts as device-tested; this report records the specific user-reported test and associated local artifacts only.

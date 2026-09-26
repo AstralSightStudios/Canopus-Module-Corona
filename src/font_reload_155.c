@@ -349,7 +349,7 @@ static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
     r=list(mgr+12,40,0,WRAPPERS,&n); if(r) return -2760+r;
     if(n) {
         t->wrapper=rh_platform_alloc(n*sizeof(*t->wrapper));
-        if(!t->wrapper) return -2;
+        if(!t->wrapper) return -2902;
     }
     p=rd(mgr+16);
     for(i=0;i<n;i++) {
@@ -406,16 +406,19 @@ static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
 /* Checked face-ID interning. Firmware drop_face_id owns these allocations.
  * Preallocate both node and string, then append without unchecked native list
  * allocation. Payload=8, prev=+8, next=+12, list at context+4. */
-static uint32_t intern(uint32_t ctx, const char *path) {
-    uint32_t nodes[INTERN_IDS],n,i,p,s,tail;
-    if(list(ctx+4,8,nodes,INTERN_IDS,&n)) return 0;
+static uint32_t intern(uint32_t ctx, const char *path, int *error) {
+    uint32_t nodes[INTERN_IDS],n,i,p,s,tail; int r;
+    *error=0;
+    r=list(ctx+4,8,nodes,INTERN_IDS,&n);
+    if(r) { *error=-2920+r; return 0; }
     for(i=0;i<n;i++) if(native_eq(rd(nodes[i]),path)) {
-        p=nodes[i]; if(!rd(p+4) || rd(p+4)>=0x7ffffffeu) return 0;
+        p=nodes[i];
+        if(!rd(p+4) || rd(p+4)>=0x7ffffffeu) { *error=-2931; return 0; }
         wr(p+4,rd(p+4)+1); return rd(p);
     }
-    if(n==INTERN_IDS) return 0;
-    s=duplicate(path); if(!s) return 0;
-    p=alloc(16); if(!p) { release_mem(s); return 0; }
+    if(n==INTERN_IDS) { *error=-2932; return 0; }
+    s=duplicate(path); if(!s) { *error=-2933; return 0; }
+    p=alloc(16); if(!p) { release_mem(s); *error=-2934; return 0; }
     wr(p,s); wr(p+4,1); tail=rd(ctx+12); wr(p+8,tail);
     if(tail) wr(tail+12,p); else wr(ctx+8,p);
     wr(ctx+12,p); return s;
@@ -440,23 +443,28 @@ static void destroy_descriptor(uint32_t d) {
 /* Fully checked replacement for the allocation-unsafe native font factory.
  * A preexisting target face is deliberately unsupported: it might belong to
  * an untracked consumer. Sharing is allowed only between this transaction's
- * newly prepared descriptors. Stock restoration works after prior generations
- * have evicted their old manager backing and idle entries. */
-static uint32_t prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
+ * newly prepared descriptors. Stock restoration additionally requires that no
+ * other consumer still owns the target stock face. Do not misreport this
+ * ownership refusal (or intern/FT validation failure) as allocation failure. */
+static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     uint32_t d=0,path=0,e=0,face=0,i,found=0,key[7],ft,size,metrics,v;
+    int error;
     zero(key,sizeof(key));
-    d=alloc(64); if(!d) return 0;
-    path=intern(ctx,t->target[r->family]); if(!path) goto fail;
+    d=alloc(64); if(!d) return -2904;
+    path=intern(ctx,t->target[r->family],&error); if(!path) goto fail;
     key[0]=path; key[1]=65536u | r->style;
     e=call(0x0c3a3860u,rd(ctx+24),key,0);
     if(e) {
         for(i=0;i<t->nres;i++) if(t->res[i].fresh && rd(t->res[i].fresh+56)==e) found=1;
         if(!found || rd(e+4)==0xffffffffu) {
+            error=!found ? -2908 : -2909;
             (void)call(0x0c8b9780u,rd(ctx+24),e,0); e=0; goto fail;
         }
     } else {
         e=call(0x0c3a7b78u,rd(ctx+24),key,0);
-        if(!e) goto fail;
+        /* The native leaf returns NULL for open/parse/allocation failure;
+         * do not claim to distinguish those without a native error report. */
+        if(!e) { error=-2910; goto fail; }
         found=0;
     }
     face=e-rd(e+8);
@@ -464,17 +472,18 @@ static uint32_t prepare(struct transaction *t, struct replacement *r, uint32_t c
     wr(d+52,face); wr(d+56,e); wr(d+60,path);
     if(!found) {
         v=new_cache(32,2*rd(ctx+20),0x0c39fd9bu,0x0c3a5ef1u,0x0c39fd95u);
-        if(!v) goto owned_fail;
+        if(!v) { error=-2911; goto owned_fail; }
         wr(face+16,v);
         v=new_cache(8,rd(ctx+20),0x0c39fdcdu,0x0c3a8bb9u,0x0c3a09f5u);
-        if(!v) goto owned_fail;
+        if(!v) { error=-2912; goto owned_fail; }
         wr(face+20,v);
     }
     ft=rd(face+12); size=rd(d+40);
     /* The installed callbacks require scalable outlines, not a bitmap-only
      * face which happens to pass FT parsing and pixel-size setup. */
-    if(!ft || !(rd(ft+8)&1u) || call(0x0c8b8a54u,ft,size,0)) goto owned_fail;
-    metrics=rd(ft+88); if(!metrics) goto owned_fail;
+    if(!ft || !(rd(ft+8)&1u)) { error=-2913; goto owned_fail; }
+    if(call(0x0c8b8a54u,ft,size,0)) { error=-2914; goto owned_fail; }
+    metrics=rd(ft+88); if(!metrics) { error=-2915; goto owned_fail; }
     wr(d+4,METRICS); wr(d+8,OUTLINE); wr(d+12,RELEASE);
     wr(d+16,(uint32_t)((int32_t)rd(metrics+32)>>6));
     wr(d+20,(uint32_t)(-((int32_t)rd(metrics+28)>>6)));
@@ -483,12 +492,12 @@ static uint32_t prepare(struct transaction *t, struct replacement *r, uint32_t c
     wb(d+25,(uint32_t)((int32_t)v>>6));
     v=call(0x0c424304u,rd(metrics+20),(int16_t)(rb(ft+82)|(rb(ft+83)<<8)),0);
     v=(uint32_t)((int32_t)(v<<18)>>24); wb(d+26,(int32_t)v<1 ? 1 : v);
-    return d;
+    r->fresh=d; return 0;
 owned_fail:
-    destroy_descriptor(d); return 0;
+    destroy_descriptor(d); return error;
 fail:
     if(path) (void)call(0x0c39a424u,ctx,path,0);
-    release_mem(d); return 0;
+    release_mem(d); return error;
 }
 struct membership { uint32_t wanted,found,visited,overflow; };
 static int depth_ok(uint32_t p) { uint32_t n=0; while(p) { if(++n>32) return 0; p=rd(p+4); } return 1; }
@@ -611,7 +620,7 @@ int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
     if(state.running) return 1;
     if((r=roots(&mgr,&ctx))!=0) return r<0 ? -2201 : r;
     if(registry(mgr,ctx)) return -2202;
-    t=rh_platform_alloc(sizeof(*t)); if(!t) return -2;
+    t=rh_platform_alloc(sizeof(*t)); if(!t) return -2901;
     state.running=1;
     zero(t,sizeof(*t));
     r=select_paths(t,mapping); if(r) goto done;
@@ -623,14 +632,13 @@ int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
      * an idle boundary and known ownership, then hash each unique file once. */
     r=plan(t); if(r) goto done;
     for(i=0;i<state.count;i++) if(t->dirty[i]) {
-        t->path[i]=duplicate(t->target[i]); if(!t->path[i]) { r=-2; goto done; }
+        t->path[i]=duplicate(t->target[i]); if(!t->path[i]) { r=-2903; goto done; }
     }
     /* Idle-only families are also parsed with their audited key before their
      * obsolete idle entries are evicted. The staged idle descriptors are never
      * published, and are released below in this same callback. */
     for(i=0;i<t->nres;i++) {
-        t->res[i].fresh=prepare(t,&t->res[i],ctx);
-        if(!t->res[i].fresh) { r=-2; goto done; }
+        r=prepare(t,&t->res[i],ctx); if(r) goto done;
     }
     /* Native factory leaves do not run UI callbacks. Still validate roots,
      * registry, barrier and ownership immediately before allocation-free

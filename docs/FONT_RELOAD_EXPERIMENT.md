@@ -4,7 +4,7 @@ This is an opt-in implementation for `xiaomi-band-11-4.100.155`, not a productio
 
 ## Device result
 
-On 2026-09-26, the user reported that the current `.155` experimental font-replacement/reload test passed on hardware after the dynamic-wrapper fix. Status: **USER_REPORTED_PASS**, limited to that test, not full hardware/fault acceptance. See the [device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md) for local artifact hashes, the device-driven fixes and untested cases. GPU recovery, framework restart, custom owners and endurance/memory-pressure testing remain outside this report.
+On 2026-09-26, the user reported that the current `.155` experimental font-replacement/reload test passed on hardware after the dynamic-wrapper fix. A subsequent attempt to restore the stock fonts returned `-2`: **USER_REPORTED_FAIL** for restoration, with the device-specific cause not yet isolated. Status: **USER_REPORTED_PASS** for replacement only, not restoration or full hardware/fault acceptance. See the [device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md) for local artifact hashes, the device-driven fixes and untested cases. GPU recovery, framework restart, custom owners and endurance/memory-pressure testing remain outside this report.
 
 ## Build and target approval
 
@@ -60,7 +60,7 @@ Default builds retain RHQ1 **v5 / 40 bytes** unchanged. The experimental build e
 | 40 | Signed font result: `0` completed/no-op, `1` pending/busy, negative rejected/failed |
 | 44 | `1` while the font stage is pending, otherwise `0` |
 
-The adapter retains generic `-1` and preparation/allocation `-2`; `-2014` records observed restart. Stage codes `-2201`/`-2202` identify roots/registry rejection, `-2204` the drawing boundary, `-2205` ownership, `-2206` missing audited exemplar, and `-2207` owner overflow. File codes `-2210`/`-2211`/`-2212`/`-2213` identify I/O, size limit, file-count limit and changed current-file contents. A post-commit owner-refresh failure can have a nonzero committed count; that is not a rollback. Consumers must check the version/length and error field rather than interpreting image redraw success as font success. Manager 1.2.1 displays the corresponding result via the file protocol below.
+The adapter retains generic `-1`; the legacy ambiguous preparation/allocation `-2` is now split into the `-29xx` codes below; `-2014` records observed restart. Stage codes `-2201`/`-2202` identify roots/registry rejection, `-2204` the drawing boundary, `-2205` ownership, `-2206` missing audited exemplar, and `-2207` owner overflow. File codes `-2210`/`-2211`/`-2212`/`-2213` identify I/O, size limit, file-count limit and changed current-file contents. A post-commit owner-refresh failure can have a nonzero committed count; that is not a rollback. Consumers must check the version/length and error field rather than interpreting image redraw success as font success. Manager 1.2.1 displays the corresponding result via the file protocol below.
 
 ### Ownership diagnostic codes (replacement for generic `-2205`)
 
@@ -89,9 +89,33 @@ Whole-list diagnostics now use `-2741..-2744` (active), `-2751..-2754` (idle), a
 
 The active/idle scan previously reused the 96-replacement limit even for unrelated records. Both scans now use their existing 256-element scratch capacity, matching the precommit scan. A subsequent device `-2707` established that more than 96 active backings are actually affected, not merely present. The replacement capacity is now 512, matching the combined active/idle scan bounds; wrapper, ownership and link checks remain unchanged. The separate interned-path limit remains 96 rather than growing with descriptor count. Host regression covers 100 unrelated active or idle records, oversized lists and broken links/tails. A large affected fixture additionally exercises 255 active backings, 256 wrappers and 256 idle backings (511 replacements), restoration, and allocation failures at the start, middle and end of a 521-allocation preparation, with unchanged old references and successful retry. The backing-array expansion adds 14,976 bytes of bounded heap storage, not a larger UI stack or full-file allocation. Real-device allocation latency and font parsing remain unverified. Exact native insert/remove instructions at `0x0c3a43b0`, `0x0c3a46a2` and `0x0c3a46dc` confirm head/tail at list+4/+8 and previous/next at node+size/+size+4. The device's former `-2702` alone does not prove whether capacity or a link check failed.
 
-A subsequent device `-2762` reached the old 256-wrapper limit. Wrapper cardinality is now independent of backing cardinality: validate/count up to 4096 wrappers without a stack array, then allocate `actual_count * sizeof(struct wrap)` bytes (16 bytes each, at most 64 KiB). Only affected wrappers are captured; membership is rechecked as an ordered subsequence of the live list before publication. Backing scans remain 256 each and replacement capacity remains 512. Snapshot allocation failure returns `-2` with no publication, and heap snapshots are freed on success, rollback, busy retry and lifecycle disable. Tests cover 303/1024/4096 wrappers, 4097 rejection before snapshot allocation, restoration, snapshot OOM/retry, unrelated wrappers and replacement of a captured wrapper identity. The same fixed `-2762` code now denotes the 4096 traversal bound; this is not unlimited support.
+A subsequent device `-2762` reached the old 256-wrapper limit. Wrapper cardinality is now independent of backing cardinality: validate/count up to 4096 wrappers without a stack array, then allocate `actual_count * sizeof(struct wrap)` bytes (16 bytes each, at most 64 KiB). Only affected wrappers are captured; membership is rechecked as an ordered subsequence of the live list before publication. Backing scans remain 256 each and replacement capacity remains 512. Snapshot allocation failure returns `-2902` with no publication, and heap snapshots are freed on success, rollback, busy retry and lifecycle disable. Tests cover 303/1024/4096 wrappers, 4097 rejection before snapshot allocation, restoration, snapshot OOM/retry, unrelated wrappers and replacement of a captured wrapper identity. The same fixed `-2762` code now denotes the 4096 traversal bound; this is not unlimited support.
 
 The cache constructor, callback table and manager descriptor initialization were rechecked against the exact AP instructions at `0x0c3a998e`, `0x0c3a9e48`, `0x0c494380` and `0x0c4946a4`, plus callback table `0x2ca308e4`. This does not identify which predicate produced the device's former `-2205`; the next revision-matched result is needed for that. Host fault-injection tests assert individual codes, unchanged old fonts, no prevalidation file reads, and unchanged busy/retry behavior.
+
+### Restore/prepare diagnostics
+
+The legacy `-2` conflated allocation, intern-list validation/capacity, an already-existing target face and native font preparation. A host reproduction now covers a stock face retained by a separate consumer: switching to a replacement succeeds, but restoring that stock face is refused without freeing the other consumer's reference. This is a demonstrated possible cause, **not** identification of the reported device's cause. Keep the ownership guard until the concrete failure is known; this diagnostic update does not claim to fix device restoration.
+
+| Code | Meaning |
+| --- | --- |
+| `-2901` | Transaction scratch allocation failed |
+| `-2902` | Wrapper snapshot allocation failed |
+| `-2903` | Registry pathname allocation failed |
+| `-2904` | Descriptor allocation failed |
+| `-2908` | Target face exists outside the prepared transaction; its ownership is not adopted |
+| `-2909` | Prepared face reference count reached the refusal threshold |
+| `-2910` | Native face acquire/create returned NULL; the native leaf does not distinguish open, parse and allocation failure to the caller |
+| `-2911` / `-2912` | Metrics / outline child-cache allocation or initialization failed |
+| `-2913` | Missing FreeType face or non-scalable font |
+| `-2914` | Native pixel-size setup failed |
+| `-2915` | Missing native size metrics |
+| `-2921` through `-2924` | Intern-list size, traversal limit/cycle, predecessor or tail validation failed |
+| `-2931` | Existing intern-ID reference count is invalid or saturated |
+| `-2932` | Intern-ID capacity exhausted |
+| `-2933` / `-2934` | Intern pathname / node allocation failed |
+
+Manager 1.2.2 already displays these numeric errors; no Manager update is required to obtain the diagnostic code. Before publication, failures retain the currently displayed replacement font and preserve external ownership. Host tests also inject every native allocation failure during stock restoration and verify cleanup and a subsequent successful retry. No native constructor, forced cache eviction or GPU recovery was added.
 
 ## Manager acknowledgement protocol
 
@@ -107,7 +131,7 @@ The checksum detects torn/partial writes, not malicious changes. The module retr
 
 ## Verification
 
-`cd manager && npm test` checks all twelve mappings, immutable generations, restoration, request ordering, checksums, stale/partial responses, errors, no-op, legacy modules, timeout and cancellation. Manager uses a native scrolling list, 18–24 px high-contrast text and 48 px full-width buttons; physical-device readability still requires acceptance.
+`cd manager && npm test` independently checks the reusable file functions (text/binary/range/metadata operations, missing-file semantics, native callback failures and synchronous exceptions), then checks all twelve mappings, immutable generations, restoration, request ordering, checksums, stale/partial responses, errors, no-op, legacy modules, timeout and cancellation. Manager uses a native scrolling list, 18–24 px high-contrast text and 48 px full-width buttons; physical-device readability still requires acceptance.
 
 `build.sh` runs the existing host suite plus:
 
