@@ -17,11 +17,15 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus-Private')).resolve()
 TARGET = 'xiaomi-band-11-4.100.155'
-DEFAULT_CERT = Path.home() / 'develop/AstroBox-Certs/module-installer-ed25519.pem.zip'
+DEFAULT_CERTS = [
+    Path.home() / 'develop/Astrobox-certs/module-installer-ed25519.pem.zip',
+    Path.home() / 'develop/AstroBox-Certs/module-installer-ed25519.pem.zip',
+]
+DEFAULT_CERT = next((p for p in DEFAULT_CERTS if p.is_file()), DEFAULT_CERTS[0])
 SUPERVISOR = CANOPUS / 'manager/service/canopus_supervisor_platform.c'
 RECEIPT_BUILDER = CANOPUS / 'scripts/build-module-installer-receipt.py'
 WATCHFACE_BUILDER = CANOPUS / 'scripts/build_module_installer_prod.py'
-OUTPUT_NAME = 'module-installer-font-experimental-0.3.0-band11-4.100.155-signed'
+OUTPUT_NAME = 'module-installer-font-experimental-0.3.0-band11-4.100.155'
 
 
 def run(command, *, env=None):
@@ -129,6 +133,7 @@ def main():
 
         generated = stage / 'watchface'
         run([sys.executable, WATCHFACE_BUILDER, '--product', 'resource-hook',
+             '--module-id', 'corona',
              '--target', TARGET, '--payload-dir', stage / 'payload',
              '--assets-dir', ROOT / 'examples', '--output-dir', generated])
         device = generated / 'xiaomi-band-11'
@@ -191,7 +196,7 @@ def main():
             '- `SHA256SUMS`: package file checksums.\n\n'
             'Hardware acceptance is NOT_PROBED. Do not use on other firmware targets.\n')
         (package / 'build.json').write_text(json.dumps({
-            'name': OUTPUT_NAME, 'target': TARGET, 'firmware_sha256': firmware,
+            'name': output.name, 'target': TARGET, 'firmware_sha256': firmware,
             'module_build_id': 'resource-hook-0.3.0-font-exp',
             'module_sha256': hashlib.sha256(module.read_bytes()).hexdigest(),
             'receipt_sha256': hashlib.sha256(receipt.read_bytes()).hexdigest(),
@@ -203,7 +208,7 @@ def main():
         (package / 'SHA256SUMS').write_text(''.join(
             f'{hashlib.sha256(item.read_bytes()).hexdigest()}  {item.relative_to(package).as_posix()}\n'
             for item in files))
-        bundle = package / f'{OUTPUT_NAME}.zip'
+        bundle = package / f'{output.name}.zip'
         with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
             for item in sorted(p for p in package.rglob('*') if p.is_file() and p != bundle):
                 archive.write(item, item.relative_to(package))
