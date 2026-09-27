@@ -139,7 +139,7 @@ async function main() {
   assert.throws(() => decodeBase91('fPNKd', 5), /预期/);
   assert.throws(() => decodeBase91(' '), /非法字符/);
   assert.equal(validateThemeRelativePath('app/settings/launcher.bin', 'dark'), true);
-  for (const unsafe of ['/absolute', '../escape', 'app//x', 'app/./x', 'app/../x', 'app\\x'])
+  for (const unsafe of ['/absolute', 'C:/absolute', '../escape', 'app//x', 'app/./x', 'app/../x', 'app\\x'])
     assert.equal(validateThemeRelativePath(unsafe, 'dark'), false, unsafe);
 
   const canoraObject = {

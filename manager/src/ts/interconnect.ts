@@ -148,7 +148,7 @@ function validThemeId(value: unknown): value is string {
 /** Validate without rewriting: the returned path is the exact transmitted spelling. */
 export function validateThemeRelativePath(relativePath: unknown, themeId: string): relativePath is string {
   if (typeof relativePath !== "string" || !relativePath || relativePath[0] === "/" ||
-      relativePath.indexOf("\\") >= 0) return false;
+      /^[A-Za-z]:/.test(relativePath) || relativePath.indexOf("\\") >= 0) return false;
   const segments = relativePath.split("/");
   if (segments.some(segment => !segment || segment === "." || segment === "..")) return false;
   const absolutePath = `${NATIVE_THEME_ROOT}${themeId}/${relativePath}`;
