@@ -1,0 +1,75 @@
+<template>
+  <div class="time-banner">
+    <text class="time" style="left:60.9px;top:3.8px;transform: rotate(-21deg)">{{time[0]}}</text>
+    <text class="time" style="left:79px;top:-1px;transform: rotate(-9deg)">{{time[1]}}</text>
+    <text class="time" style="left:93.5px;top:-5px">:</text>
+    <text class="time" style="left:108px;top:-1px;transform: rotate(9deg)">{{time[2]}}</text>
+    <text class="time" style="left:126.1px;top:3.8px;transform: rotate(21deg)">{{time[3]}}</text>
+    <text class="pagetitle">{{title}}</text>
+  </div>
+</template>
+
+<style>
+.time-banner {
+  position: relative;
+  width: 212px;
+  height: 77px;
+}
+
+.time {
+  position: absolute;
+  width: 25px;
+  height: 33px;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: normal;
+  text-align: center;
+  display: flex;
+  align-items: flex-end;
+  letter-spacing: normal;
+  color: rgba(255, 255, 255, 0.6);
+  transform-origin: 12.5px 16.5px;
+}
+
+.pagetitle {
+  position: absolute;
+  left: 0px;
+  top: 35px;
+  width: 212px;
+  height: 42px;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: normal;
+  text-align: center;
+  letter-spacing: normal;
+  color: rgba(255, 255, 255, 1);
+}
+</style>
+
+<script>
+export default {
+  props: ["title"],
+
+  private: {
+    time: "0000",
+    timer: null
+  },
+
+  onInit() {
+    this.updateTime()
+    this.timer = setInterval(() => this.updateTime(), 1000)
+  },
+
+  onDestroy() {
+    if (this.timer !== null) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  updateTime() {
+    const now = new Date()
+    this.time = `${now.getHours().toString().padStart(2, "0")}${now.getMinutes().toString().padStart(2, "0")}`
+  }
+}
+</script>

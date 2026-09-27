@@ -1,5 +1,11 @@
+<import name="time-banner" src="../../components/time"></import>
+
 <template>
   <list class="page">
+    <list-item type="time" class="time-section">
+      <time-banner title="Corona" />
+    </list-item>
+
     <list-item type="header" class="section header">
       <text class="title">主题资源管理</text>
       <text class="hint">字体需新版 .155 实验模块。</text>
@@ -136,8 +142,15 @@ export default {
   padding-bottom: 20px;
 }
 
+.time-section {
+  flex-direction: column;
+  width: 100%;
+  align-items: center;
+  padding-top: 12px;
+}
+
 .header {
-  padding-top: 26px;
+  padding-top: 10px;
 }
 
 .title {
