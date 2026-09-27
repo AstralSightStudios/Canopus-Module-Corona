@@ -76,21 +76,38 @@ function validAbsolutePath(value: string): boolean {
   return true;
 }
 
+function validRelativeDestination(value: string): boolean {
+  if (!value || value[0] === "/" || utf8Length(value) >= MAX_PATH_BYTES) return false;
+  let segmentStart = 0;
+  for (let i = 0; i <= value.length; i++) {
+    if (i < value.length) {
+      const code = value.charCodeAt(i);
+      if (code < 32 || code === 127 || value[i] === "\\" || value[i] === ":") return false;
+    }
+    if (i === value.length || value[i] === "/") {
+      const segment = value.slice(segmentStart, i);
+      if ((!segment && i < value.length) || segment === "." || segment === "..") return false;
+      segmentStart = i + 1;
+    }
+  }
+  return true;
+}
+
 function parseMappings(value: unknown, themeId: string): ResourcePackMapping[] {
   if (!Array.isArray(value) || value.length > MAX_MAPPING_RULES)
     throw new Error(`mappings 必须是最多 ${MAX_MAPPING_RULES} 条的数组`);
 
   const seenSources = new Set<string>();
-  const destinationRoot = `${THEME_ROOT}${themeId}/`;
   const mappings = value.map((item, index) => {
     if (!isRecord(item)) throw new Error(`mappings[${index}] 格式无效`);
     const source = requiredText(item.source, `mappings[${index}].source`, MAX_PATH_BYTES - 1);
     const destination = requiredText(item.destination,
       `mappings[${index}].destination`, MAX_PATH_BYTES - 1);
-    if (!validAbsolutePath(source) || !validAbsolutePath(destination))
-      throw new Error(`mappings[${index}] 路径无效`);
-    if (!destination.startsWith(destinationRoot))
-      throw new Error(`mappings[${index}].destination 必须位于主题目录 ${themeId} 下`);
+    if (!validAbsolutePath(source) || !validRelativeDestination(destination))
+      throw new Error(`mappings[${index}] source 必须为绝对路径，destination 必须为安全的包内相对路径`);
+    const resolvedDestination = `${THEME_ROOT}${themeId}/${destination}`;
+    if (!validAbsolutePath(resolvedDestination))
+      throw new Error(`mappings[${index}].destination 展开后超过设备路径限制`);
     if ((source[source.length - 1] === "/") !==
         (destination[destination.length - 1] === "/"))
       throw new Error(`mappings[${index}] 源路径与目标路径的目录/文件类型不一致`);
@@ -99,14 +116,16 @@ function parseMappings(value: unknown, themeId: string): ResourcePackMapping[] {
     return { source, destination };
   });
 
-  const serialized = serializeMappings(mappings);
+  const serialized = serializeMappings(mappings, themeId);
   if (utf8Length(serialized) > MAX_CONFIG_BYTES)
     throw new Error("生成的 mappings.tsv 超过 32 KiB");
   return mappings;
 }
 
-function serializeMappings(mappings: ResourcePackMapping[]): string {
-  return mappings.map(rule => `${rule.source}\t${rule.destination}\n`).join("");
+function serializeMappings(mappings: ResourcePackMapping[], themeId: string): string {
+  const destinationRoot = `${THEME_ROOT}${themeId}/`;
+  return mappings.map(rule =>
+    `${rule.source}\t${destinationRoot}${rule.destination}\n`).join("");
 }
 
 /** Parse and validate the on-device canora.json before registering or displaying a pack. */
@@ -153,5 +172,5 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
 
 /** Build the module's active TSV configuration from validated manifest rules. */
 export function serializeResourcePackMappings(manifest: ResourcePackManifest): string {
-  return serializeMappings(manifest.mappings);
+  return serializeMappings(manifest.mappings, manifest.themeId);
 }

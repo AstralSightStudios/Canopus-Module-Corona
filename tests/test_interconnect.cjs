@@ -117,8 +117,10 @@ async function main() {
 
   const native = makeNativeApi();
   const sent = [];
+  let apkStatus;
   const connection = {
     onmessage: null, onopen: null, onclose: null, onerror: null,
+    getApkStatus() { return apkStatus; },
     send(options) { sent.push(options.data); options.success(); }
   };
   const boundary = path.join(temporary, 'import.js');
@@ -153,7 +155,7 @@ async function main() {
     targets: ['xiaomi-band-11-4.100.139'],
     mappings: [{
       source: '/resource/icons/',
-      destination: '/data/quickapp/files/ng.lst.corona/themes/dark/icons/'
+      destination: 'icons/'
     }]
   };
   const canoraBytes = Buffer.from(JSON.stringify(canoraObject));
@@ -166,10 +168,24 @@ async function main() {
   assert.throws(() => parseResourcePackManifest(canoraText, 'other'), /不匹配/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
     ...canoraObject, mappings: [{ source: '/resource/', destination: '/tmp/theme/' }]
-  }), 'dark'), /必须位于主题目录/);
+  }), 'dark'), /destination 必须为安全的包内相对路径/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
-    ...canoraObject, mappings: [{ source: '/resource/\\t', destination: '/data/quickapp/files/ng.lst.corona/themes/dark/' }]
-  }), 'dark'), /路径无效/);
+    ...canoraObject, mappings: [{ source: '/resource/', destination: '../outside/' }]
+  }), 'dark'), /destination 必须为安全的包内相对路径/);
+  assert.throws(() => parseResourcePackManifest(JSON.stringify({
+    ...canoraObject, mappings: [{ source: '/resource/\\t', destination: 'icons/' }]
+  }), 'dark'), /source 必须为绝对路径/);
+
+  apkStatus = 1;
+  const startupReceiver = new InterconnectThemeReceiver();
+  startupReceiver.start();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(sent.map(packet => JSON.parse(packet.slice(1))), [
+    { version: 1, maxTextChars: 18000, maxWindow: 4 }
+  ]);
+  startupReceiver.stop();
+  sent.length = 0;
+  apkStatus = undefined;
 
   const states = [];
   let transferPageRequests = 0;
@@ -182,7 +198,7 @@ async function main() {
   assert.match(states.at(-1).message, /等待手机端互联连接/);
   connection.onopen({});
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert(sent.some(packet => packet.startsWith('H')));
+  assert.deepEqual(sent, ['H{"version":1,"maxTextChars":18000,"maxWindow":4}']);
 
   async function deliver(packet) {
     const start = sent.length;
@@ -192,6 +208,7 @@ async function main() {
   }
   const messages = packets => packets.map(packet => packet[0] === 'T' || packet[0] === 'P' || packet[0] === 'E'
     ? JSON.parse(packet.slice(1)) : packet);
+  assert.deepEqual(await deliver('H' + JSON.stringify({ version: 1, maxTextChars: 18000, maxWindow: 4 })), []);
 
   native.text.set('internal://files/mappings.tsv',
     '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/locked/icons/\n');
