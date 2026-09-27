@@ -53,6 +53,9 @@ async function main() {
   await file.makeDirectory(uri, false); assert.equal(options.recursive, false);
   api.delete = o => { options = o; o.success(); };
   assert.equal(await file.deleteFile(uri), undefined); assert.equal(options.uri, uri);
+  api.rmdir = o => { options = o; o.success(); };
+  assert.equal(await file.removeDirectory(uri), undefined);
+  assert.equal(options.uri, uri); assert.equal(options.recursive, true);
 
   const methods = [
     ['readText', () => file.readText(uri)],
@@ -61,7 +64,8 @@ async function main() {
     ['writeArrayBuffer', () => file.writeArrayBuffer(uri, buffer)],
     ['get', () => file.readFileInfo(uri)],
     ['mkdir', () => file.makeDirectory(uri)],
-    ['delete', () => file.deleteFile(uri)]
+    ['delete', () => file.deleteFile(uri)],
+    ['rmdir', () => file.removeDirectory(uri)]
   ];
   for (const [method, run] of methods) {
     const data = { reason: 'denied' };

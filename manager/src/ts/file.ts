@@ -35,6 +35,7 @@ export interface FileApi {
   get(options: Callbacks<FileInfo> & { uri: string }): void;
   mkdir(options: Callbacks<void> & { uri: string; recursive?: boolean }): void;
   delete(options: Callbacks<void> & { uri: string }): void;
+  rmdir(options: Callbacks<void> & { uri: string; recursive?: boolean }): void;
 }
 
 export interface FileOperationError extends Error {
@@ -168,5 +169,11 @@ export function makeDirectory(uri: string, recursive = true): Promise<void> {
 export function deleteFile(uri: string): Promise<void> {
   return invoke<void>("删除", uri, (callbacks) =>
     api.delete({ uri, ...callbacks }),
+  );
+}
+
+export function removeDirectory(uri: string): Promise<void> {
+  return invoke<void>("删除目录", uri, (callbacks) =>
+    api.rmdir({ uri, recursive: true, ...callbacks }),
   );
 }

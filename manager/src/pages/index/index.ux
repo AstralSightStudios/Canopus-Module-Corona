@@ -11,6 +11,12 @@
       <text class="hint">字体需新版 .155 实验模块。</text>
     </list-item>
 
+    <list-item type="interconnect" class="section">
+      <text class="section-title">互联主题包接收</text>
+      <text class="hint">保持接收页打开可查看进度；断线后可从已接收分片续传。</text>
+      <input class="button primary" type="button" value="打开接收页面" onclick="openReceiver" />
+    </list-item>
+
     <list-item type="fonts" class="section">
       <text class="section-title">固件字体</text>
       <text class="hint">替换为简中像素字体，粗体也会变为 Regular。</text>
@@ -38,6 +44,7 @@
 
 <script>
 import { ThemeBridge } from "../../ts/theme-bridge"
+import router from "@system.router"
 
 export default {
   private: {
@@ -54,6 +61,10 @@ export default {
   onDestroy() {
     this.destroyed = true
     this.bridge.cancelWait()
+  },
+
+  openReceiver() {
+    router.push({ uri: "pages/receive" })
   },
 
   installTestTheme() {

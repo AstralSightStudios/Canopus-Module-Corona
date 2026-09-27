@@ -15,6 +15,9 @@
     },
     {
       "name": "system.file"
+    },
+    {
+      "name": "system.brightness"
     }
   ],
   "config": {
@@ -26,6 +29,9 @@
     "pages": {
       "pages/index": {
         "component": "index"
+      },
+      "pages/receive": {
+        "component": "receive"
       }
     }
   }

@@ -1,10 +1,17 @@
 <script>
+import { InterconnectThemeReceiver } from "./ts/interconnect"
+
 export default {
   onCreate() {
-    console.log("app created")
+    const receiver = new InterconnectThemeReceiver()
+    globalThis.themeReceiver = receiver
+    receiver.start()
   },
   onDestroy() {
-    console.log("app destroyed")
+    if (globalThis.themeReceiver) {
+      globalThis.themeReceiver.stop()
+      globalThis.themeReceiver = null
+    }
   }
 }
 </script>

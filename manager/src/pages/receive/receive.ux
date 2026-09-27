@@ -1,0 +1,231 @@
+<template>
+  <div class="page">
+    <text if="{{phase == 'waiting' || phase == 'ready'}}" class="page-title">主题包接收</text>
+    <text if="{{phase == 'receiving' || phase == 'error' || phase == 'success'}}" class="page-title">{{phaseTitle}}</text>
+
+    <img if="{{phase == 'waiting'}}" class="hero" src="/common/images/connect.png" />
+    <img if="{{phase == 'ready'}}" class="hero" src="/common/images/choose.png" />
+    <img if="{{phase == 'receiving'}}" class="hero-small" src="/common/images/download.png" />
+    <img if="{{phase == 'error'}}" class="hero-small" src="/common/images/error.png" />
+    <img if="{{phase == 'success'}}" class="hero-small" src="/common/images/succ.png" />
+
+    <text if="{{phase == 'waiting' || phase == 'ready'}}" class="phase-title">{{phaseTitle}}</text>
+    <text class="message">{{message}}</text>
+
+    <div if="{{phase == 'receiving'}}" class="transfer-info">
+      <text class="progress">{{percent}}%</text>
+      <text class="filename">{{fileName}}</text>
+      <text class="detail">文件 {{fileIndex}} / {{fileCount}}</text>
+      <text class="detail">{{receivedLabel}}</text>
+    </div>
+    <div if="{{phase == 'success'}}" class="transfer-info">
+      <text class="detail">主题：{{themeId}}</text>
+      <text class="detail">{{fileCount}} 个文件 · {{receivedLabel}}</text>
+    </div>
+
+    <img class="back-button" src="/common/images/back.png" onclick="goBack" />
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import brightness from "@system.brightness"
+
+export default {
+  private: {
+    phase: "waiting",
+    phaseTitle: "等待连接",
+    message: "等待手机端互联连接…",
+    themeId: "",
+    fileName: "",
+    fileIndex: 0,
+    fileCount: 0,
+    bytesReceived: 0,
+    totalBytes: 0,
+    percent: 0,
+    receivedLabel: "0 B / 0 B",
+    pageVisible: false,
+    keepScreenOn: false,
+    unsubscribe: null
+  },
+
+  onInit() {
+    const receiver = globalThis.themeReceiver
+    if (!receiver) {
+      this.phase = "error"
+      this.phaseTitle = "接收服务未启动"
+      this.message = "请返回主题管理页后重新打开。"
+      return
+    }
+    this.unsubscribe = receiver.subscribe(snapshot => {
+      this.phase = snapshot.phase
+      this.message = snapshot.message
+      this.themeId = snapshot.themeId
+      this.fileName = snapshot.fileName
+      this.fileIndex = snapshot.fileIndex
+      this.fileCount = snapshot.fileCount
+      this.bytesReceived = snapshot.bytesReceived
+      this.totalBytes = snapshot.totalBytes
+      this.percent = snapshot.percent
+      this.phaseTitle = this.getPhaseTitle(snapshot.phase)
+      this.receivedLabel = `${this.formatBytes(snapshot.bytesReceived)} / ${this.formatBytes(snapshot.totalBytes)}`
+      this.syncScreenOn()
+    })
+  },
+
+  onShow() {
+    this.pageVisible = true
+    this.syncScreenOn()
+  },
+
+  onHide() {
+    this.pageVisible = false
+    this.syncScreenOn()
+  },
+
+  onDestroy() {
+    this.pageVisible = false
+    this.syncScreenOn(true)
+    if (this.unsubscribe) this.unsubscribe()
+  },
+
+  syncScreenOn(force) {
+    const shouldKeepOn = this.pageVisible && this.phase === "receiving"
+    if (!force && this.keepScreenOn === shouldKeepOn) return
+    this.keepScreenOn = shouldKeepOn
+    if (typeof brightness.setKeepScreenOn !== "function") return
+    try {
+      brightness.setKeepScreenOn({ keepScreenOn: shouldKeepOn })
+    } catch (_error) {
+      // The feature is available only on newer Vela platform versions.
+    }
+  },
+
+
+  getPhaseTitle(phase) {
+    const titles = {
+      waiting: "等待连接",
+      ready: "等待文件",
+      receiving: "正在接收",
+      error: "传输中断",
+      success: "接收完成"
+    }
+    return titles[phase] || "主题包接收"
+  },
+
+  formatBytes(value) {
+    if (value < 1024) return `${value} B`
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+    return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #000000;
+  flex-direction: column;
+  align-items: center;
+}
+
+.page-title {
+  position: absolute;
+  left: 0;
+  top: 114px;
+  width: 100%;
+  height: 38px;
+  color: #FFFFFF;
+  font-size: 27px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.hero {
+  position: absolute;
+  left: 6px;
+  top: 160px;
+  width: 199px;
+  height: 199px;
+}
+
+.hero-small {
+  position: absolute;
+  left: 46px;
+  top: 200px;
+  width: 120px;
+  height: 120px;
+}
+
+.phase-title {
+  position: absolute;
+  left: 0;
+  top: 346px;
+  width: 100%;
+  color: #FFFFFF;
+  font-size: 29px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.message {
+  position: absolute;
+  left: 16px;
+  top: 390px;
+  width: 180px;
+  height: 38px;
+  color: #C5CBD5;
+  font-size: 15px;
+  line-height: 20px;
+  text-align: center;
+  lines: 2;
+  text-overflow: ellipsis;
+}
+
+.transfer-info {
+  position: absolute;
+  left: 12px;
+  top: 431px;
+  width: 188px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.progress {
+  width: 188px;
+  color: #FFFFFF;
+  font-size: 25px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.filename {
+  width: 188px;
+  color: #D9E2F0;
+  font-size: 14px;
+  text-align: center;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.detail {
+  width: 188px;
+  color: #9AA4B2;
+  font-size: 13px;
+  line-height: 17px;
+  text-align: center;
+}
+
+.back-button {
+  position: absolute;
+  left: 49px;
+  top: 6px;
+  width: 113px;
+  height: 80px;
+}
+</style>

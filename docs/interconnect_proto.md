@@ -44,7 +44,7 @@ H{"version":1,"maxTextChars":18000}
 H{"version":1,"maxTextChars":18000,"freeBytes":12345678,"maxWindow":4}
 ```
 
-`maxTextChars` 为本端最大完整消息字符数；双方取较小值。`freeBytes` 为可用字节数（若可获取），`maxWindow` 为最大分片窗口（初始建议 4）。接收端按本地配置限制文件数与主题总大小；不公开总空间与已用空间。
+`maxTextChars` 为本端最大完整消息字符数；双方取较小值。`freeBytes` 为可用字节数（若可获取），`maxWindow` 为最大分片窗口（初始建议 4）。接收端按本地配置限制文件数与主题总大小；不公开总空间与已用空间。当前 Manager 不提供 `freeBytes`。
 
 ### `T` — 文件清单与传输状态
 
@@ -79,7 +79,13 @@ P{"themeId":"dark","fileIndex":1,"status":"resume","window":4,"receivedRanges":[
 F<fileIndex:4位十六进制><chunkIndex:4位十六进制><data:Base91>
 ```
 
-固定头共 8 个字符，余下部分是 Base91 文件数据。按 `chunkIndex * chunkSizeBytes` 写入当前文件偏移；解码后长度须符合该片预期长度。发送端限制完整 `F` 消息不超过协商的 `maxTextChars`。双方须固定同一种 Base91 变体/字符表并使用相同测试向量。
+固定头共 8 个字符，余下部分是 Base91 文件数据。按 `chunkIndex * chunkSizeBytes` 写入当前文件偏移；解码后长度须符合该片预期长度。发送端限制完整 `F` 消息不超过协商的 `maxTextChars`。Manager 接收端固定使用 basE91（Bas Wijnen 变体）字符表，发送端必须使用完全相同的字符表：
+
+```text
+ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~"
+```
+
+测试向量：ASCII `test` 编码为 `fPNKd`。Manager 目前本地限制为最多 128 个文件、主题总大小 64 MiB、单文件最多 2,048 片；没有可用的文件系统剩余空间 API，因此通过本地上限预检，实际写入失败时回 `write-failed`。
 
 ### `A` — 分片确认
 
