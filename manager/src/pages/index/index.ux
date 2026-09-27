@@ -1,32 +1,33 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <list class="page">
-    <list-item type="time" class="time-section">
+  <div class="page">
+    <div class="time-section">
       <time-banner title="Corona" />
-    </list-item>
+    </div>
 
-    <list-item type="header" class="section header">
-      <text class="title">主题资源管理</text>
-      <text class="hint">通过互联接收并保存主题包，不会自动应用。</text>
-    </list-item>
-
-    <list-item type="interconnect" class="section">
-      <text class="section-title">互联主题包接收</text>
-      <text class="hint">保持接收页打开可查看进度；断线后可从已接收分片续传。</text>
-      <input class="button primary" type="button" value="打开接收页面" onclick="openReceiver" />
-    </list-item>
-
-  </list>
+    <list class="card-list">
+      <list-item type="item" class="item" onclick="openResources">
+        <text class="itemtext">资源管理</text>
+        <img class="enter" src="/common/images/enter.png" />
+      </list-item>
+      <list-item type="item" class="item" onclick="noop">
+        <text class="itemtext">混搭微调</text>
+        <img class="enter" src="/common/images/enter.png" />
+      </list-item>
+    </list>
+  </div>
 </template>
 
 <script>
 import router from "@system.router"
 
 export default {
-  openReceiver() {
-    router.push({ uri: "pages/receive" })
-  }
+  openResources() {
+    router.push({ uri: "pages/resources" })
+  },
+
+  noop() {}
 }
 </script>
 
@@ -35,62 +36,48 @@ export default {
   width: 100%;
   height: 100%;
   background-color: #000000;
-}
-
-.section {
   flex-direction: column;
-  width: 100%;
-  padding-left: 14px;
-  padding-right: 14px;
-  padding-bottom: 20px;
 }
 
 .time-section {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 100%;
+  height: 77px;
   flex-direction: column;
-  width: 100%;
   align-items: center;
-  padding-top: 12px;
 }
 
-.header {
-  padding-top: 10px;
-}
-
-.title {
+.card-list {
+  position: absolute;
+  left: 0;
+  top: 93px;
   width: 100%;
-  font-size: 24px;
-  font-weight: bold;
+  height: 427px;
+}
+
+.item {
+  height: 102px;
+  margin-bottom: 9px;
+  background-color: #262626;
+  border-radius: 30px;
+  align-items: center;
+}
+
+.itemtext {
+  width: 155px;
+  margin-left: 12px;
   color: #FFFFFF;
-  margin-bottom: 10px;
-}
-
-.section-title {
-  width: 100%;
-  font-size: 22px;
+  font-size: 35px;
   font-weight: bold;
-  color: #FFFFFF;
-  margin-bottom: 8px;
+  line-height: 40px;
+  text-overflow: ellipsis;
+  lines: 1;
 }
 
-.hint {
-  width: 100%;
-  font-size: 18px;
-  line-height: 26px;
-  color: #E2E8F0;
+.enter {
+  width: 40px;
+  height: 40px;
 }
-
-.button {
-  width: 100%;
-  height: 48px;
-  margin-top: 10px;
-  border-radius: 10px;
-  font-size: 20px;
-  font-weight: bold;
-}
-
-.primary {
-  color: #FFFFFF;
-  background-color: #2456B8;
-}
-
 </style>

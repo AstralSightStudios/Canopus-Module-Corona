@@ -1,9 +1,13 @@
 <script>
+import router from "@system.router"
 import { InterconnectThemeReceiver } from "./ts/interconnect"
 
 export default {
   onCreate() {
-    const receiver = new InterconnectThemeReceiver()
+    globalThis.receivePageVisible = false
+    const receiver = new InterconnectThemeReceiver(() => {
+      if (!globalThis.receivePageVisible) router.push({ uri: "pages/receive" })
+    })
     globalThis.themeReceiver = receiver
     receiver.start()
   },

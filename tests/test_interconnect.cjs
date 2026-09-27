@@ -134,7 +134,8 @@ async function main() {
     assert.equal(validateThemeRelativePath(unsafe, 'dark'), false, unsafe);
 
   const states = [];
-  let receiver = new InterconnectThemeReceiver();
+  let transferPageRequests = 0;
+  let receiver = new InterconnectThemeReceiver(() => { transferPageRequests++; });
   const unsubscribe = receiver.subscribe(snapshot => states.push(snapshot));
   receiver.start();
   assert.equal(states.at(-1).phase, 'waiting');
@@ -179,16 +180,23 @@ async function main() {
   }
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'dark' })));
   assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  assert.equal(transferPageRequests, 0); // No navigation before the first valid P packet.
+  reply = messages(await deliver('P' + JSON.stringify({ themeId: 'other', fileIndex: 0,
+    sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  assert.equal(transferPageRequests, 0);
 
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
     sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
   assert(reply.some(packet => packet.status === 'ready'));
+  assert.equal(transferPageRequests, 1);
   reply = messages(await deliver(`F00000001${encodeBase91([10])}`));
   assert(reply.includes('A00000001'));
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
     sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
   assert(reply.some(packet => packet.status === 'resume' &&
     JSON.stringify(packet.receivedRanges) === '[[1,1]]'));
+  assert.equal(transferPageRequests, 1); // P packets for further files do not navigate again.
   reply = messages(await deliver(`F00000000${encodeBase91([97])}`));
   assert(reply.includes('A00000000'));
   assert.equal(states.at(-1).phase, 'receiving');
@@ -209,7 +217,7 @@ async function main() {
   receiver.stop();
   unsubscribe();
   const resumedStates = [];
-  receiver = new InterconnectThemeReceiver();
+  receiver = new InterconnectThemeReceiver(() => { transferPageRequests++; });
   receiver.subscribe(snapshot => resumedStates.push(snapshot));
   receiver.start();
   await deliver('T' + JSON.stringify({ operation: 'begin', ...header, mode: 'resume' }));
@@ -221,6 +229,7 @@ async function main() {
     sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
   assert(reply.some(packet => packet.status === 'complete' &&
     JSON.stringify(packet.receivedRanges) === '[[0,1]]'));
+  assert.equal(transferPageRequests, 2); // A resumed upload on a new app session opens once.
   reply = await deliver('C0000');
   assert(reply.includes('C0000'));
   const completedProgress = JSON.parse(native.text.get('internal://files/interconnect-transfer.json'));
@@ -231,6 +240,7 @@ async function main() {
 
   await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 1,
     sizeBytes: 3, chunkSizeBytes: 3, chunkCount: 1 }));
+  assert.equal(transferPageRequests, 2);
   reply = await deliver(`F00010000${encodeBase91([1, 2, 255])}`);
   assert(reply.includes('A00010000'));
   assert.deepEqual([...native.binary.get('internal://files/themes/dark/icons/a.bin')], [1, 2, 255]);

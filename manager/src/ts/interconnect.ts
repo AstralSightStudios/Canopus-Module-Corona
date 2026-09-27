@@ -271,7 +271,10 @@ export class InterconnectThemeReceiver {
   private stopped = false;
   private handshakeSent = false;
   private peerMaxTextChars = MAX_TEXT_CHARS;
+  private transferPageOpened = false;
   private readonly listeners = new Set<(snapshot: ReceiverSnapshot) => void>();
+
+  constructor(private readonly onTransferPage?: () => void) {}
   private snapshot: ReceiverSnapshot = {
     phase: "waiting",
     message: "等待手机端互联连接…",
@@ -564,6 +567,7 @@ export class InterconnectThemeReceiver {
       }
       const next = { ...current, mode: "resume" as const, manifestReceiving: true, manifestSeen: 0 };
       await this.persist(next);
+      if (current.finished) this.transferPageOpened = false;
       await this.sendTransferAck(themeId, "begin");
       this.updateSnapshot({ phase: "ready", message: `正在校验主题 ${themeId} 的续传清单…`, themeId,
         fileCount, totalBytes, bytesReceived: 0, percent: 0 });
@@ -596,6 +600,7 @@ export class InterconnectThemeReceiver {
       finished: false
     };
     await this.persist(next);
+    this.transferPageOpened = false;
     await this.sendTransferAck(themeId, "begin");
     this.updateSnapshot({ phase: "ready", message: `正在接收主题 ${themeId} 的文件清单…`, themeId,
       fileName: "", fileIndex: 0, fileCount, bytesReceived: 0, totalBytes, percent: 0 });
@@ -718,6 +723,11 @@ export class InterconnectThemeReceiver {
     }
     await this.sendPrepared(index, next.files[index]);
     this.updateTransferProgress(next, index, `等待接收：${stored.relativePath}`);
+    if (!this.transferPageOpened) {
+      this.transferPageOpened = true;
+      try { this.onTransferPage?.(); }
+      catch (_error) { /* Navigation must not interrupt the transfer. */ }
+    }
   }
 
   private async handleFileChunk(packet: string): Promise<void> {

@@ -77,16 +77,19 @@ export default {
   },
 
   onShow() {
+    globalThis.receivePageVisible = true
     this.pageVisible = true
     this.syncScreenOn()
   },
 
   onHide() {
+    globalThis.receivePageVisible = false
     this.pageVisible = false
     this.syncScreenOn()
   },
 
   onDestroy() {
+    globalThis.receivePageVisible = false
     this.pageVisible = false
     this.syncScreenOn(true)
     if (this.unsubscribe) this.unsubscribe()

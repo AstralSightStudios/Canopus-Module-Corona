@@ -32,6 +32,9 @@
       },
       "pages/receive": {
         "component": "receive"
+      },
+      "pages/resources": {
+        "component": "resources"
       }
     }
   }
