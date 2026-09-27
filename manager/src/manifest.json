@@ -35,6 +35,9 @@
       },
       "pages/resources": {
         "component": "resources"
+      },
+      "pages/resource-detail": {
+        "component": "resource-detail"
       }
     }
   }

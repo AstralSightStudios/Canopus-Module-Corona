@@ -8,10 +8,12 @@
 
     <text if="{{themes.length == 0}}" class="empty-state">{{statusText}}</text>
     <list if="{{themes.length > 0}}" class="resource-list">
-      <list-item for="{{theme in themes}}" type="resource" class="resource-item">
+      <list-item for="{{theme in themes}}" type="resource" class="resource-item"
+        id="{{theme.themeId}}" onclick="openTheme">
         <div class="resource-copy">
-          <text class="theme-name">{{theme}}</text>
-          <text class="theme-meta">已接收资源包</text>
+          <text class="theme-name">{{theme.name}}</text>
+          <text class="theme-meta">{{theme.metaLine}}</text>
+          <text class="description-preview">{{theme.descriptionPreview}}</text>
         </div>
       </list-item>
     </list>
@@ -22,8 +24,10 @@
 <script>
 import router from "@system.router"
 import * as file from "../../ts/file"
+import { parseResourcePackManifest } from "../../ts/resource-pack"
 
 const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json"
+const THEME_ROOT_URI = "internal://files/themes/"
 const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
 
 export default {
@@ -46,10 +50,32 @@ export default {
         this.statusText = "尚未接收资源包"
         return
       }
-      const themes = JSON.parse(text)
-      if (!Array.isArray(themes) || themes.some(theme =>
-        typeof theme !== "string" || !VALID_THEME_ID.test(theme))) {
+      const themeIds = JSON.parse(text)
+      if (!Array.isArray(themeIds) || themeIds.some(themeId =>
+        typeof themeId !== "string" || !VALID_THEME_ID.test(themeId))) {
         throw new Error("资源包索引格式无效")
+      }
+      const themes = []
+      for (const themeId of themeIds) {
+        let manifest = null
+        try {
+          const canora = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`)
+          if (canora !== null) manifest = parseResourcePackManifest(canora, themeId)
+        } catch (_error) {
+          // Keep the installed entry visible if its metadata was removed or damaged.
+        }
+        const author = manifest && manifest.author ? manifest.author : ""
+        const version = manifest && manifest.version ? `v${manifest.version}` : ""
+        themes.push({
+          themeId,
+          name: manifest ? manifest.name : themeId,
+          metaLine: manifest
+            ? ([author, version].filter(Boolean).join(" · ") || "资源包详情")
+            : "canora.json 不可用",
+          descriptionPreview: manifest
+            ? (manifest.description || "点按查看资源包详情")
+            : "包信息不可用"
+        })
       }
       this.themes = themes
       this.statusText = themes.length ? "" : "尚未接收资源包"
@@ -57,6 +83,13 @@ export default {
       this.themes = []
       this.statusText = "读取资源包列表失败，请返回后重试。"
     }
+  },
+
+  openTheme(event) {
+    const item = event.currentTarget || event.target
+    const themeId = item && item.id
+    if (typeof themeId !== "string" || !VALID_THEME_ID.test(themeId)) return
+    router.push({ uri: "pages/resource-detail", params: { themeId } })
   },
 
   goBack() {
@@ -94,7 +127,7 @@ export default {
 
 .resource-item {
   width: 196px;
-  height: 82px;
+  height: 104px;
   margin-bottom: 8px;
   padding-left: 12px;
   border-radius: 24px;
@@ -119,10 +152,21 @@ export default {
 
 .theme-meta {
   width: 172px;
-  margin-top: 4px;
+  margin-top: 3px;
   color: #BBBBBB;
-  font-size: 15px;
+  font-size: 13px;
   lines: 1;
+  text-overflow: ellipsis;
+}
+
+.description-preview {
+  width: 172px;
+  margin-top: 5px;
+  color: #BBBBBB;
+  font-size: 12px;
+  line-height: 15px;
+  lines: 2;
+  text-overflow: ellipsis;
 }
 
 .empty-state {

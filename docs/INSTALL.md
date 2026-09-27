@@ -164,7 +164,7 @@ RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
 旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
 miwear。
 
-当前 Manager 仅提供按 [Interconnect 协议](interconnect_proto.md)接收主题包的页面。接收端原样保存包内路径和 `mappings.tsv`，不负责主题选择或激活，也不直接展示模块 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，但需通过 Manager 以外的工具管理映射和重载请求，且未覆盖 GPU 故障恢复或框架重启。
+当前 Manager 提供按 [Interconnect 协议](interconnect_proto.md)接收主题文件树的页面；CRPack v1 使用 `canora.json` 描述元数据和映射，接收端校验后原样保存，资源管理页可查看包信息，不显示映射规则。Manager 接收时会根据 manifest 生成主题目录内的派生 `mappings.tsv`，但尚不提供主题选择/激活，不生成活动 `mappings.tsv`、不发送 `reload.request`，也不展示模块 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，但需通过 Manager 以外的工具管理映射和重载请求，且未覆盖 GPU 故障恢复或框架重启。
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
@@ -229,7 +229,7 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 Umem；每次解析变更配置最多另需 32 KiB scratch，分配失败会保留当前规则并在后续轮询重试。
 默认构建仅改写字体注册路径，不能替换页面已持有的字体对象，不代表完整 UI/字体热重载；仅 `.155` opt-in 实验构建支持受限字体事务，详见 [字体实验说明](FONT_RELOAD_EXPERIMENT.md)。
 
-Manager 的 Interconnect 页面将收到的主题包文件逐个写入原相对路径，并原样保存清单中的 `mappings.tsv`；它不解析或应用映射，不发送 `reload.request`，也不支持 ZIP 或通用配置编辑。接收端使用 `internal://files/` 访问 app-scoped 文件区。固件字体实验属于模块侧能力，不再附带设置图标或字体测试资产/操作；若使用实验构建，需由其他受信任工具写入不可变字体代次、映射和重载信号。模块侧使用 native 绝对路径；快应用文件 API 应使用 `internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
+Manager 的 Interconnect 页面接收解包后的 CRPack v1 文件树，要求唯一根目录 `canora.json`，并将元数据和资源逐个写入原相对路径；资源管理页展示名称、作者、版本、描述和目标设备，不显示映射规则。Manager 接收时生成主题目录内的派生 `mappings.tsv`，但不接收 ZIP 本体、不应用映射、不生成活动 `mappings.tsv`、不发送 `reload.request`，也不是通用配置编辑器。接收端使用 `internal://files/` 访问 app-scoped 文件区。固件字体实验属于模块侧能力，不再附带设置图标或字体测试资产/操作；若使用实验构建，需由其他受信任工具写入不可变字体代次、映射和重载信号。模块侧使用 native 绝对路径；快应用文件 API 应使用 `internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
 stop/deactivate 仍需完整重启卸载，不支持热卸载。
 
 ## 状态与错误

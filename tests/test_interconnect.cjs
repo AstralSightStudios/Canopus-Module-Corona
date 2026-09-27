@@ -42,8 +42,15 @@ function makeNativeApi() {
   const native = {
     text, binary, directories,
     readText(options) {
-      if (!text.has(options.uri)) { options.fail('missing', 301); return; }
-      options.success({ text: text.get(options.uri) });
+      if (text.has(options.uri)) {
+        options.success({ text: text.get(options.uri) });
+        return;
+      }
+      if (binary.has(options.uri)) {
+        options.success({ text: Buffer.from(binary.get(options.uri)).toString('utf8') });
+        return;
+      }
+      options.fail('missing', 301);
     },
     writeText(options) {
       text.set(options.uri, options.text);
@@ -121,6 +128,8 @@ async function main() {
   };
   const receiverModule = require(path.join(temporary, 'interconnect.js'));
   const { InterconnectThemeReceiver, decodeBase91, validateThemeRelativePath } = receiverModule;
+  const { parseResourcePackManifest, serializeResourcePackMappings } =
+    require(path.join(temporary, 'resource-pack.js'));
   assert.equal(Buffer.from(decodeBase91('fPNKd')).toString(), 'test');
   assert.deepEqual([...decodeBase91(encodeBase91([0, 1, 2, 255]))], [0, 1, 2, 255]);
   for (let length = 0; length <= 128; length++) {
@@ -132,6 +141,35 @@ async function main() {
   assert.equal(validateThemeRelativePath('app/settings/launcher.bin', 'dark'), true);
   for (const unsafe of ['/absolute', '../escape', 'app//x', 'app/./x', 'app/../x', 'app\\x'])
     assert.equal(validateThemeRelativePath(unsafe, 'dark'), false, unsafe);
+
+  const canoraObject = {
+    format: 'canopus-resource-pack',
+    formatVersion: 1,
+    themeId: 'dark',
+    name: 'Dark',
+    version: '1.0.0',
+    author: 'Canopus',
+    description: 'Dark resource set',
+    targets: ['xiaomi-band-11-4.100.139'],
+    mappings: [{
+      source: '/resource/icons/',
+      destination: '/data/quickapp/files/ng.lst.corona/themes/dark/icons/'
+    }]
+  };
+  const canoraBytes = Buffer.from(JSON.stringify(canoraObject));
+  const canoraText = canoraBytes.toString('utf8');
+  const parsedCanora = parseResourcePackManifest(canoraText, 'dark');
+  assert.equal(parsedCanora.name, 'Dark');
+  assert.equal(parsedCanora.mappings.length, 1);
+  assert.equal(serializeResourcePackMappings(parsedCanora),
+    '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/dark/icons/\n');
+  assert.throws(() => parseResourcePackManifest(canoraText, 'other'), /不匹配/);
+  assert.throws(() => parseResourcePackManifest(JSON.stringify({
+    ...canoraObject, mappings: [{ source: '/resource/', destination: '/tmp/theme/' }]
+  }), 'dark'), /必须位于主题目录/);
+  assert.throws(() => parseResourcePackManifest(JSON.stringify({
+    ...canoraObject, mappings: [{ source: '/resource/\\t', destination: '/data/quickapp/files/ng.lst.corona/themes/dark/' }]
+  }), 'dark'), /路径无效/);
 
   const states = [];
   let transferPageRequests = 0;
@@ -163,10 +201,10 @@ async function main() {
   assert(activeReply.some(packet => packet.errorCode === 'active-theme'));
 
   const manifest = [
-    { relativePath: 'mappings.tsv', sizeBytes: 2 },
+    { relativePath: 'canora.json', sizeBytes: canoraBytes.length },
     { relativePath: 'icons/a.bin', sizeBytes: 3 }
   ];
-  const header = { themeId: 'dark', mode: 'replace', fileCount: 2, totalBytes: 5 };
+  const header = { themeId: 'dark', mode: 'replace', fileCount: 2, totalBytes: canoraBytes.length + 3 };
   let reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...header })));
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'dark', fileIndex: 0,
@@ -180,35 +218,40 @@ async function main() {
   }
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'dark' })));
   assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  assert.equal(native.text.has('internal://files/themes/dark/mappings.tsv'), false);
   assert.equal(transferPageRequests, 0); // No navigation before the first valid P packet.
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'other', fileIndex: 0,
     sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
   assert.equal(transferPageRequests, 0);
 
+  const canoraChunkSize = Math.ceil(canoraBytes.length / 2);
+  const canoraChunkCount = Math.ceil(canoraBytes.length / canoraChunkSize);
+  const canoraChunk = index => canoraBytes.slice(index * canoraChunkSize,
+    Math.min(canoraBytes.length, (index + 1) * canoraChunkSize));
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
-    sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
+    sizeBytes: canoraBytes.length, chunkSizeBytes: canoraChunkSize, chunkCount: canoraChunkCount })));
   assert(reply.some(packet => packet.status === 'ready'));
   assert.equal(transferPageRequests, 1);
-  reply = messages(await deliver(`F00000001${encodeBase91([10])}`));
+  reply = messages(await deliver(`F00000001${encodeBase91(canoraChunk(1))}`));
   assert(reply.includes('A00000001'));
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
-    sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
+    sizeBytes: canoraBytes.length, chunkSizeBytes: canoraChunkSize, chunkCount: canoraChunkCount })));
   assert(reply.some(packet => packet.status === 'resume' &&
     JSON.stringify(packet.receivedRanges) === '[[1,1]]'));
   assert.equal(transferPageRequests, 1); // P packets for further files do not navigate again.
-  reply = messages(await deliver(`F00000000${encodeBase91([97])}`));
+  reply = messages(await deliver(`F00000000${encodeBase91(canoraChunk(0))}`));
   assert(reply.includes('A00000000'));
   assert.equal(states.at(-1).phase, 'receiving');
-  assert.equal(states.at(-1).percent, 40);
+  assert.equal(states.at(-1).percent, Math.floor(canoraBytes.length * 100 / header.totalBytes));
   connection.onerror({ data: 'link lost' });
   assert.equal(states.at(-1).phase, 'error');
   assert.match(states.at(-1).message, /接收进度已保留/);
-  assert.equal(states.at(-1).percent, 40);
+  assert.equal(states.at(-1).percent, Math.floor(canoraBytes.length * 100 / header.totalBytes));
   connection.onopen({ isReconnected: true });
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(states.at(-1).phase, 'ready');
-  assert.deepEqual([...native.binary.get('internal://files/themes/dark/mappings.tsv')], [97, 10]);
+  assert.deepEqual([...native.binary.get('internal://files/themes/dark/canora.json')], [...canoraBytes]);
   const savedProgress = JSON.parse(native.text.get('internal://files/interconnect-transfer.json'));
   assert.equal(savedProgress.files[0].receivedBitmap, '3');
   assert.equal(Object.hasOwn(savedProgress.files[0], 'receivedChunks'), false);
@@ -226,7 +269,7 @@ async function main() {
   await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'dark' }));
 
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
-    sizeBytes: 2, chunkSizeBytes: 1, chunkCount: 2 })));
+    sizeBytes: canoraBytes.length, chunkSizeBytes: canoraChunkSize, chunkCount: canoraChunkCount })));
   assert(reply.some(packet => packet.status === 'complete' &&
     JSON.stringify(packet.receivedRanges) === '[[0,1]]'));
   assert.equal(transferPageRequests, 2); // A resumed upload on a new app session opens once.
@@ -249,11 +292,23 @@ async function main() {
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'dark' })));
   assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
+  assert.equal(native.text.get('internal://files/themes/dark/mappings.tsv'),
+    '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/dark/icons/\n');
   assert.equal(resumedStates.at(-1).phase, 'success');
   assert.equal(resumedStates.at(-1).percent, 100);
 
+  reply = messages(await deliver('T' + JSON.stringify({
+    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 1, totalBytes: 2
+  })));
+  assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+  await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'legacy', fileIndex: 0,
+    relativePath: 'mappings.tsv', sizeBytes: 2 }));
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
+
   receiver.stop();
-  console.log('Interconnect handshake, path validation, active-theme guard, Base91, chunk ACK, resume and finish tests passed.');
+  console.log('Interconnect canora manifest, path validation, active-theme guard, Base91, chunk ACK, resume and finish tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true });

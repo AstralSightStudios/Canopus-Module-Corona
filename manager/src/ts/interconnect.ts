@@ -1,13 +1,15 @@
 import { interconnect } from "./import";
 import * as file from "./file";
 import type { FileOperationError } from "./file";
+import { parseResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
+import type { ResourcePackManifest } from "./resource-pack";
 
 const VERSION = 1;
 const MAX_TEXT_CHARS = 18000;
 const MAX_WINDOW = 4;
 const MAX_FILES = 128;
 const MAX_THEME_BYTES = 64 * 1024 * 1024;
-const MAX_CONFIG_BYTES = 32 * 1024;
+const MAX_CANORA_BYTES = 64 * 1024;
 const MAX_CHUNKS_PER_FILE = 2048;
 const QUICKAPP_FILES_URI = "internal://files/";
 const MAPPINGS_URI = `${QUICKAPP_FILES_URI}mappings.tsv`;
@@ -654,7 +656,7 @@ export class InterconnectThemeReceiver {
       throw protocolError("invalid-manifest", "文件清单数量不完整");
 
     let totalBytes = 0;
-    let mappingCount = 0;
+    let canoraCount = 0;
     const paths = new Set<string>();
     for (const entry of state.files) {
       if (!validateThemeRelativePath(entry.relativePath, state.themeId) || paths.has(entry.relativePath))
@@ -663,14 +665,16 @@ export class InterconnectThemeReceiver {
       totalBytes += entry.sizeBytes;
       if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_THEME_BYTES)
         throw protocolError("no-space", "主题总大小超过 Manager 本地限制");
-      if (entry.relativePath === "mappings.tsv") {
-        mappingCount++;
-        if (entry.sizeBytes > MAX_CONFIG_BYTES)
-          throw protocolError("invalid-manifest", "mappings.tsv 超过 32 KiB 模块限制");
+      if (entry.relativePath === "canora.json") {
+        canoraCount++;
+        if (entry.sizeBytes < 1 || entry.sizeBytes > MAX_CANORA_BYTES)
+          throw protocolError("invalid-manifest", "canora.json 为空或超过 64 KiB");
       }
+      if (entry.relativePath === "mappings.tsv")
+        throw protocolError("invalid-manifest", "资源包不允许携带 mappings.tsv");
     }
-    if (totalBytes !== state.totalBytes || mappingCount !== 1)
-      throw protocolError("invalid-manifest", "清单总字节数不匹配或缺少唯一的 mappings.tsv");
+    if (totalBytes !== state.totalBytes || canoraCount !== 1)
+      throw protocolError("invalid-manifest", "清单总字节数不匹配或缺少唯一的 canora.json");
 
     const next = {
       ...state,
@@ -801,10 +805,19 @@ export class InterconnectThemeReceiver {
     if (!state || message.themeId !== state.themeId || !state.manifestComplete || state.manifestReceiving ||
         state.files.length !== state.fileCount || state.files.some(entry => !entry.complete))
       throw protocolError("invalid-manifest", "主题仍有未完成文件，不能登记为可用");
+    let manifest: ResourcePackManifest;
+    try {
+      const text = await file.readText(this.themeFileUri(state.themeId, "canora.json"));
+      manifest = parseResourcePackManifest(text, state.themeId);
+    } catch (error) {
+      throw protocolError("invalid-manifest", `canora.json 无效：${String((error as Error).message || error)}`);
+    }
+    await file.writeText(this.themeFileUri(state.themeId, "mappings.tsv"),
+      serializeResourcePackMappings(manifest));
     if (!state.finished) await this.persist({ ...state, finished: true });
     await this.registerTheme(state.themeId);
     await this.sendStatus(state.themeId, "ready");
-    this.updateSnapshot({ phase: "success", message: `主题 ${state.themeId} 已接收完成，可由主题管理器选择应用。`,
+    this.updateSnapshot({ phase: "success", message: `资源包 ${manifest.name} 接收完成，可由主题管理器查看。`,
       themeId: state.themeId, fileName: "", fileIndex: state.fileCount, fileCount: state.fileCount,
       bytesReceived: state.totalBytes, totalBytes: state.totalBytes, percent: 100 });
   }

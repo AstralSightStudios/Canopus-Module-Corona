@@ -1,0 +1,160 @@
+<import name="time-banner" src="../../components/time"></import>
+
+<template>
+  <div class="page">
+    <div class="header">
+      <time-banner title="< 资源详情" clickable="true" onactivate="goBack" />
+    </div>
+
+    <text if="{{!loaded}}" class="status">{{statusText}}</text>
+    <div if="{{loaded}}" class="summary">
+      <text class="theme-name">{{name}}</text>
+      <text class="theme-meta">{{metaLine}}</text>
+      <text class="theme-id">资源包 ID · {{themeId}}</text>
+      <text class="description">{{description}}</text>
+      <text class="targets">{{targetsLine}}</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import * as file from "../../ts/file"
+import { parseResourcePackManifest } from "../../ts/resource-pack"
+
+const THEME_ROOT_URI = "internal://files/themes/"
+const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
+
+export default {
+  private: {
+    themeId: "",
+    loaded: false,
+    statusText: "正在读取资源包…",
+    name: "",
+    metaLine: "",
+    description: "",
+    targetsLine: ""
+  },
+
+  onInit() {
+    this.loadManifest()
+  },
+
+  async loadManifest() {
+    const themeId = this.themeId
+    if (typeof themeId !== "string" || !VALID_THEME_ID.test(themeId)) {
+      this.statusText = "资源包标识无效。"
+      return
+    }
+
+    this.statusText = "正在读取资源包…"
+    try {
+      const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`)
+      if (text === null) throw new Error("找不到 canora.json")
+      const manifest = parseResourcePackManifest(text, themeId)
+      this.name = manifest.name
+      this.metaLine = [
+        manifest.author || "",
+        manifest.version ? `v${manifest.version}` : ""
+      ].filter(Boolean).join(" · ") || "未声明作者或版本"
+      this.description = manifest.description || "暂无简介"
+      this.targetsLine = manifest.targets && manifest.targets.length
+        ? `目标：${manifest.targets.join("、")}`
+        : "未声明目标设备"
+      this.loaded = true
+      this.statusText = ""
+    } catch (error) {
+      this.loaded = false
+      this.statusText = `无法读取资源包信息：${String(error.message || error)}`
+    }
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #000000;
+}
+
+.header {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 100%;
+  height: 77px;
+  align-items: center;
+}
+
+.summary {
+  position: absolute;
+  left: 14px;
+  top: 96px;
+  width: 184px;
+  height: 190px;
+  flex-direction: column;
+}
+
+.theme-name {
+  width: 184px;
+  color: #FFFFFF;
+  font-size: 21px;
+  font-weight: bold;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.theme-meta {
+  width: 184px;
+  margin-top: 3px;
+  color: #BBBBBB;
+  font-size: 13px;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.theme-id {
+  width: 184px;
+  margin-top: 4px;
+  color: #BBBBBB;
+  font-size: 12px;
+  lines: 1;
+}
+
+.description {
+  width: 184px;
+  margin-top: 7px;
+  color: #FFFFFF;
+  font-size: 13px;
+  line-height: 17px;
+  lines: 3;
+  text-overflow: ellipsis;
+}
+
+.targets {
+  width: 184px;
+  margin-top: 5px;
+  color: #BBBBBB;
+  font-size: 11px;
+  line-height: 14px;
+  lines: 2;
+  text-overflow: ellipsis;
+}
+
+.status {
+  position: absolute;
+  left: 16px;
+  top: 225px;
+  width: 180px;
+  color: #BBBBBB;
+  font-size: 16px;
+  line-height: 23px;
+  text-align: center;
+  lines: 3;
+}
+</style>
