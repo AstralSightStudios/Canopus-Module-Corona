@@ -440,12 +440,26 @@ static void destroy_descriptor(uint32_t d) {
     (void)call(0x0c39a424u,ctx,path,0);
     release_mem(d);
 }
+/* Borrow only a fingerprint-verified stock face, using the native factory's
+ * acquire-existing contract. The lookup has added one reference; require at
+ * least one previous owner and validate the exact key and both child caches.
+ * Never replace existing caches or retire another consumer's reference. */
+static int stock_face(uint32_t ctx, uint32_t path, uint32_t key, uint32_t e) {
+    uint32_t face,ft; int r;
+    if(rd(e)!=rd(ctx+24) || rd(e+8)!=28 || rb(e+12) ||
+       rd(e+4)<2 || rd(e+4)>=0x7ffffffeu) return -2941;
+    face=e-28;
+    if(rd(face)!=path || rd(face+4)!=key) return -2942;
+    ft=rd(face+12);
+    if(!ft || !(rd(ft+8)&1u)) return -2913;
+    r=cache_check(rd(face+16),CNT_CLASS,32,1,0); if(r) return r;
+    return cache_check(rd(face+20),CNT_CLASS,8,1,0);
+}
 /* Fully checked replacement for the allocation-unsafe native font factory.
- * A preexisting target face is deliberately unsupported: it might belong to
- * an untracked consumer. Sharing is allowed only between this transaction's
- * newly prepared descriptors. Stock restoration additionally requires that no
- * other consumer still owns the target stock face. Do not misreport this
- * ownership refusal (or intern/FT validation failure) as allocation failure. */
+ * Immutable non-stock faces may only be shared within this transaction.
+ * Valid stock faces may also be shared with existing native consumers. The
+ * native metrics callback selects its descriptor's pixel size on cache miss,
+ * so preparation uses the same shared-FT-face size contract as the factory. */
 static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     uint32_t d=0,path=0,e=0,face=0,i,found=0,key[7],ft,size,metrics,v;
     int error;
@@ -456,9 +470,15 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     e=call(0x0c3a3860u,rd(ctx+24),key,0);
     if(e) {
         for(i=0;i<t->nres;i++) if(t->res[i].fresh && rd(t->res[i].fresh+56)==e) found=1;
-        if(!found || rd(e+4)==0xffffffffu) {
-            error=!found ? -2908 : -2909;
-            (void)call(0x0c8b9780u,rd(ctx+24),e,0); e=0; goto fail;
+        if(rd(e+4)>=0x7ffffffeu) { error=-2909; goto acquired_fail; }
+        if(!found) {
+            struct family *f=&state.family[r->family];
+            if(!eq(t->target[r->family],f->stock) || !f->hashed ||
+               !digest_eq(t->hash[r->family],f->stock_hash)) {
+                error=-2908; goto acquired_fail;
+            }
+            error=stock_face(ctx,path,key[1],e); if(error) goto acquired_fail;
+            found=1; /* Reuse child caches; do not allocate or overwrite them. */
         }
     } else {
         e=call(0x0c3a7b78u,rd(ctx+24),key,0);
@@ -495,6 +515,9 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     r->fresh=d; return 0;
 owned_fail:
     destroy_descriptor(d); return error;
+acquired_fail:
+    /* Balance just the lookup reference, leaving the preexisting face intact. */
+    (void)call(0x0c8b9780u,rd(ctx+24),e,0);
 fail:
     if(path) (void)call(0x0c39a424u,ctx,path,0);
     release_mem(d); return error;
@@ -611,6 +634,13 @@ static int revalidate(struct transaction *t,uint32_t mgr,uint32_t ctx) {
     }
     if(p) return -2765;
     if(j!=t->nwrap) return -2766;
+    /* Prepared faces (including borrowed stock faces) must still satisfy the
+     * descriptor/cache contract immediately before publication. */
+    for(i=0;i<t->nres;i++) {
+        if(!t->res[i].fresh) return -2601;
+        r=descriptor(t->res[i].fresh+4,ctx,t->target[t->res[i].family]);
+        if(r) return r;
+    }
     return 0;
 }
 int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {

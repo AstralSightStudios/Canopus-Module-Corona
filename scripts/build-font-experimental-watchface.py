@@ -84,10 +84,12 @@ def main():
                         help='AstroBox module-installer Ed25519 certificate ZIP')
     parser.add_argument('--no-build', action='store_true',
                         help='package the already-built opt-in ELF; strict verification still runs')
+    parser.add_argument('--overwrite', action='store_true',
+                        help='overwrite existing output directory if it already exists')
     args = parser.parse_args()
     output = args.output.expanduser().absolute()
     cert = args.certificate_zip.expanduser().resolve()
-    if output.exists() or output.is_symlink():
+    if (output.exists() or output.is_symlink()) and not args.overwrite:
         parser.error(f'output already exists; refusing to overwrite: {output}')
     if not cert.is_file():
         parser.error(f'certificate ZIP not found: {cert}')
@@ -224,7 +226,9 @@ def main():
                 raise ValueError('watchface ZIP receipt differs from signed receipt')
 
         if output.exists() or output.is_symlink():
-            raise RuntimeError(f'output appeared during build; refusing to replace: {output}')
+            if not args.overwrite:
+                raise RuntimeError(f'output appeared during build; refusing to replace: {output}')
+            shutil.rmtree(output)
         package.rename(output)
 
     print(f'Complete signed watchface package: {output}')

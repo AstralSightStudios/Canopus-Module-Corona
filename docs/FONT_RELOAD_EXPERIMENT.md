@@ -4,7 +4,7 @@ This is an opt-in implementation for `xiaomi-band-11-4.100.155`, not a productio
 
 ## Device result
 
-On 2026-09-26, the user reported that the current `.155` experimental font-replacement/reload test passed on hardware after the dynamic-wrapper fix. A subsequent attempt to restore the stock fonts returned `-2`: **USER_REPORTED_FAIL** for restoration, with the device-specific cause not yet isolated. Status: **USER_REPORTED_PASS** for replacement only, not restoration or full hardware/fault acceptance. See the [device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md) for local artifact hashes, the device-driven fixes and untested cases. GPU recovery, framework restart, custom owners and endurance/memory-pressure testing remain outside this report.
+On 2026-09-26, the user reported that the current `.155` experimental font-replacement/reload test passed on hardware after the dynamic-wrapper fix. A subsequent attempt to restore the stock fonts returned `-2`, then `-2908` with diagnostics: **USER_REPORTED_FAIL** for restoration, localized to the rejection of an already-cached stock face. Checked stock-face reuse is now implemented, but has not yet been verified on the device. Status: **USER_REPORTED_PASS** for replacement only, not restoration or full hardware/fault acceptance. See the [device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md) for local artifact hashes, the device-driven fixes and untested cases. GPU recovery, framework restart, custom owners and endurance/memory-pressure testing remain outside this report.
 
 ## Build and target approval
 
@@ -34,7 +34,7 @@ Preparation and publication happen within one serialized UI timer callback, neve
 - Only the fingerprinted `.155` standard managed outline-FreeType path is supported. Each affected family must have an auditable active or idle descriptor at its first change (or an already audited scalar exemplar from this module lifetime).
 - Unknown font callbacks/backends, unregistered/app-owned font copies, custom text caches, canvas pixels and separately uploaded paths are not supported.
 - Use a **new immutable destination filename/directory for every font generation**. Keep files unchanged and available. Overwriting `themes/current/font.ttf` is not supported. Non-stock generation paths cannot be selected again after leaving them; restoration of unchanged stock files is supported.
-- A target face already held outside the current preparation transaction is refused rather than borrowed from an unknown consumer. New staged descriptors may share a face with each other.
+- Existing non-stock target faces outside the current preparation transaction are still refused. An unchanged, fingerprint-verified stock face may be borrowed through a new native cache reference after checking its canonical interned pathname, style/mode key, existing positive ownership, FreeType face and both child caches. Child-cache holds remain busy/retry. Existing caches and other consumers' references are never overwritten or forcibly retired; new staged descriptors may also share a face with each other.
 - The baseline must be captured before legacy retargeting loses the originals. Switching a running legacy instance into this implementation cannot reconstruct missing original paths; use a clean framework/module lifetime.
 - Bounds: 32 registered families, 512 affected backing resources per transaction (the combined capacity of two 256-record active/idle scans), 96 interned file IDs, 4096 wrappers, 512 collected UI objects, 32 parent levels, 64 remembered non-stock family-path selections, and 32 MiB per fingerprinted font file. Exceeding a bound is a refusal, not partial publication. Persistent adapter state is approximately 42 KiB, plus bounded transaction scratch and staged native fonts/caches. File validation streams 2 KiB chunks rather than allocating whole files. It runs only after idle/ownership checks, deduplicates shared paths within a transaction, and accepts the 11,637,064-byte stock Regular-All font. Validation and parsing remain synchronous and may delay a UI tick.
 - Same mapping text after a successful request remains a no-op at module level. A new signal with unchanged mapping text retries a previously failed font transaction; it is not an in-place file replacement mechanism.
@@ -95,7 +95,9 @@ The cache constructor, callback table and manager descriptor initialization were
 
 ### Restore/prepare diagnostics
 
-The legacy `-2` conflated allocation, intern-list validation/capacity, an already-existing target face and native font preparation. A host reproduction now covers a stock face retained by a separate consumer: switching to a replacement succeeds, but restoring that stock face is refused without freeing the other consumer's reference. This is a demonstrated possible cause, **not** identification of the reported device's cause. Keep the ownership guard until the concrete failure is known; this diagnostic update does not claim to fix device restoration.
+The legacy `-2` conflated allocation, intern-list validation/capacity, an already-existing target face and native font preparation. The subsequent device `-2908` identifies the preexisting-target-face refusal. A host fixture reproduces replacement followed by failed restoration when another consumer retains the stock face. The fix borrows only verified stock faces, balances its own acquired references on failure, and revalidates all prepared descriptors before publication. Non-stock preexisting faces remain refused. Device restoration with the fix remains unverified.
+
+The exact `.155` native manager factory (`0x0c494380`, including `0x0c4946a4`) already acquires an existing face and skips child-cache creation on that branch. Both metrics creation (`0x0c3a5ef0`) and outline creation (`0x0c3a8bb8`) select the required FT size before loading a glyph. The adapter follows that serialized shared-face contract rather than replacing child caches or requiring exclusive ownership of the immutable stock font. This does not add support for concurrent/custom rendering or GPU recovery.
 
 | Code | Meaning |
 | --- | --- |
@@ -103,7 +105,7 @@ The legacy `-2` conflated allocation, intern-list validation/capacity, an alread
 | `-2902` | Wrapper snapshot allocation failed |
 | `-2903` | Registry pathname allocation failed |
 | `-2904` | Descriptor allocation failed |
-| `-2908` | Target face exists outside the prepared transaction; its ownership is not adopted |
+| `-2908` | Existing target face is not verified stock and cannot be borrowed |
 | `-2909` | Prepared face reference count reached the refusal threshold |
 | `-2910` | Native face acquire/create returned NULL; the native leaf does not distinguish open, parse and allocation failure to the caller |
 | `-2911` / `-2912` | Metrics / outline child-cache allocation or initialization failed |
@@ -114,8 +116,10 @@ The legacy `-2` conflated allocation, intern-list validation/capacity, an alread
 | `-2931` | Existing intern-ID reference count is invalid or saturated |
 | `-2932` | Intern-ID capacity exhausted |
 | `-2933` / `-2934` | Intern pathname / node allocation failed |
+| `-2941` | Borrowed stock entry has invalid ownership/layout, no prior positive owner, or a saturated reference count |
+| `-2942` | Borrowed stock face differs from the canonical interned pathname or style/mode key |
 
-Manager 1.2.2 already displays these numeric errors; no Manager update is required to obtain the diagnostic code. Before publication, failures retain the currently displayed replacement font and preserve external ownership. Host tests also inject every native allocation failure during stock restoration and verify cleanup and a subsequent successful retry. No native constructor, forced cache eviction or GPU recovery was added.
+Manager 1.2.2 already displays these numeric errors; no Manager update is required to obtain the diagnostic code. Before publication, failures retain the currently displayed replacement font and preserve external ownership. Host tests inject every native allocation failure during both fresh and borrowed-stock restoration, plus pixel-size, wrapper-snapshot and precommit-validation failures. They verify unchanged external descriptors/cache identities, balanced references, busy child-cache retry, repeated replace/restore cycles and successful retry after each injected failure. No native constructor, forced cache eviction or GPU recovery was added.
 
 ## Manager acknowledgement protocol
 

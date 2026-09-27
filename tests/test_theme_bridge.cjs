@@ -36,9 +36,9 @@ function files() {
   };
 }
 function loadBridge(nativeFile) {
-  const boundary = path.join(temporary, 'system-file.js');
+  const boundary = path.join(temporary, 'import.js');
   require.cache[boundary] = { id: boundary, filename: boundary, loaded: true,
-    exports: { __esModule: true, default: nativeFile } };
+    exports: { __esModule: true, file: nativeFile } };
   delete require.cache[path.join(temporary, 'file.js')];
   delete require.cache[path.join(temporary, 'theme-bridge.js')];
   return require(path.join(temporary, 'theme-bridge.js'));

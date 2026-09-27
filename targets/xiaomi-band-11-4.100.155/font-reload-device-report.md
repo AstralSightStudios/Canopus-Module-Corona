@@ -2,7 +2,7 @@
 
 - Recorded: 2026-09-26 (UTC).
 - Device/firmware: Xiaomi Band 11, 4.100.155, as identified by the user during this session.
-- Result: **USER_REPORTED_PASS** for the experimental font-replacement/reload test through Manager. A later stock-restoration attempt is **USER_REPORTED_FAIL** (`-2`); see the follow-up below.
+- Result: **USER_REPORTED_PASS** for the experimental font-replacement/reload test through Manager. A later stock-restoration attempt is **USER_REPORTED_FAIL** (`-2`, then diagnostic `-2908`); see the follow-up below.
 - Evidence: after testing the wrapper-capacity fix, the user reported: “实机验证通过，记录并commit”.
 - This is a user report, not an independently observed hardware trace. No screenshot, device memory dump, measured resource counts, or device-side artifact hash was supplied.
 
@@ -45,9 +45,11 @@ These tests model native leaves; they are not full FreeType/GPU/device fault-inj
 
 ## Follow-up: restoring stock fonts fails
 
-Later in the same session the user reported: “字体替换生效之后，再按恢复默认会显示-2”. This narrows the positive result to replacement/reload only; stock restoration is now a reported failure, not merely untested. The device-specific cause remains unresolved because the tested build merged several preparation failures into `-2`.
+Later in the same session the user reported: “字体替换生效之后，再按恢复默认会显示-2”. This narrows the positive result to replacement/reload only; stock restoration is now a reported failure, not merely untested. The tested build merged several preparation failures into `-2`; the user's subsequent `-2908` report on the diagnostic build identifies the preexisting-target-face refusal.
 
-The diagnostic update separates allocation, intern-list, target-face ownership and native preparation failures into `-29xx` codes, without relaxing refusal or rollback checks. A host fixture reproduces successful replacement followed by refused restoration when another consumer retains the stock face (`-2908`); this is a possible cause, not proof of the device's failure path. It also covers 12 native allocation-failure positions during restoration, unchanged replacement references and successful retry after removing the injected failure. These tests are not a device restoration pass.
+The diagnostic update separated allocation, intern-list, target-face ownership and native preparation failures into `-29xx` codes. A host fixture reproduces the now-reported `-2908` branch: successful replacement followed by refused restoration when another consumer retains the stock face. The report does not identify that device consumer or its exact reference count.
+
+The follow-up fix allows checked reuse of unchanged, fingerprint-verified stock faces using the existing native acquisition contract. It preserves other owners, cache identities and rollback; non-stock external faces remain refused. Host tests cover repeated replace/restore, 12 fresh-face and 3 borrowed-face allocation-failure positions, pixel-size/snapshot/precommit failures, busy child caches and balanced external references. Static inspection confirms the native factory's existing-face branch skips cache construction, while glyph callbacks select the required FT size. **The fixed restoration path still requires device validation; these tests are not a device restoration pass.**
 
 The hashes above identify the original reported test artifacts, **not** later rebuilt diagnostic/refactored artifacts.
 

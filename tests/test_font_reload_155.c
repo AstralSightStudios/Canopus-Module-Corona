@@ -33,7 +33,7 @@ static uint32_t display,vg,glyph_queue,old_live,read_count,fail_temp;
 static uint32_t temp_calls,fail_temp_at,temp_live;
 static uint32_t stock_content,a_content,b_content,file_offset,lifecycle_in_prepare,busy_in_prepare;
 static int open_file;
-static uint32_t simulated_file_size, file_opens;
+static uint32_t simulated_file_size, file_opens, mutate_cache_in_prepare;
 static const char stock[]="/system/fonts/Regular.ttf";
 static const char path_a[]=RH_THEME_ROOT "g001/Regular.ttf";
 static const char path_b[]=RH_THEME_ROOT "g002/Regular.ttf";
@@ -141,6 +141,7 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
         }
         assert(!"missing face id"); return 0;
     case 0x0c8b8a54:
+        if(mutate_cache_in_prepare) wr(mutate_cache_in_prepare+20,123);
         if(lifecycle_in_prepare) wr(CONTEXT_SLOT,0);
         if(busy_in_prepare) wr(glyph_queue+8,1);
         if(fail_size) return 1;
@@ -219,7 +220,7 @@ static void setup(void) {
     bump=8; nalloc=alloc_calls=fail_alloc=fail_parse=fail_size=fail_cache_init=bitmap_only=0;
     owner_count=refresh_calls=vector_drops=mutate_owner=post_fail=post_overflow=fail_temp=lifecycle_in_prepare=busy_in_prepare=0;
     stock_content=11; a_content=22; b_content=33;
-    simulated_file_size=4; file_opens=0;
+    simulated_file_size=4; file_opens=mutate_cache_in_prepare=0;
     ui=heap(64); mgr=heap(560); ctx=heap(28);
     wr(UIKIT_SLOT,ui); wr(ui+28,mgr); wr(CONTEXT_SLOT,ctx);
     wr(mgr,48); wr(mgr+12,40); wr(mgr+24,8);
@@ -259,16 +260,17 @@ static void unchanged(void) {
     assert(native_eq(rd(reg+4),stock)); assert(alive(old_dsc) && alive(idle_node));
     assert(live_allocations()==old_live);
 }
-static void committed(const char *path,uint32_t changed) {
+static void committed_with_refs(const char *path,uint32_t changed,uint32_t refs) {
     uint32_t d=rd(wrapper+24),d2=rd(wrapper3+24);
     assert(changed==1 && d!=old_dsc && alive(d));
     assert(rd(record)==d+4 && rd(record2)==d2+4 && rd(wrapper2+24)==d);
     assert(rd(wrapper+28)==wrapper3 && rd(wrapper+32)==0x76543210 && rd(wrapper+36)==record);
     assert(rd(record+44)==2 && rd(record2+44)==1);
-    assert(rd(d+52)==rd(d2+52) && rd(rd(d+56)+4)==2);
+    assert(rd(d+52)==rd(d2+52) && rd(rd(d+56)+4)==refs);
     assert(!alive(old_dsc) && !alive(idle_node));
     assert(native_eq(rd(reg+4),path) && native_eq(rd(d+60),path));
 }
+static void committed(const char *path,uint32_t changed) { committed_with_refs(path,changed,2); }
 static void test_switch_restore(void) {
     uint32_t changed;
     setup(); assert(!reload_path(path_a,&changed)); committed(path_a,changed);
@@ -441,16 +443,19 @@ static void test_dynamic_wrappers(void) {
     puts("dynamic snapshots: 303/1024/4096 wrappers, restore, snapshot OOM and 4097 refusal passed");
 }
 static void test_wrapper_snapshot_membership(void) {
-    struct transaction *t; uint32_t manager,context,p;
+    struct transaction *t; uint32_t manager,context,p,i;
     setup(); assert(roots(&manager,&context)==0 && registry(manager,context)==0);
     t=calloc(1,sizeof(*t)); assert(t); t->dirty[0]=1; t->count=1;
     assert(resources(t,manager,context)==0 && t->nwrap==3);
+    copy(t->target[0],path_a); assert(plan(t)==0);
+    for(i=0;i<t->nres;i++) assert(prepare(t,&t->res[i],context)==0);
     p=heap(48); append(mgr+12,p); /* Unrelated wrapper need not be snapshotted. */
     assert(revalidate(t,manager,context)==0);
     unlink_node(mgr+12,p); free_heap(p);
     unlink_node(mgr+12,wrapper2); free_heap(wrapper2);
     (void)fixture_wrapper(record); /* Same owner count, different identity. */
     assert(revalidate(t,manager,context)==-2766);
+    for(i=t->nres;i>0;i--) destroy_descriptor(t->res[i-1].fresh);
     rh_platform_free(t->wrapper); free(t); assert(temp_live==0);
 }
 static void test_busy(void) {
@@ -538,7 +543,7 @@ static void test_holds_limits_and_external_faces(void) {
     setup(); wr(wrapper3+44,wrapper); assert(reload_path(path_a,&changed)<0); unchanged();
     setup(); path=intern(ctx,path_a,&error); assert(path && !error); key[0]=path; key[1]=65536;
     data=face_create(cache,(uintptr_t)key); old_live=live_allocations(); before=rd(data+4);
-    assert(reload_path(path_a,&changed)<0); unchanged(); assert(rd(data+4)==before);
+    assert(reload_path(path_a,&changed)==-2908); unchanged(); assert(rd(data+4)==before);
     setup(); wr(rd(old_dsc+56)+4,0x7ffffffe); assert(reload_path(path_a,&changed)<0); unchanged();
     setup(); lifecycle_in_prepare=1; assert(reload_path(path_a,&changed)<0 && state.disabled);
     before=read_count; assert(reload_path(path_a,&changed)<0 && before==read_count);
@@ -629,26 +634,86 @@ static void test_restore_failures(void) {
     }
     printf("stock restoration: %u allocation failure positions preserve the replacement and allow retry\n",calls);
 }
-static void test_restore_with_retained_stock_face(void) {
-    uint32_t changed,face,entry,path,id,before,current;
-    setup();
-    /* Another consumer owns the original face independently of manager
-     * records. Switching away must leave that consumer alive. */
-    face=rd(old_dsc+52); entry=face+28; id=rd(ctx+8); path=rd(id);
-    wr(entry+4,rd(entry+4)+1); wr(id+4,rd(id+4)+1);
+static uint32_t retain_stock_and_replace(uint32_t *face,uint32_t *id) {
+    uint32_t changed,external;
+    setup(); *face=rd(old_dsc+52); *id=rd(ctx+8);
+    wr(*face+32,rd(*face+32)+1); wr(*id+4,rd(*id+4)+1);
+    external=fixture_dsc(42,*face);
     assert(reload_path(path_a,&changed)==0); committed(path_a,changed);
-    assert(alive(face) && rd(entry+4)==1 && rd(id+4)==1);
-    before=live_allocations(); current=rd(wrapper+24);
-    /* This is an ownership refusal, not an allocation failure. */
-    assert(reload_path(NULL,&changed)==-2908 && !changed);
-    assert(live_allocations()==before && rd(wrapper+24)==current);
-    assert(rd(entry+4)==1 && rd(id+4)==1 && alive(face));
-    committed(path_a,1); assert(!temp_live);
-    /* Only the original consumer may relinquish its ownership. */
-    (void)call(0x0c8b9780u,cache,entry,0);
-    (void)call(0x0c8b8c9eu,cache,face,0);
-    (void)call(0x0c39a424u,ctx,path,0);
-    assert(reload_path(NULL,&changed)==0); committed(stock,changed);
+    assert(alive(*face) && rd(*face+32)==1 && rd(*id+4)==1);
+    return external;
+}
+static void test_restore_with_retained_stock_face(void) {
+    uint32_t changed,face,id,external,metrics,outline;
+    unsigned char saved[64];
+    external=retain_stock_and_replace(&face,&id);
+    memcpy(saved,address(external,sizeof(saved)),sizeof(saved));
+    metrics=rd(face+16); outline=rd(face+20);
+    assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
+    assert(rd(rd(wrapper+24)+52)==face && rd(rd(wrapper3+24)+52)==face);
+    assert(rd(face+32)==3 && rd(id+4)==3);
+    assert(rd(face+16)==metrics && rd(face+20)==outline);
+    assert(!memcmp(saved,address(external,sizeof(saved)),sizeof(saved)));
+    /* Switching away again must not retire the external stock consumer. */
+    assert(reload_path(path_b,&changed)==0); committed(path_b,changed);
+    assert(rd(face+32)==1 && rd(id+4)==1 && alive(face));
+    assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
+    assert(rd(face+16)==metrics && rd(face+20)==outline);
+    assert(!memcmp(saved,address(external,sizeof(saved)),sizeof(saved)));
+    destroy_descriptor(external);
+    assert(rd(face+32)==2 && rd(id+4)==2 && alive(face) && !temp_live);
+}
+static void test_borrowed_stock_failures(void) {
+    uint32_t changed,face,id,external,before,current,calls,start,i,child,data;
+    unsigned char saved[64]; int result;
+    external=retain_stock_and_replace(&face,&id);
+    start=alloc_calls; assert(reload_path(NULL,&changed)==0); calls=alloc_calls-start;
+    for(i=1;i<=calls+3;i++) {
+        external=retain_stock_and_replace(&face,&id);
+        memcpy(saved,address(external,sizeof(saved)),sizeof(saved));
+        before=live_allocations(); current=rd(wrapper+24);
+        if(i<=calls) fail_alloc=alloc_calls+i;
+        else if(i==calls+1) fail_size=1;
+        else if(i==calls+2) { fail_temp_at=temp_calls+2; }
+        else mutate_cache_in_prepare=rd(face+16);
+        result=reload_path(NULL,&changed); assert(result<0 && !changed);
+        if(i==calls+3) assert(result==-2406);
+        assert(live_allocations()==before && rd(wrapper+24)==current && !temp_live);
+        assert(rd(face+32)==1 && rd(id+4)==1 && alive(face));
+        assert(!memcmp(saved,address(external,sizeof(saved)),sizeof(saved)));
+        committed(path_a,1);
+        if(mutate_cache_in_prepare) wr(mutate_cache_in_prepare+20,0x0c3a5ef1u);
+        fail_alloc=fail_size=fail_temp_at=mutate_cache_in_prepare=0;
+        assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
+        assert(rd(face+32)==3 && rd(id+4)==3);
+    }
+    for(i=0;i<2;i++) {
+        external=retain_stock_and_replace(&face,&id);
+        child=rd(face+(i ? 20u : 16u)); data=held_entry(child,i ? 8u : 32u);
+        before=live_allocations(); current=rd(wrapper+24);
+        assert(reload_path(NULL,&changed)==1 && !changed);
+        assert(live_allocations()==before && rd(wrapper+24)==current && !temp_live);
+        assert(rd(face+32)==1 && rd(id+4)==1 && alive(external));
+        wr(data+(i ? 12u : 36u),0);
+        assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
+    }
+    external=retain_stock_and_replace(&face,&id);
+    stock_content++; before=live_allocations();
+    assert(reload_path(NULL,&changed)<0 && !changed);
+    assert(rd(face+32)==1 && rd(id+4)==1 && live_allocations()==before && alive(external));
+    external=retain_stock_and_replace(&face,&id);
+    wr(face+32,0x7ffffffdu); before=live_allocations();
+    assert(reload_path(NULL,&changed)==-2909 && !changed);
+    assert(rd(face+32)==0x7ffffffdu && rd(id+4)==1 && live_allocations()==before);
+    external=retain_stock_and_replace(&face,&id);
+    wr(face+32,0); before=live_allocations();
+    assert(reload_path(NULL,&changed)==-2941 && !changed);
+    assert(rd(face+32)==0 && rd(id+4)==1 && live_allocations()==before && alive(external));
+    external=retain_stock_and_replace(&face,&id);
+    data=duplicate(stock); wr(face,data); before=live_allocations();
+    assert(reload_path(NULL,&changed)==-2942 && !changed);
+    assert(rd(face+32)==1 && rd(id+4)==1 && live_allocations()==before && alive(external));
+    printf("borrowed stock face: %u allocation failures, size/snapshot/precommit failures and busy child caches passed\n",calls);
 }
 static void test_multi_family_atomicity(void) {
     uint32_t changed,calls,i;
@@ -672,6 +737,7 @@ int main(void) {
     test_holds_limits_and_external_faces(); test_idle_only_and_unowned_family();
     test_unchanged_primary_with_changed_fallback(); test_multi_family_atomicity();
     test_intern_diagnostics(); test_restore_failures(); test_restore_with_retained_stock_face();
+    test_borrowed_stock_failures();
     puts("font reload .155 transaction tests passed (modeled native leaves)"); return 0;
 }
 #endif

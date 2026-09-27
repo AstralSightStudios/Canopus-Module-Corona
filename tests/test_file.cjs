@@ -12,9 +12,9 @@ async function main() {
     path.join(root, 'manager/src/ts/file.ts'), '--outDir', temporary,
     '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck', '--allowJs'
   ], { stdio: 'inherit' });
-  const api = {}, boundary = path.join(temporary, 'system-file.js');
+  const api = {}, boundary = path.join(temporary, 'import.js');
   require.cache[boundary] = { id: boundary, filename: boundary, loaded: true,
-    exports: { __esModule: true, default: api } };
+    exports: { __esModule: true, file: api } };
   const file = require(path.join(temporary, 'file.js'));
   const uri = 'internal://files/test.bin', buffer = new Uint8Array([0, 1, 255]);
   let options;
