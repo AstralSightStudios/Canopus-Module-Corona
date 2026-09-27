@@ -8,7 +8,7 @@
 
     <list-item type="header" class="section header">
       <text class="title">主题资源管理</text>
-      <text class="hint">字体需新版 .155 实验模块。</text>
+      <text class="hint">通过互联接收并保存主题包，不会自动应用。</text>
     </list-item>
 
     <list-item type="interconnect" class="section">
@@ -17,123 +17,15 @@
       <input class="button primary" type="button" value="打开接收页面" onclick="openReceiver" />
     </list-item>
 
-    <list-item type="fonts" class="section">
-      <text class="section-title">固件字体</text>
-      <text class="hint">替换为简中像素字体，粗体也会变为 Regular。</text>
-      <input class="button primary" type="button" value="全部替换" disabled="{{busy}}" onclick="installAllFonts" />
-      <input class="button secondary" type="button" value="恢复默认" disabled="{{busy}}" onclick="restoreFirmwareFonts" />
-    </list-item>
-
-    <list-item type="icons" class="section">
-      <text class="section-title">设置图标</text>
-      <input class="button primary" type="button" value="安装测试" disabled="{{busy}}" onclick="installTestTheme" />
-      <input class="button secondary" type="button" value="删除主题" disabled="{{busy}}" onclick="deleteTestTheme" />
-    </list-item>
-
-    <list-item type="reload" class="section">
-      <input class="button primary" type="button" value="重载资源" disabled="{{busy}}" onclick="requestReload" />
-    </list-item>
-
-    <list-item type="result" class="section footer">
-      <text class="section-title">操作结果</text>
-      <text class="status">{{ statusText }}</text>
-      <text class="hint footnote">可上下滑动。旧字体文件请保留。</text>
-    </list-item>
   </list>
 </template>
 
 <script>
-import { ThemeBridge } from "../../ts/theme-bridge"
 import router from "@system.router"
 
 export default {
-  private: {
-    busy: false,
-    statusText: "准备就绪。字体操作会自动重载；图标操作后点重载资源。",
-    bridge: null,
-    destroyed: false
-  },
-
-  onInit() {
-    this.bridge = new ThemeBridge()
-  },
-
-  onDestroy() {
-    this.destroyed = true
-    this.bridge.cancelWait()
-  },
-
   openReceiver() {
     router.push({ uri: "pages/receive" })
-  },
-
-  installTestTheme() {
-    this.runOperation(
-      "正在安装设置图标…",
-      () => this.bridge.installTestTheme(),
-      "图标主题已写入，点重载资源应用。"
-    )
-  },
-
-  deleteTestTheme() {
-    this.runOperation(
-      "正在移除图标映射…",
-      () => this.bridge.deleteTestTheme(),
-      "图标映射已移除，点重载资源恢复。"
-    )
-  },
-
-  waitForResult(revision) {
-    if (this.destroyed) throw new Error("页面已关闭。")
-    this.statusText = "信号已发送，等待模块确认…"
-    return this.bridge.waitForReload(revision, message => {
-      if (!this.destroyed) this.statusText = message
-    })
-  },
-
-  installAllFonts() {
-    this.runOperation(
-      "正在分块写入新字体，请稍候…",
-      async () => {
-        const result = await this.bridge.installAllFirmwareFonts()
-        return this.waitForResult(result.revision)
-      },
-      message => message
-    )
-  },
-
-  restoreFirmwareFonts() {
-    this.runOperation(
-      "正在恢复默认映射…",
-      async () => {
-        const result = await this.bridge.restoreFirmwareFonts()
-        const message = await this.waitForResult(result.revision)
-        return result.broaderDirectoryRule ? message + " 上级目录规则仍可能覆盖字体。" : message
-      },
-      message => message
-    )
-  },
-
-  requestReload() {
-    this.runOperation(
-      "正在发送重载请求…",
-      async () => this.waitForResult(await this.bridge.requestReload()),
-      message => message
-    )
-  },
-
-  runOperation(startText, operation, successText) {
-    if (this.busy) return
-    this.busy = true
-    this.statusText = startText
-    Promise.resolve().then(operation).then(result => {
-      if (!this.destroyed)
-        this.statusText = typeof successText === "function" ? successText(result) : successText
-    }).catch(error => {
-      if (!this.destroyed) this.statusText = `操作未完成：${String(error.message || error)}`
-    }).then(() => {
-      if (!this.destroyed) this.busy = false
-    })
   }
 }
 </script>
@@ -201,23 +93,4 @@ export default {
   background-color: #2456B8;
 }
 
-.secondary {
-  color: #FFFFFF;
-  background-color: #303B4B;
-}
-
-.status {
-  width: 100%;
-  font-size: 20px;
-  line-height: 28px;
-  color: #FFFFFF;
-}
-
-.footnote {
-  margin-top: 16px;
-}
-
-.footer {
-  padding-bottom: 30px;
-}
 </style>

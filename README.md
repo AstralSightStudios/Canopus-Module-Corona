@@ -201,7 +201,7 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
 目录映射的源/目标都以 `/` 结尾并追加剩余路径；文件映射两端都不以 `/` 结尾，只匹配完整路径。启动配置文件不存在、为空或仅含注释时，模块以零规则启动 pass-through hook 和轮询器，不重定向资源或刷新 UI；之后写入映射并更新信号即可加载主题。模块运行后也可用 0 条规则清除全部映射。非法配置及其他读取错误会保留
 last-known-good。控制目录的变更标记格式为
-`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 提供设置图标测试操作，以及仅供 `.155` 实验模块使用的全字体替换/恢复测试；固件 `/font/` 下 9 个 `.ttf` 路径指向同一简中 Regular 子集，按 32 KiB 分块写入新不可变代次并发送重载信号。Manager 1.2.2 还覆盖 3 个 `/tmp/MiSans-*.ttf` 启动复制路径，并通过带请求编号与校验的 `reload.result` 显示真实事务结果、失败原因或等待超时；不直接读取 RHQ1。界面使用 18–24 px 高对比文字、单列大按钮和滚动列表。必须同时更新 Manager 与实验模块，不能只更新应用。Manager 另有 Interconnect 主题包接收端，逐文件写入原相对路径，不解析或改写包内 `mappings.tsv`；它仍不是通用配置编辑器或主题选择器。它通过 `internal://files/` 访问同一 app-scoped 文件区。构建需要含已批准 errno veneer
+`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 仅提供 Interconnect 主题包接收端，逐文件写入原相对路径并保留包内 `mappings.tsv`；不会解析或激活主题，也不是通用配置编辑器或主题选择器。它通过 `internal://files/` 访问同一 app-scoped 文件区。固件实验字体热重载不再由 Manager 提供测试 UI。构建需要含已批准 errno veneer
 的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、

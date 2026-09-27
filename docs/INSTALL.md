@@ -164,8 +164,7 @@ RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
 旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
 miwear。
 
-当前 Manager 提供固定设置图标测试操作，以及仅供 `.155` 实验模块使用的 Fusion Pixel 字体替换/恢复按钮；并提供按 [Interconnect 协议](interconnect_proto.md)接收主题包的页面。接收端原样保存包内路径和 `mappings.tsv`，不负责主题选择或激活，也不直接展示模块 RHQ1 计数器
-（“立即激活”只负责加载激活模块）。Manager 1.2.2 通过请求关联的文件回执确认模块结果；回执不可用时明确提示未确认，不阻断重载信号。当前字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，未覆盖 GPU 故障恢复或框架重启。
+当前 Manager 仅提供按 [Interconnect 协议](interconnect_proto.md)接收主题包的页面。接收端原样保存包内路径和 `mappings.tsv`，不负责主题选择或激活，也不直接展示模块 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，但需通过 Manager 以外的工具管理映射和重载请求，且未覆盖 GPU 故障恢复或框架重启。
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
@@ -230,8 +229,7 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 Umem；每次解析变更配置最多另需 32 KiB scratch，分配失败会保留当前规则并在后续轮询重试。
 默认构建仅改写字体注册路径，不能替换页面已持有的字体对象，不代表完整 UI/字体热重载；仅 `.155` opt-in 实验构建支持受限字体事务，详见 [字体实验说明](FONT_RELOAD_EXPERIMENT.md)。
 
-图标按钮会把 `settings-launcher.bin` 写到 `internal://files/themes/current/app/settings/launcher.bin`，安装或删除 `/resource/app/settings/` 对应映射，再由“重载资源”按钮写入 `internal://files/reload.request`。字体按钮仅适用于 `.155` opt-in 实验模块：它把 Fusion Pixel 子集以 32 KiB 分块写入新的 `font-generations/g-<id>/` 不可变目录，并将解包固件 `/font/` 下的 9 个 `.ttf` 源路径分别以精确文件规则指向同一代文件；替换/恢复会自动发重载信号。分块读写避免把完整 6 MiB 字体装入 JS Buffer。旧字体代次不会删除，避免模块仍持有其路径或 face 时文件消失。Manager 1.2.2 另含 3 个 `/tmp/MiSans-{Regular,Medium,Demibold}.ttf` 启动复制路径规则，并等待与本次请求关联的 `reload.result` 回执，显示实际更新数、失败原因或超时；它不直接读取 RHQ1。Manager 另提供 Interconnect 主题包接收端：按协议原样保存清单路径与映射文件，不解析/激活主题；不支持 ZIP 或通用配置编辑。需要同步安装新版实验 ELF 和 Manager，旧模块没有回执时不能判断为成功。模块侧使用 native 绝对路径，Manager 侧使用
-`internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
+Manager 的 Interconnect 页面将收到的主题包文件逐个写入原相对路径，并原样保存清单中的 `mappings.tsv`；它不解析或应用映射，不发送 `reload.request`，也不支持 ZIP 或通用配置编辑。接收端使用 `internal://files/` 访问 app-scoped 文件区。固件字体实验属于模块侧能力，不再附带设置图标或字体测试资产/操作；若使用实验构建，需由其他受信任工具写入不可变字体代次、映射和重载信号。模块侧使用 native 绝对路径；快应用文件 API 应使用 `internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
 stop/deactivate 仍需完整重启卸载，不支持热卸载。
 
 ## 状态与错误

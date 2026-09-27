@@ -137,6 +137,10 @@ async function main() {
   let receiver = new InterconnectThemeReceiver();
   const unsubscribe = receiver.subscribe(snapshot => states.push(snapshot));
   receiver.start();
+  assert.equal(states.at(-1).phase, 'waiting');
+  connection.onerror({ data: 'peer not connected' });
+  assert.equal(states.at(-1).phase, 'waiting');
+  assert.match(states.at(-1).message, /等待手机端互联连接/);
   connection.onopen({});
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(sent.some(packet => packet.startsWith('H')));
@@ -187,7 +191,15 @@ async function main() {
     JSON.stringify(packet.receivedRanges) === '[[1,1]]'));
   reply = messages(await deliver(`F00000000${encodeBase91([97])}`));
   assert(reply.includes('A00000000'));
+  assert.equal(states.at(-1).phase, 'receiving');
   assert.equal(states.at(-1).percent, 40);
+  connection.onerror({ data: 'link lost' });
+  assert.equal(states.at(-1).phase, 'error');
+  assert.match(states.at(-1).message, /接收进度已保留/);
+  assert.equal(states.at(-1).percent, 40);
+  connection.onopen({ isReconnected: true });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(states.at(-1).phase, 'ready');
   assert.deepEqual([...native.binary.get('internal://files/themes/dark/mappings.tsv')], [97, 10]);
   const savedProgress = JSON.parse(native.text.get('internal://files/interconnect-transfer.json'));
   assert.equal(savedProgress.files[0].receivedBitmap, '3');

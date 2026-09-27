@@ -1,7 +1,10 @@
+<import name="time-banner" src="../../components/time"></import>
+
 <template>
   <div class="page">
-    <text if="{{phase == 'waiting' || phase == 'ready'}}" class="page-title">主题包接收</text>
-    <text if="{{phase == 'receiving' || phase == 'error' || phase == 'success'}}" class="page-title">{{phaseTitle}}</text>
+    <div class="time-section">
+      <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
+    </div>
 
     <img if="{{phase == 'waiting'}}" class="hero" src="/common/images/connect.png" />
     <img if="{{phase == 'ready'}}" class="hero" src="/common/images/choose.png" />
@@ -9,7 +12,7 @@
     <img if="{{phase == 'error'}}" class="hero-small" src="/common/images/error.png" />
     <img if="{{phase == 'success'}}" class="hero-small" src="/common/images/succ.png" />
 
-    <text if="{{phase == 'waiting' || phase == 'ready'}}" class="phase-title">{{phaseTitle}}</text>
+    <text class="phase-title">{{phaseTitle}}</text>
     <text class="message">{{message}}</text>
 
     <div if="{{phase == 'receiving'}}" class="transfer-info">
@@ -23,7 +26,6 @@
       <text class="detail">{{fileCount}} 个文件 · {{receivedLabel}}</text>
     </div>
 
-    <img class="back-button" src="/common/images/back.png" onclick="goBack" />
   </div>
 </template>
 
@@ -33,6 +35,7 @@ import brightness from "@system.brightness"
 
 export default {
   private: {
+    headerTitle: "< 主题传输",
     phase: "waiting",
     phaseTitle: "等待连接",
     message: "等待手机端互联连接…",
@@ -134,16 +137,14 @@ export default {
   align-items: center;
 }
 
-.page-title {
+.time-section {
   position: absolute;
   left: 0;
-  top: 114px;
+  top: 12px;
   width: 100%;
-  height: 38px;
-  color: #FFFFFF;
-  font-size: 27px;
-  font-weight: bold;
-  text-align: center;
+  height: 77px;
+  flex-direction: column;
+  align-items: center;
 }
 
 .hero {
@@ -221,11 +222,4 @@ export default {
   text-align: center;
 }
 
-.back-button {
-  position: absolute;
-  left: 49px;
-  top: 6px;
-  width: 113px;
-  height: 80px;
-}
 </style>

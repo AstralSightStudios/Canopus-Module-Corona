@@ -319,8 +319,14 @@ export class InterconnectThemeReceiver {
       }
     };
     link.onerror = event => {
-      if (!this.stopped)
-        this.setPhase("error", `互联错误：${String(event.data || event.code || "未知错误")}`);
+      if (this.stopped || this.snapshot.phase === "success" || this.snapshot.phase === "error") return;
+      if (this.snapshot.phase === "receiving") {
+        const reason = String(event.data || event.code || "未知错误");
+        this.setPhase("error", `互联中断（${reason}），接收进度已保留，可重连续传。`);
+      } else {
+        // Initial link errors are normal while waiting for the phone to connect.
+        this.setPhase("waiting", "等待手机端互联连接…");
+      }
     };
     try {
       const status = link.getApkStatus?.();
