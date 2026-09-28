@@ -117,6 +117,11 @@ async function main() {
 
   const native = makeNativeApi();
   const sent = [];
+  const innerSent = () => sent.map(envelope => {
+    assert.deepEqual(Object.keys(envelope), ['msg']);
+    assert.equal(typeof envelope.msg, 'string');
+    return envelope.msg;
+  });
   let apkStatus;
   const connection = {
     onmessage: null, onopen: null, onclose: null, onerror: null,
@@ -176,14 +181,35 @@ async function main() {
     ...canoraObject, mappings: [{ source: '/resource/\\t', destination: 'icons/' }]
   }), 'dark'), /source 必须为绝对路径/);
 
-  apkStatus = 1;
+  apkStatus = 'connected';
   const startupReceiver = new InterconnectThemeReceiver();
   startupReceiver.start();
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.deepEqual(sent.map(packet => JSON.parse(packet.slice(1))), [
-    { version: 1, maxTextChars: 18000, maxWindow: 4 }
+  assert.deepEqual(innerSent().map(packet => JSON.parse(packet.slice(1))), [
+    { version: 2, type: 'announce', maxTextChars: 18000, maxWindow: 4 }
   ]);
+  assert.deepEqual(sent[0], { msg: 'H{"version":2,"type":"announce","maxTextChars":18000,"maxWindow":4}' });
   startupReceiver.stop();
+  for (const openStatus of [true, 1, { status: 1 }, 'OPEN', ' CONNECTED ', { status: 'READY' }]) {
+    sent.length = 0;
+    apkStatus = openStatus;
+    const knownStatusReceiver = new InterconnectThemeReceiver();
+    knownStatusReceiver.start();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(innerSent(), ['H{"version":2,"type":"announce","maxTextChars":18000,"maxWindow":4}']);
+    knownStatusReceiver.stop();
+  }
+  // An unknown/disconnected status must not be mistaken for an open connection.
+  sent.length = 0;
+  apkStatus = 'disconnected';
+  const waitingReceiver = new InterconnectThemeReceiver();
+  waitingReceiver.start();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(innerSent(), []);
+  connection.onopen({});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(innerSent(), ['H{"version":2,"type":"announce","maxTextChars":18000,"maxWindow":4}']);
+  waitingReceiver.stop();
   sent.length = 0;
   apkStatus = undefined;
 
@@ -198,17 +224,30 @@ async function main() {
   assert.match(states.at(-1).message, /等待手机端互联连接/);
   connection.onopen({});
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.deepEqual(sent, ['H{"version":1,"maxTextChars":18000,"maxWindow":4}']);
+  assert.deepEqual(innerSent(), ['H{"version":2,"type":"announce","maxTextChars":18000,"maxWindow":4}']);
 
   async function deliver(packet) {
     const start = sent.length;
     connection.onmessage({ data: packet });
     await new Promise(resolve => setTimeout(resolve, 0));
-    return sent.slice(start);
+    return innerSent().slice(start);
   }
   const messages = packets => packets.map(packet => packet[0] === 'T' || packet[0] === 'P' || packet[0] === 'E'
     ? JSON.parse(packet.slice(1)) : packet);
-  assert.deepEqual(await deliver('H' + JSON.stringify({ version: 1, maxTextChars: 18000, maxWindow: 4 })), []);
+  assert.deepEqual(await deliver('H' + JSON.stringify({
+    version: 2, type: 'announce', maxTextChars: 18000, maxWindow: 4
+  })), []);
+  assert.deepEqual(await deliver('H' + JSON.stringify({
+    version: 2, type: 'response', replyTo: 'earlier', maxTextChars: 18000, maxWindow: 4
+  })), []);
+  const request = 'H' + JSON.stringify({
+    version: 2, type: 'request', requestId: 'peer_42-abc', maxTextChars: 18000
+  });
+  const expectedHandshakeResponse = 'H' + JSON.stringify({
+    version: 2, type: 'response', replyTo: 'peer_42-abc', maxTextChars: 18000, maxWindow: 4
+  });
+  assert.deepEqual(await deliver(request), [expectedHandshakeResponse]);
+  assert.deepEqual(await deliver(request), [expectedHandshakeResponse]);
 
   native.text.set('internal://files/mappings.tsv',
     '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/locked/icons/\n');

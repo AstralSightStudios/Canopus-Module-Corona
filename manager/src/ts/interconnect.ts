@@ -4,7 +4,8 @@ import type { FileOperationError } from "./file";
 import { parseResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
 import type { ResourcePackManifest } from "./resource-pack";
 
-const VERSION = 1;
+const VERSION = 2;
+const TRANSFER_STATE_VERSION = 1;
 const MAX_TEXT_CHARS = 18000;
 const MAX_WINDOW = 4;
 const MAX_FILES = 128;
@@ -79,7 +80,7 @@ export interface ReceiverSnapshot {
 interface InterconnectLink {
   getApkStatus?: () => unknown;
   send(options: {
-    data: string;
+    data: { msg: string };
     success?: () => void;
     fail?: (data: unknown, code: number) => void;
   }): void;
@@ -335,9 +336,11 @@ export class InterconnectThemeReceiver {
     };
     try {
       const status = link.getApkStatus?.();
+      const connectionStates = ["open", "connected", "ready"];
       const alreadyOpen = status === true || status === 1 ||
-        (typeof status === "string" && /open|connect|ready/i.test(status)) ||
-        (isRecord(status) && (status.status === 1 || status.status === "open" || status.status === "connected"));
+        (typeof status === "string" && connectionStates.includes(status.trim().toLowerCase())) ||
+        (isRecord(status) && (status.status === 1 ||
+          (typeof status.status === "string" && connectionStates.includes(status.status.trim().toLowerCase()))));
       if (alreadyOpen) opened({});
     } catch (_error) {
       // onopen remains the authoritative connection lifecycle event.
@@ -414,7 +417,7 @@ export class InterconnectThemeReceiver {
       let parsed: unknown;
       try { parsed = JSON.parse(text); }
       catch (_error) { throw protocolError("invalid-manifest", "本地续传状态损坏"); }
-      if (!isRecord(parsed) || parsed.version !== VERSION || !validThemeId(parsed.themeId) ||
+      if (!isRecord(parsed) || parsed.version !== TRANSFER_STATE_VERSION || !validThemeId(parsed.themeId) ||
           (parsed.mode !== "replace" && parsed.mode !== "resume") ||
           !integer(parsed.fileCount, 1, MAX_FILES) || !integer(parsed.totalBytes, 0, MAX_THEME_BYTES) ||
           !Array.isArray(parsed.files) || !integer(parsed.manifestSeen, 0, parsed.fileCount) ||
@@ -509,18 +512,42 @@ export class InterconnectThemeReceiver {
 
   private async handleHandshake(packet: string): Promise<void> {
     const message = parseJsonPacket(packet, "H");
-    if (message.version !== VERSION || !integer(message.maxTextChars, 256, 1000000))
+    if (message.version !== VERSION || typeof message.type !== "string" ||
+        !integer(message.maxTextChars, 256, 1000000))
       throw protocolError("invalid-manifest", "互联协议版本或最大消息长度不受支持");
     this.peerMaxTextChars = Math.min(MAX_TEXT_CHARS, message.maxTextChars);
-    this.setPhase("ready", `握手完成，可接收主题包（单条消息上限 ${this.peerMaxTextChars} 字符）。`);
-    if (!this.handshakeSent) await this.sendHandshake();
+    switch (message.type) {
+      case "announce":
+        if (!integer(message.maxWindow, 1, MAX_WINDOW))
+          throw protocolError("invalid-manifest", "无效的握手 announce 参数");
+        this.setPhase("ready", `握手完成，可接收主题包（单条消息上限 ${this.peerMaxTextChars} 字符）。`);
+        return;
+      case "request":
+        if (typeof message.requestId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(message.requestId))
+          throw protocolError("invalid-manifest", "无效的握手 requestId");
+        await this.sendJson("H", {
+          version: VERSION, type: "response", replyTo: message.requestId,
+          maxTextChars: MAX_TEXT_CHARS, maxWindow: MAX_WINDOW
+        });
+        return;
+      case "response":
+        if (typeof message.replyTo !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(message.replyTo) ||
+            !integer(message.maxWindow, 1, MAX_WINDOW))
+          throw protocolError("invalid-manifest", "无效的握手 response 参数");
+        this.setPhase("ready", `握手完成，可接收主题包（单条消息上限 ${this.peerMaxTextChars} 字符）。`);
+        return;
+      default:
+        throw protocolError("invalid-manifest", "未知的握手消息类型");
+    }
   }
 
   private async sendHandshake(): Promise<void> {
     if (this.handshakeSent) return;
     this.handshakeSent = true;
     try {
-      await this.sendJson("H", { version: VERSION, maxTextChars: MAX_TEXT_CHARS, maxWindow: MAX_WINDOW });
+      await this.sendJson("H", {
+        version: VERSION, type: "announce", maxTextChars: MAX_TEXT_CHARS, maxWindow: MAX_WINDOW
+      });
     } catch (error) {
       this.handshakeSent = false;
       throw error;
@@ -590,7 +617,7 @@ export class InterconnectThemeReceiver {
     await this.removeThemeDirectory(themeId);
     await this.unregisterTheme(themeId);
     const next: TransferState = {
-      version: VERSION,
+      version: TRANSFER_STATE_VERSION,
       themeId,
       mode: "replace",
       fileCount,
@@ -872,13 +899,16 @@ export class InterconnectThemeReceiver {
 
   private async send(packet: string): Promise<void> {
     if (!this.link) throw new Error("interconnect 尚未连接");
-    if (packet.length > Math.min(MAX_TEXT_CHARS, this.peerMaxTextChars))
+    const envelope = { msg: packet };
+    const serializedEnvelope = JSON.stringify(envelope);
+    if (packet.length > Math.min(MAX_TEXT_CHARS, this.peerMaxTextChars) ||
+        serializedEnvelope.length > MAX_TEXT_CHARS)
       throw new Error("待发送互联消息超过协商长度");
     const link = this.link;
     await new Promise<void>((resolve, reject) => {
       try {
         link.send({
-          data: packet,
+          data: envelope,
           success: resolve,
           fail: (data, code) => reject(new Error(`interconnect.send 失败（${code}）：${String(data)}`))
         });

@@ -83,18 +83,33 @@ Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及模块限制�
 
 ## 消息格式
 
-消息首字符是包类型。控制包使用完整字段名的 JSON；大块文件数据使用紧凑文本。一次 `interconnect.send` 是一条独立消息；平台发送成功回调不代表对端已写盘，必须等待应用层确认。
+消息首字符是包类型。控制包使用完整字段名的 JSON；大块文件数据使用紧凑文本。AstroBox 发往 Manager 的包继续使用原始协议文本；Manager 发往 AstroBox 时，Vela `connect.send` 的 `data` 必须是对象，因此发送 `{msg: packet}`。固件会将该对象序列化后传回 AstroBox，接收端先解析 JSON 并取出 `msg`，再交给相同的内层包解析器；`tag` 不需要。`maxTextChars` 限制内层协议包，Manager 还须确保序列化后的 `{msg: packet}` 不超过本地 Vela 消息上限。一次 `interconnect.send` 是一条独立消息；平台发送成功回调不代表对端已写盘，必须等待应用层确认。
+
+```text
+AstroBox -> Manager: H{"version":2,"type":"request",...}
+Manager -> Vela API: { data: { msg: 'H{"version":2,"type":"response",...}' } }
+Firmware -> AstroBox: {"msg":"H{\"version\":2,\"type\":\"response\",...}"}
+```
 
 ### `H` — 握手
 
 ```text
-H{"version":1,"maxTextChars":18000}
-H{"version":1,"maxTextChars":18000,"freeBytes":12345678,"maxWindow":4}
+H{"version":2,"type":"announce","maxTextChars":18000,"maxWindow":4}
+H{"version":2,"type":"request","requestId":"peer_42","maxTextChars":18000}
+H{"version":2,"type":"response","replyTo":"peer_42","maxTextChars":18000,"maxWindow":4}
 ```
 
-握手是双向的：发送端与接收端都应在互联链路可用后主动发送 `H`，不必等待先收到对方的 `H`。接收端应用启动时若链路已经连接，应立即发送；若尚未连接，则等链路打开事件后发送。重连后双方重新握手。收到对方 `H` 时，若本端本轮尚未发送握手，也应回发自己的 `H`；若已发送则不必重复回复，避免握手包来回循环。
+只支持协议版本 2，不进行 v1 fallback。`maxTextChars` 为本端最大完整消息字符数；双方取较小值。`maxWindow` 为最大分片窗口（当前为 4）。Manager 不提供 `freeBytes`。
 
-`maxTextChars` 为本端最大完整消息字符数；双方取较小值。`freeBytes` 为可用字节数（若可获取），`maxWindow` 为最大分片窗口（初始建议 4）。接收端按本地配置限制文件数与主题总大小；不公开总空间与已用空间。当前 Manager 不提供 `freeBytes`。
+握手完整时序如下：Manager 在应用启动时探测到链路已打开，或收到连接打开事件（包括重连）时主动发送 `announce`；若链路未打开，则等 `onopen` 后发送。AstroBox 在订阅互联事件并 launch 后发送 `request`，`requestId` 必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Manager 收到每个合法 `request`，无论此前是否已发送 `announce`，都必须回复 `response`，并以 `replyTo` 原样匹配请求 ID；重复请求可重复回复同一响应，处理具幂等性。收到 `announce` 或 `response` 不回复，避免握手回环。典型顺序为：
+
+```text
+Manager -> AstroBox: announce（链路打开时）
+AstroBox -> Manager: request（订阅/launch 后）
+Manager -> AstroBox: response（replyTo 匹配 requestId）
+```
+
+两端连接事件与订阅/launch 的先后可能不同；若 AstroBox 的 `request` 先于 Manager 的 `announce` 到达，Manager 仍须响应，之后照常按链路生命周期发送 `announce`。AstroBox 收到 `announce` 后会立即重发 `request`，并每 750 ms 重试一次，最多持续 8 秒；重试必须沿用同一个 `requestId`。响应只按 `replyTo` 与待处理请求的 `requestId` 匹配，不因先后顺序或重复请求而改变关联。
 
 ### `T` — 文件清单与传输状态
 
