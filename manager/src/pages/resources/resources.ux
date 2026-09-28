@@ -29,6 +29,7 @@
 <script>
 import prompt from "@system.prompt"
 import router from "@system.router"
+import vibrator from "@system.vibrator"
 import * as file from "../../ts/file"
 import { parseResourcePackManifest } from "../../ts/resource-pack"
 import {
@@ -255,6 +256,7 @@ export default {
       this.dragId = this.candidateId
       this.dragFrom = index
       this.dragTo = index
+      try { vibrator.vibrate({ mode: "short" }) } catch (_error) {}
       this.markClickSuppressed()
       this.updateDrag()
       this.scrollTimer = setInterval(() => this.scrollAtEdge(), SCROLL_MS)

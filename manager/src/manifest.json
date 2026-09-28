@@ -21,6 +21,9 @@
     },
     {
       "name": "system.brightness"
+    },
+    {
+      "name": "system.vibrator"
     }
   ],
   "config": {
