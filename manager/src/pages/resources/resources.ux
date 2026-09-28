@@ -9,7 +9,7 @@
     <text if="{{themes.length == 0}}" class="empty-state">{{statusText}}</text>
     <list if="{{themes.length > 0}}" class="resource-list">
       <list-item for="{{theme in themes}}" type="resource" class="resource-item"
-        id="{{theme.themeId}}" onclick="openTheme">
+        onclick="openTheme(theme.themeId)">
         <div class="resource-copy">
           <text class="theme-name">{{theme.name}}</text>
           <text class="theme-meta">{{theme.metaLine}}</text>
@@ -85,9 +85,7 @@ export default {
     }
   },
 
-  openTheme(event) {
-    const item = event.currentTarget || event.target
-    const themeId = item && item.id
+  openTheme(themeId) {
     if (typeof themeId !== "string" || !VALID_THEME_ID.test(themeId)) return
     router.push({ uri: "pages/resource-detail", params: { themeId } })
   },
