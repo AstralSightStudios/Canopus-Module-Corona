@@ -16,15 +16,44 @@
         <img class="enter" src="/common/images/enter.png" />
       </list-item>
     </list>
+    <div class="reload-action-wrap">
+      <img class="reload-action" src="/common/images/reload.png" onclick="requestReload" />
+    </div>
   </div>
 </template>
 
 <script>
+import prompt from "@system.prompt"
+import * as file from "../../ts/file"
 import router from "@system.router"
+import { sendReloadSignal, waitForReload } from "../../ts/reload-signal"
 
 export default {
+  private: {
+    sendingReload: false,
+    reloadRevision: 0
+  },
+
   openResources() {
     router.push({ uri: "pages/resources" })
+  },
+
+  async requestReload() {
+    if (this.sendingReload) return
+    this.sendingReload = true
+    this.reloadRevision = Math.max(Date.now(), this.reloadRevision + 1)
+    let signalSent = false
+    try {
+      const revision = String(this.reloadRevision)
+      await sendReloadSignal(revision, file)
+      signalSent = true
+      const message = await waitForReload(revision, file)
+      prompt.showToast({ message })
+    } catch (_error) {
+      prompt.showToast({ message: signalSent ? "等待模块响应失败" : "重载信号发送失败" })
+    } finally {
+      this.sendingReload = false
+    }
   },
 
   noop() {}
@@ -79,5 +108,20 @@ export default {
 .enter {
   width: 40px;
   height: 40px;
+}
+
+.reload-action-wrap {
+  position: absolute;
+  left: 0;
+  bottom: 10px;
+  width: 100%;
+  height: 78px;
+  align-items: center;
+  justify-content: center;
+}
+
+.reload-action {
+  width: 150px;
+  height: 78px;
 }
 </style>

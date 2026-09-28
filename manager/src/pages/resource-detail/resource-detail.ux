@@ -14,13 +14,18 @@
       <text class="description">{{description}}</text>
       <text class="targets">{{targetsLine}}</text>
     </div>
+    <div if="{{loaded}}" class="delete-action-wrap">
+      <img class="delete-action" src="/common/images/del.png" onclick="onDeleteTap" />
+    </div>
   </div>
 </template>
 
 <script>
 import router from "@system.router"
+import prompt from "@system.prompt"
 import * as file from "../../ts/file"
 import { parseResourcePackManifest } from "../../ts/resource-pack"
+import { removeInstalledTheme } from "../../ts/resource-storage"
 
 const THEME_ROOT_URI = "internal://files/themes/"
 const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
@@ -33,7 +38,9 @@ export default {
     name: "",
     metaLine: "",
     description: "",
-    targetsLine: ""
+    targetsLine: "",
+    deleteFirstTapAt: null,
+    deleting: false
   },
 
   onInit() {
@@ -66,6 +73,39 @@ export default {
     } catch (error) {
       this.loaded = false
       this.statusText = `无法读取资源包信息：${String(error.message || error)}`
+    }
+  },
+
+  onDeleteTap() {
+    if (this.deleting) return
+    const now = Date.now()
+    const elapsed = this.deleteFirstTapAt === null ? Infinity : now - this.deleteFirstTapAt
+    if (elapsed >= 0 && elapsed <= 500) {
+      this.deleteFirstTapAt = null
+      this.deleteTheme()
+      return
+    }
+
+    this.deleteFirstTapAt = now
+    prompt.showToast({ message: "双击删除" })
+  },
+
+  async deleteTheme() {
+    if (this.deleting) return
+    this.deleting = true
+    try {
+      await removeInstalledTheme(this.themeId, file)
+      prompt.showToast({ message: "资源包已删除" })
+      router.back()
+    } catch (error) {
+      this.deleting = false
+      const reason = error && error.resourceStorageReason
+      const message = reason === "active-theme"
+        ? "正在使用的资源包不能删除"
+        : reason === "invalid-index"
+          ? "资源包索引损坏，删除失败"
+          : "删除失败，请稍后重试"
+      prompt.showToast({ message })
     }
   },
 
@@ -156,5 +196,20 @@ export default {
   line-height: 23px;
   text-align: center;
   lines: 3;
+}
+
+.delete-action-wrap {
+  position: absolute;
+  left: 0;
+  bottom: 10px;
+  width: 100%;
+  height: 78px;
+  align-items: center;
+  justify-content: center;
+}
+
+.delete-action {
+  width: 150px;
+  height: 78px;
 }
 </style>

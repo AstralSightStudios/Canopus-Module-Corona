@@ -201,7 +201,7 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
 目录映射的源/目标都以 `/` 结尾并追加剩余路径；文件映射两端都不以 `/` 结尾，只匹配完整路径。启动配置文件不存在、为空或仅含注释时，模块以零规则启动 pass-through hook 和轮询器，不重定向资源或刷新 UI；之后写入映射并更新信号即可加载主题。模块运行后也可用 0 条规则清除全部映射。非法配置及其他读取错误会保留
 last-known-good。控制目录的变更标记格式为
-`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 的 Interconnect 接收端要求 `canora.json`，逐文件保存资源和元数据，并由其生成主题目录内的派生 `mappings.tsv`；资源管理页展示包信息，不展示映射规则，但不会选择/激活主题、生成活动 `mappings.tsv` 或发送 `reload.request`，也不接收 ZIP 本体。它通过 `internal://files/` 访问同一 app-scoped 文件区。固件实验字体热重载不再由 Manager 提供测试 UI。构建需要含已批准 errno veneer
+`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 的 Interconnect 接收端要求 `canora.json`，逐文件保存资源和元数据，并由其生成主题目录内的派生 `mappings.tsv`；资源管理页展示包信息，不展示映射规则，但不会选择/激活主题或生成活动 `mappings.tsv`，也不接收 ZIP 本体。首页重载按钮只向 `internal://files/reload.request` 写入版本化信号，针对现有活动配置触发重载，不会应用收到的主题包；按钮等待本次版本匹配的模块回执后再显示结果 toast，超时会提示未收到响应。Manager 通过 `internal://files/` 访问同一 app-scoped 文件区。固件实验字体热重载不再由 Manager 提供测试 UI。构建需要含已批准 errno veneer
 的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、

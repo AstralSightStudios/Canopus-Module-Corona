@@ -11,6 +11,9 @@
       "name": "system.router"
     },
     {
+      "name": "system.prompt"
+    },
+    {
       "name": "system.interconnect"
     },
     {
