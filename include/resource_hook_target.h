@@ -13,6 +13,13 @@
 #define RH_FW_IMAGE_CACHE_CLASS   0x2ca168b4u
 #define RH_FW_HEADER_CACHE_CLASS  0x2ca16934u
 #define RH_FW_FONT_REMOVE_PATH    0x0c904cedu
+/* Font transaction identities: individually mapped, not a range delta. */
+#define RH_FW_VECTOR_CLASS            0x2ca6ee48u
+#define RH_FW_VECTOR_COMPARE          0x0c69feb1u
+#define RH_FW_VECTOR_DESTROY          0x0c6a12d5u
+#define RH_FW_VECTOR_DROP             0x0c6a1305u
+#define RH_FW_FONT_SET_PIXEL_SIZE     0x0c8b8a55u
+#define RH_FW_CACHE_RELEASE           0x0c8b9781u
 #else
 /* Exact .139 cache and LVGL image-class identities, verified in its AP. */
 #define RH_FW_IMAGE_OBJECT_CLASS  0x2ca14cb8u
@@ -20,6 +27,13 @@
 #define RH_FW_IMAGE_CACHE_CLASS   0x2ca168c4u
 #define RH_FW_HEADER_CACHE_CLASS  0x2ca16944u
 #define RH_FW_FONT_REMOVE_PATH    0x0c904cfdu
+/* Font transaction identities: individually mapped, not a range delta. */
+#define RH_FW_VECTOR_CLASS            0x2ca6ee58u
+#define RH_FW_VECTOR_COMPARE          0x0c69fec1u
+#define RH_FW_VECTOR_DESTROY          0x0c6a12e5u
+#define RH_FW_VECTOR_DROP             0x0c6a1315u
+#define RH_FW_FONT_SET_PIXEL_SIZE     0x0c8b8a65u
+#define RH_FW_CACHE_RELEASE           0x0c8b9791u
 #endif
 
 /* Get-info, tree walk and style APIs are byte-identical at these Thumb

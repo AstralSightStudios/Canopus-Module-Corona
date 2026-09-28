@@ -1,7 +1,6 @@
 #include "resource_hook_font_reload.h"
 
-#if !defined(RH_TARGET_155) || !RH_TARGET_155 || \
-    !defined(RH_EXPERIMENTAL_FONT_RELOAD) || !RH_EXPERIMENTAL_FONT_RELOAD
+#if !defined(RH_EXPERIMENTAL_FONT_RELOAD) || !RH_EXPERIMENTAL_FONT_RELOAD
 int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
     (void)current;
     if (changed) *changed = 0;
@@ -10,10 +9,13 @@ int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
 void rh_font_reload_disable(void) {}
 #else
 #include "resource_hook_platform.h"
+#include "resource_hook_target.h"
 #include <stddef.h>
 
-/* Q66 4.100.155 ONLY. PCs/layouts independently inspected in the fingerprinted
- * IDA database; see font-reload-investigation.md. No native wrapper creation,
+/* Exact Q66 4.100.139/.155 APs only. Shared layouts/algorithm and explicit
+ * target identities: see .155/font-reload-investigation.md and
+ * .139/font-reload-compatibility.md under targets/xiaomi-band-11-4.100.*.
+ * No native wrapper creation,
  * cache constructor, registry remove/add, GPU wait, drain or reset is called.
  *
  * Support: managed outline FreeType records, including fallback wrappers;
@@ -45,12 +47,12 @@ void rh_font_reload_disable(void) {}
  * not allocation: hashing streams the file and never loads it wholesale. */
 #define FILE_LIMIT (32u * 1024u * 1024u)
 #define MAGIC 1600079444u
-#define CNT_CLASS 0x2ca16934u
-#define SIZE_CLASS 0x2ca168b4u
+#define CNT_CLASS RH_FW_HEADER_CACHE_CLASS
+#define SIZE_CLASS RH_FW_IMAGE_CACHE_CLASS
 #define METRICS 0x0c396b5du
 #define OUTLINE 0x0c3a7c45u
 #define RELEASE 0x0c3a0993u
-#define VECTOR_CLASS 0x2ca6ee48u
+#define VECTOR_CLASS RH_FW_VECTOR_CLASS
 #define UIKIT_SLOT 0x200bd1e8u
 #define CONTEXT_SLOT 0x200bd3ecu
 #define DRAW_SLOT 0x200bd318u
@@ -209,9 +211,9 @@ static int cache_check(uint32_t cache, uint32_t clz, uint32_t size, int holds, i
         if(rd(cache+24)!=destroy) return -base-7;
     } else {
         if(!vector) return -base-20;
-        if(rd(cache+16)!=0x0c69feb1u) return -base-5;
+        if(rd(cache+16)!=RH_FW_VECTOR_COMPARE) return -base-5;
         if(rd(cache+20)) return -base-6;
-        if(rd(cache+24)!=0x0c6a12d5u) return -base-7;
+        if(rd(cache+24)!=RH_FW_VECTOR_DESTROY) return -base-7;
     }
     for(p=rd(cache+52);p;p=rd(p+8)) {
         uint32_t tree,data,entry,k;
@@ -435,8 +437,8 @@ static uint32_t new_cache(uint32_t size,uint32_t count,uint32_t compare,uint32_t
  * function. A valid zero-ref entry survives release until explicit drop. */
 static void destroy_descriptor(uint32_t d) {
     uint32_t ctx=rd(d+48),cache=rd(ctx+24),e=rd(d+56),face=rd(d+52),path=rd(d+60);
-    (void)call(0x0c8b9780u,cache,e,0);
-    if(rd(e+4)==0) (void)call(0x0c8b8c9eu,cache,face,0);
+    (void)call(RH_FW_CACHE_RELEASE,cache,e,0);
+    if(rd(e+4)==0) (void)call(RH_FW_CACHE_DROP,cache,face,0);
     (void)call(0x0c39a424u,ctx,path,0);
     release_mem(d);
 }
@@ -502,7 +504,7 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     /* The installed callbacks require scalable outlines, not a bitmap-only
      * face which happens to pass FT parsing and pixel-size setup. */
     if(!ft || !(rd(ft+8)&1u)) { error=-2913; goto owned_fail; }
-    if(call(0x0c8b8a54u,ft,size,0)) { error=-2914; goto owned_fail; }
+    if(call(RH_FW_FONT_SET_PIXEL_SIZE,ft,size,0)) { error=-2914; goto owned_fail; }
     metrics=rd(ft+88); if(!metrics) { error=-2915; goto owned_fail; }
     wr(d+4,METRICS); wr(d+8,OUTLINE); wr(d+12,RELEASE);
     wr(d+16,(uint32_t)((int32_t)rd(metrics+32)>>6));
@@ -517,7 +519,7 @@ owned_fail:
     destroy_descriptor(d); return error;
 acquired_fail:
     /* Balance just the lookup reference, leaving the preexisting face intact. */
-    (void)call(0x0c8b9780u,rd(ctx+24),e,0);
+    (void)call(RH_FW_CACHE_RELEASE,rd(ctx+24),e,0);
 fail:
     if(path) (void)call(0x0c39a424u,ctx,path,0);
     release_mem(d); return error;
@@ -546,7 +548,7 @@ static int refresh(struct transaction *t) {
         if(!r) continue;
         /* Drop copied non-uploaded vector paths, then property refresh lets the
          * next draw rebuild lazily. Avoid unchecked eager vector allocations. */
-        if(rd(p)==VECTOR_CLASS) (void)call(0x0c6a1304u,p,0,0);
+        if(rd(p)==VECTOR_CLASS) (void)call(RH_FW_VECTOR_DROP,p,0,0);
         r=live(p); if(r<0) return -1; if(!r) continue;
         (void)call(0x0c38525cu,p,0x000f0000u,90); /* LV_PART_ANY */
         if(state.disabled || rd(UIKIT_SLOT)!=state.uikit || rd(CONTEXT_SLOT)!=state.context) return disable();

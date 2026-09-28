@@ -1,6 +1,8 @@
-# Experimental Q66 .155 font reload
+# Experimental Q66 .139 / .155 font reload
 
-This is an opt-in implementation for `xiaomi-band-11-4.100.155`, not a production font reload guarantee. Default `.139` and `.155` builds retain the existing registry-only behavior. No automatic page rebuild, GPU wait/reset or global cache drop is added.
+This is a shared opt-in implementation for `xiaomi-band-11-4.100.139` and `xiaomi-band-11-4.100.155`, not a production font reload guarantee. Default `.139` and `.155` builds retain the existing registry-only behavior. No automatic page rebuild, GPU wait/reset or global cache drop is added.
+
+The [.139 compatibility audit](../targets/xiaomi-band-11-4.100.139/font-reload-compatibility.md) verifies the supplied OTA and loader, 122 native function bodies and shared layouts. Nine exact addresses differ; the transaction algorithm is shared without a blanket relocation rule. `.139` physical-device acceptance remains **NOT_PROBED**.
 
 ## Device result
 
@@ -9,14 +11,15 @@ On 2026-09-26, the user reported that the current `.155` experimental font-repla
 ## Build and target approval
 
 ```sh
-RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.155
+RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.139
+# Or select xiaomi-band-11-4.100.155.
 ```
 
 The experimental ELF is `build/resource-hook-font-experimental.elf`, with descriptor build ID `resource-hook-0.3.0-font-exp`. It does not overwrite the default `build/resource-hook.elf`. Other targets and values besides `0`/`1` are rejected. `build-install-payload.sh` refuses the experimental option, including when invoked by the release-delivery builder.
 
-The selected Canopus target pack must allow the exact native font functions used by `src/font_reload_155.c`. The normal verifier is still mandatory: an existing pack that only approves the image adapter will reject the new absolute addresses. An ELF produced before that rejection is **not a verified/installable delivery**. Do not disable verification or broaden the allowed address ranges to get a green build. The original pack's target ID and AP SHA256 are checked before compilation.
+The selected Canopus target pack must allow the exact native font functions used by `src/font_reload.c`. The normal verifier is still mandatory: an existing pack that only approves the image adapter will reject the new absolute addresses. An ELF produced before that rejection is **not a verified/installable delivery**. Do not disable verification or broaden the allowed address ranges to get a green build. The original pack's target ID and AP SHA256 are checked before compilation.
 
-The adjacent `Canopus-Private` `.155` pack was updated with user permission: 42 exact restricted symbol records and `EVID-FONT-4155-001`, plus normally generated C/Rust metadata. They remain `STATIC_RECOVERED / PENDING`, not public-callable or device approval. No address range was broadened. With these additions, the experimental ELF passes the unchanged strict verifier; removing the allocator's exact record makes verification fail again.
+The adjacent `Canopus-Private` packs were updated with user permission: 42 exact restricted symbol records per target, `EVID-FONT-4139-001` / `EVID-FONT-4155-001`, and normally generated C/Rust metadata. They remain `STATIC_RECOVERED / PENDING`, not public-callable or device approval. No address range was broadened. Both experimental ELFs pass the unchanged strict verifier. A temporary `.139` pack copy with the allocator's exact record removed rejects the experimental ELF; the earlier `.155` negative check is preserved.
 
 ## What the transaction does
 
@@ -31,7 +34,7 @@ Preparation and publication happen within one serialized UI timer callback, neve
 
 ## Resource and support limits
 
-- Only the fingerprinted `.155` standard managed outline-FreeType path is supported. Each affected family must have an auditable active or idle descriptor at its first change (or an already audited scalar exemplar from this module lifetime).
+- Only the fingerprinted `.139` / `.155` standard managed outline-FreeType paths are supported. Each affected family must have an auditable active or idle descriptor at its first change (or an already audited scalar exemplar from this module lifetime).
 - Unknown font callbacks/backends, unregistered/app-owned font copies, custom text caches, canvas pixels and separately uploaded paths are not supported.
 - Use a **new immutable destination filename/directory for every font generation**. Keep files unchanged and available. Overwriting `themes/current/font.ttf` is not supported. Non-stock generation paths cannot be selected again after leaving them; restoration of unchanged stock files is supported.
 - Existing non-stock target faces outside the current preparation transaction are still refused. An unchanged, fingerprint-verified stock face may be borrowed through a new native cache reference after checking its canonical interned pathname, style/mode key, existing positive ownership, FreeType face and both child caches. Child-cache holds remain busy/retry. Existing caches and other consumers' references are never overwritten or forcibly retired; new staged descriptors may also share a face with each other.
@@ -41,7 +44,7 @@ Preparation and publication happen within one serialized UI timer callback, neve
 
 For example, change a mapping destination from `themes/font-g1/` to `themes/font-g2/`, with the same font-relative paths in each immutable directory, then write a new reload-request revision. Removing that mapping restores the captured stock path. Do not reuse `font-g1` in this module lifetime.
 
-The opt-in `.155` font adapter is independent of Manager. Manager no longer bundles the Fusion Pixel test font or exposes font-replacement, restore, or settings-icon test controls. To exercise the adapter, a separate trusted tool must write an immutable font generation, update exact-file mappings, and send a reload request; the default module does not execute this adapter.
+The shared opt-in font adapter is independent of Manager. Manager no longer bundles the Fusion Pixel test font or exposes font-replacement, restore, or settings-icon test controls. To exercise the adapter, a separate trusted tool must write an immutable font generation, update exact-file mappings, and send a reload request; the default module does not execute this adapter.
 
 ## Safety boundary
 
@@ -139,11 +142,12 @@ The checksum detects torn/partial writes, not malicious changes. The module retr
 
 `build.sh` runs the existing host suite plus:
 
-- `tests/test_module.c --experimental-fonts` in a separately compiled opt-in binary: timer-only execution, busy retry, mapping-bank lifetime, permanent-error completion, same-config explicit retry, stock-removal dispatch, v6 capacity/status, and restart latch.
-- `tests/test_font_reload_155.c`: the actual transaction code against a 32-bit memory model with native leaves injected, including 13 single-family and 15 two-family allocation-failure positions and rollback, wrapper/fallback preservation, idle paths, file immutability, busy holds and owner deletion.
+- `tests/test_module.c --experimental-fonts` in separately compiled `.139` / `.155` opt-in binaries: timer-only execution, busy retry, mapping-bank lifetime, permanent-error completion, same-config explicit retry, stock-removal dispatch, v6 capacity/status, and restart latch.
+- `tests/test_font_reload.c`: both exact address selections execute the actual transaction code against a 32-bit memory model with native leaves injected, including 13 single-family and 15 two-family allocation-failure positions and rollback, wrapper/fallback preservation, idle paths, file immutability, busy holds and owner deletion.
+- `scripts/test-host.sh`: ASan/UBSan matrix covering both targets with opt-in absent, explicitly disabled, and enabled. `tests/test_font_reload_targets.py` independently checks all 45 preprocessed native address identities against the binary audit, including the nine target differences and Thumb bits, and confirms default stubs and release rejection.
 
-`tests/firmware_font_barrier_155.py` separately executes selected native instructions. Neither suite runs the complete real FreeType parser or GPU, and neither is an on-device font reload acceptance test. The separate user-reported normal-path device pass is recorded above; repeated switching, memory-pressure behavior, comprehensive visual layout and graphics-recovery validation remain required.
+`tests/firmware_font_barrier_155.py` retains its historical filename but separately executes 24 selected native probes on each exact target. `tests/firmware_font_compatibility.py` validates the binary comparison evidence; 16 guard tests reject wrong fingerprints, unknown targets, unmapped addresses and missing/tampered direct-target proofs. An additional 70 direct targets have bounded local proofs; 606 transitive callsites and the assertion handler beyond its entry block remain explicitly unverified (`LIMITED`), not a whole-program equivalence claim. Neither suite runs the complete real FreeType parser or GPU, and neither is an on-device font reload acceptance test. The separate user-reported normal-path device pass is recorded above; repeated switching, memory-pressure behavior, comprehensive visual layout and graphics-recovery validation remain required.
 
-Integration results: default `.139` and `.155` builds pass, as does the opt-in `.155` build with strict target verification. The 33 selected font instruction probes and 19 `.155` image regression probes pass. Host sanitizer tests additionally cover the post-commit traversal-overflow latch and reject a misleading same-mapping success afterward.
+Integration results after unification: all four default/opt-in × `.139`/`.155` builds pass strict target verification. Under identical ARM compiler flags, the original and shared `.155` font objects have byte-identical `.text` (8,304 bytes), `.bss` (42,660 bytes), and `.rel.text` (440 bytes). Each exact AP passes 24 native font probes and 19 image regression probes. Static verification covers 122 function bodies / 9,494 instructions per target, six data records, and the supplied `.139` OTA/loader provenance. Host sanitizer tests additionally cover the post-commit traversal-overflow latch and reject a misleading same-mapping success afterward. These results do not replace `.139` device acceptance or `.155` stock-restore acceptance.
 
 One optional dependency check remains blocked by an existing issue: `generate_band11_native_config.py --check` requires `errno_location` to be `restricted`, while the unchanged record is `managed`. No unrelated symbol policy or native-profile generation was changed to suppress that error; it does not block the direct-call module build/ELF verification.

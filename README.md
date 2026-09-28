@@ -48,21 +48,22 @@
 AP 的 18 项 Unicorn 探针通过；这是静态/仿真验证，不是实机验收。完整 UI 重启、live
 字体替换及未覆盖 owner 在默认构建中仍不支持。
 
-## .155 实验性字体热重载
+## .139 / .155 实验性字体热重载
 
-新增默认关闭的 `.155` 专用事务适配器：检查式加载与失败回滚、保留现有字体对象地址、
+两版共用默认关闭的字体事务适配器，仅按精确目标选择已核查的地址：检查式加载与失败回滚、保留现有字体对象地址、
 同步 active/idle/fallback 所有权、恢复原始字体路径，以及普通文字/矢量标签刷新。
 只在 UI timer 中执行，不主动等待或复位 GPU；必须为新字体提供**不可变的新一代文件路径**。
 
 ```sh
-RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.155
+RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.139
+# Or select xiaomi-band-11-4.100.155.
 ```
 
 独立产物为 `build/resource-hook-font-experimental.elf`，状态为 RHQ1 **v6 / 48 字节**。
 仍须通过 Canopus 精确目标包的地址白名单校验；尚未批准新字体接口的目标包会拒绝构建验证。
 **不能绕过校验安装，不能把空队列当作 GPU 故障后的安全证明。** GPU 异常、未观察到的框架
-重启、自定义文字 owner 仍未验证；当前字体替换/重载已有用户报告的实机通过，不等于完整故障场景验收。标准签名交付脚本仍拒绝此实验选项；独立实验安装表盘构建脚本为 `scripts/build-font-experimental-watchface.py`，不绕过签名或目标校验。
-详见 [实验开关、限制与验证说明](docs/FONT_RELOAD_EXPERIMENT.md)。
+重启、自定义文字 owner 仍未验证；仅 `.155` 字体替换/重载已有用户报告的实机通过，`.139` 尚未实机验收，不等于完整故障场景验收。标准签名交付脚本仍拒绝此实验选项；现有独立实验安装表盘构建脚本 `scripts/build-font-experimental-watchface.py` 仍仅面向 `.155`，不绕过签名或目标校验。
+详见 [实验开关、限制与验证说明](docs/FONT_RELOAD_EXPERIMENT.md) 和 [.139 精确固件兼容证据](targets/xiaomi-band-11-4.100.139/font-reload-compatibility.md)。
 
 ## 生命周期边界
 

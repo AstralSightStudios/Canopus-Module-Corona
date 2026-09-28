@@ -1,13 +1,15 @@
 /* Executable transaction tests, not native FT parsing or GPU simulation.
+ * Opt in with -DRH_EXPERIMENTAL_FONT_RELOAD=1; select .155 with -DRH_TARGET_155=1.
+ * Without opt-in, this exercises the no-native-access default stub.
  * cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude \
- *    tests/test_font_reload_155.c src/resource_hook.c -o build/test_font_reload_155
+ *    tests/test_font_reload.c src/resource_hook.c -o build/test_font_reload
  */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef RH_FONT_STUB_TEST
-#include "../src/font_reload_155.c"
+#if !defined(RH_EXPERIMENTAL_FONT_RELOAD) || !RH_EXPERIMENTAL_FONT_RELOAD
+#include "../src/font_reload.c"
 int main(void) {
     uint32_t changed=99;
     rh_font_reload_disable();
@@ -16,10 +18,8 @@ int main(void) {
     puts("font reload default stub passed"); return 0;
 }
 #else
-#define RH_TARGET_155 1
-#define RH_EXPERIMENTAL_FONT_RELOAD 1
 #define RH_FONT_RELOAD_TEST 1
-#include "../src/font_reload_155.c"
+#include "../src/font_reload.c"
 
 #define MEM_BASE 0x30000000u
 #define MEM_SIZE (4u*1024u*1024u)
@@ -121,7 +121,7 @@ static void drop_face(uint32_t c,uint32_t data) {
 }
 uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
     uint32_t p=(uint32_t)a,q=(uint32_t)b;
-    switch(pc) {
+    switch(pc & ~1u) {
     case 0x0c3abe20: return heap(p);
     case 0x0c3abe58: free_heap(p); return 0;
     case 0x0c3a9e48:
@@ -131,8 +131,8 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
     case 0x0c3a3860:
         q=lookup(p,b); if(q) wr(q+4,rd(q+4)+1); return q;
     case 0x0c3a7b78: return face_create(p,b);
-    case 0x0c8b9780: assert(rd(q+4)>0 && !rb(q+12)); wr(q+4,rd(q+4)-1); return 0;
-    case 0x0c8b8c9e: drop_face(p,q); return 0;
+    case (RH_FW_CACHE_RELEASE & ~1u): assert(rd(q+4)>0 && !rb(q+12)); wr(q+4,rd(q+4)-1); return 0;
+    case (RH_FW_CACHE_DROP & ~1u): drop_face(p,q); return 0;
     case 0x0c39a424:
         for(q=rd(p+8);q;q=rd(q+12)) if(rd(q)==(uint32_t)b) {
             assert(rd(q+4)); wr(q+4,rd(q+4)-1);
@@ -140,7 +140,7 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
             return 0;
         }
         assert(!"missing face id"); return 0;
-    case 0x0c8b8a54:
+    case (RH_FW_FONT_SET_PIXEL_SIZE & ~1u):
         if(mutate_cache_in_prepare) wr(mutate_cache_in_prepare+20,123);
         if(lifecycle_in_prepare) wr(CONTEXT_SLOT,0);
         if(busy_in_prepare) wr(glyph_queue+8,1);
@@ -158,7 +158,7 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
         } else for(i=0;i<owner_count;i++) if(cb(owner_list[i],(void *)c)==2) break;
         return 0;
     }
-    case 0x0c6a1304: vector_drops++; return 0;
+    case (RH_FW_VECTOR_DROP & ~1u): vector_drops++; return 0;
     case 0x0c38525c:
         assert(q==0x000f0000 && c==90); refresh_calls++;
         if(mutate_owner && owner_count>1) { free_heap(owner_list[1]); owner_count=1; }
@@ -534,7 +534,7 @@ static void test_holds_limits_and_external_faces(void) {
     setup(); child=rd(rd(old_dsc+52)+20); held_entry(child,8); old_live=live_allocations();
     assert(reload_path(path_a,&changed)==1); unchanged();
     setup(); vec=heap(64); wr(vec,SIZE_CLASS); wr(vec+4,16); wr(vec+48,4);
-    wr(vec+16,0x0c69feb1); wr(vec+24,0x0c6a12d5); wr(VECTOR_SLOT,vec);
+    wr(vec+16,RH_FW_VECTOR_COMPARE); wr(vec+24,RH_FW_VECTOR_DESTROY); wr(VECTOR_SLOT,vec);
     data=held_entry(vec,16); old_live=live_allocations();
     assert(reload_path(path_a,&changed)==1); unchanged();
     wr(data+20,0); path=heap(128); wb(path+36,1); wr(data+8,heap(20)); wr(rd(data+8),path); wr(data+12,1);
@@ -738,6 +738,6 @@ int main(void) {
     test_unchanged_primary_with_changed_fallback(); test_multi_family_atomicity();
     test_intern_diagnostics(); test_restore_failures(); test_restore_with_retained_stock_face();
     test_borrowed_stock_failures();
-    puts("font reload .155 transaction tests passed (modeled native leaves)"); return 0;
+    puts("font reload transaction tests passed (modeled native leaves)"); return 0;
 }
 #endif

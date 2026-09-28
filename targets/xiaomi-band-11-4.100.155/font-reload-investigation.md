@@ -10,7 +10,7 @@ Inspected with IDA/Hex-Rays using the BEST15xx loader mapping. Verified segments
 
 ## Investigation decision
 
-**Implementation follow-up:** an opt-in checked transaction now exists in `src/font_reload_155.c`; see [experimental implementation and validation limits](../../docs/FONT_RELOAD_EXPERIMENT.md). The investigation/test results below describe the pre-implementation evidence, not a current claim that runtime sources are unchanged. Hardware acceptance remains NOT_PROBED.
+**Implementation follow-up:** an opt-in checked transaction now exists in `src/font_reload.c` (shared with the independently audited `.139` target); see [experimental implementation and validation limits](../../docs/FONT_RELOAD_EXPERIMENT.md). The investigation/test results below describe the pre-implementation evidence, not a current claim that runtime sources are unchanged. Hardware acceptance remains NOT_PROBED.
 
 The static investigation is closed at the implementation-decision boundary: **a restricted, page-preserving reload is a credible implementation project, but the current firmware helpers do not provide a production-safe font reload API**. The required ownership, allocation, cache-key, fallback and text-refresh paths are identified below. No runtime implementation or device-success claim follows from that finding.
 

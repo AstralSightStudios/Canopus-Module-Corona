@@ -508,6 +508,31 @@ only `access()` is checked, so a themed file that opens but is not a valid face 
 not handled; and pages other than the stack-top keep their old faces. Symbols are
 allowlisted under EVID-RESOURCE-4139-006. Nothing has run on hardware.
 
+## Compatibility assessment: experimental .155 font transaction
+
+The supplied OTA archive contains a `vela_ap.bin` whose SHA-256 is
+`31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74`, matching
+this target's pinned AP. `best1503_vela.py` is an IDA loader for that extracted AP,
+not an OTA extractor; its validated footer maps the image at XIP `0x0c0c0000`,
+cached `0x2c0c0000`, and non-cached `0x280c0000`.
+
+The initial uncertainty above is superseded by the exact compatibility investigation in
+[font-reload-compatibility.md](font-reload-compatibility.md). The supplied AP and
+loader layout were fingerprinted; 122 native function bodies (9,494 instructions)
+and the manager, descriptor, cache, draw-unit, pending-glyph and owner layouts were
+compared. The shared adapter selects nine individually audited `.139` addresses;
+this is not a blanket relocation. The original native probe set passes 24/24 on each
+AP, and 70 additional direct targets have bounded local-code proofs. The static
+receipt deliberately reports `LIMITED`: 606 transitive callsites and one target
+beyond its entry block are not fully verified, so no whole-program semantic
+-equivalence claim is made.
+
+The opt-in transaction is now shared by `.139` and `.155`; default behavior remains
+the registry-only path. Exact `.139` target symbols pass the unchanged strict
+verifier. This is static and bounded emulation evidence only: `.139` has **not**
+been validated on a physical device, and the `.155` hardware report does not
+establish `.139` device acceptance.
+
 ## Verification pass: two defects the fixtures were hiding (2026-09-16)
 
 Re-deriving every firmware fact baked into the module, rather than re-running the

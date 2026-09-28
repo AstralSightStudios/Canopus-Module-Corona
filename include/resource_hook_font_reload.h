@@ -1,7 +1,7 @@
 #ifndef RESOURCE_HOOK_FONT_RELOAD_H
 #define RESOURCE_HOOK_FONT_RELOAD_H
 #include "resource_hook.h"
-/* UI timer owner ONLY, no IRQ lock. Experimental .155 standard serialized UI
+/* UI timer owner ONLY, no IRQ lock. Experimental .139/.155 standard serialized UI
  * path; NOT a GPU fault/recovery barrier. Immutable generation filenames are
  * required. 0 complete/no-op, 1 busy/retry, negative permanent refusal/failure.
  * changed is an output count of committed registry families (also on a

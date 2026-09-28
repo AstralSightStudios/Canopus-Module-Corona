@@ -2,9 +2,6 @@
 #include "canopus_module_registration.h"
 #include "resource_hook_platform.h"
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
-#if !defined(RH_TARGET_155) || !RH_TARGET_155
-#error "Experimental font reload requires the exact .155 target"
-#endif
 #include "resource_hook_font_reload.h"
 #define RH_FONT_EXPERIMENT 1
 #else
