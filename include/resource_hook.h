@@ -7,9 +7,11 @@
 #define RH_CONFIG_PATH RH_APP_FILES_ROOT "mappings.tsv"
 #define RH_RELOAD_SIGNAL_PATH RH_APP_FILES_ROOT "reload.request"
 #define RH_THEME_ROOT RH_APP_FILES_ROOT "themes/"
+#define RH_SYSTEM_DESTINATION "@system"
 /* Directory rules map source prefixes into the app-private themes tree and
  * append the unmatched suffix; file rules map one exact source path. The
- * longest matching directory prefix or exact file rule wins. */
+ * reserved RH_SYSTEM_DESTINATION exact-file rule explicitly keeps the firmware
+ * resource and masks any broader directory rule. The longest match wins. */
 struct rh_rule { char source[RH_PATH], destination[RH_PATH]; };
 struct rh_mapping_view { const struct rh_rule *rules; uint32_t count; };
 typedef int (*rh_open_fn)(void *,const char *,int);

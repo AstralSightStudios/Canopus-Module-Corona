@@ -146,24 +146,14 @@ function collectSourceGroups(themesHighToLow: ThemeRules[]): SourceGroupEntry[][
   return groups;
 }
 
-function needsMaterialization(
-  entries: SourceGroupEntry[],
-  overrides: ResourceOverrides,
-): boolean {
-  if (entries.length > 1 && entries.some(entry => entry.mapping.source.endsWith("/"))) return true;
-  return Object.keys(overrides).some(sourcePath =>
-    overrides[sourcePath] !== DEFAULT_RESOURCE_CHOICE &&
-    entries.some(entry => entry.mapping.source.endsWith("/") &&
-      sourceRuleMatches(entry.mapping.source, sourcePath)));
+function needsMaterialization(entries: SourceGroupEntry[]): boolean {
+  return entries.length > 1 && entries.some(entry => entry.mapping.source.endsWith("/"));
 }
 
-function themesNeedingInventory(
-  themesHighToLow: ThemeRules[],
-  overrides: ResourceOverrides,
-): Set<string> {
+function themesNeedingInventory(themesHighToLow: ThemeRules[]): Set<string> {
   const needed = new Set<string>();
   for (const group of collectSourceGroups(themesHighToLow)) {
-    if (needsMaterialization(group, overrides)) group.forEach(entry => needed.add(entry.themeId));
+    if (needsMaterialization(group)) group.forEach(entry => needed.add(entry.themeId));
   }
   return needed;
 }
@@ -175,24 +165,15 @@ export function planActiveMappings(
   overrides: ResourceOverrides = Object.create(null) as ResourceOverrides,
 ): ActiveMappingsPlan {
   if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
-  const groups = collectSourceGroups(themesHighToLow);
+  const priorityThemes = themesHighToLow.filter(theme => theme.active !== false);
+  const groups = collectSourceGroups(priorityThemes);
   const rules: ActiveMappingRule[] = [];
   const copies: ActiveFileCopy[] = [];
   let usedGeneration = false;
   for (let ruleIndex = 0; ruleIndex < groups.length; ruleIndex++) {
     const entries = groups[ruleIndex];
-    if (!needsMaterialization(entries, overrides)) {
-      const sourcePath = entries[0].mapping.source;
-      const choice = overrides[sourcePath];
-      if (choice === SYSTEM_RESOURCE_CHOICE) continue;
-      let winner: SourceGroupEntry | undefined;
-      if (choice && choice !== DEFAULT_RESOURCE_CHOICE) {
-        winner = entries.find(entry => entry.themeId === choice);
-        if (!winner) throw new Error(`混搭微调资源包未注册路径：${sourcePath}`);
-      } else {
-        winner = entries.find(entry => entry.active);
-      }
-      if (!winner) continue;
+    if (!needsMaterialization(entries)) {
+      const winner = entries[0];
       rules.push({ source: winner.mapping.source,
         destination: `${NATIVE_THEME_ROOT}${winner.themeId}/${winner.mapping.destination}` });
       continue;
@@ -250,19 +231,12 @@ export function planActiveMappings(
       sourcePaths.add(sourcePath);
     }));
     sourcePaths.forEach(sourcePath => {
-      const choice = overrides[sourcePath];
-      if (choice === SYSTEM_RESOURCE_CHOICE) return;
       let winner: { entry: SourceGroupEntry; asset: ThemeAssetFile } | undefined;
-      if (choice && choice !== DEFAULT_RESOURCE_CHOICE) {
-        winner = candidatesByTheme.get(choice)?.get(sourcePath);
-        if (!winner) throw new Error(`混搭微调资源包缺少文件：${sourcePath}`);
-      } else {
-        for (const themeId of themeIds) {
-          const candidate = candidatesByTheme.get(themeId)?.get(sourcePath);
-          if (candidate && candidate.entry.active) {
-            winner = candidate;
-            break;
-          }
+      for (const themeId of themeIds) {
+        const candidate = candidatesByTheme.get(themeId)?.get(sourcePath);
+        if (candidate) {
+          winner = candidate;
+          break;
         }
       }
       if (!winner) return;
@@ -279,6 +253,37 @@ export function planActiveMappings(
     });
   }
 
+  const overrideRules: ActiveMappingRule[] = [];
+  for (const sourcePath of Object.keys(overrides).sort()) {
+    const choice = overrides[sourcePath];
+    if (choice === DEFAULT_RESOURCE_CHOICE) continue;
+    if (choice === SYSTEM_RESOURCE_CHOICE) {
+      overrideRules.push({ source: sourcePath, destination: SYSTEM_RESOURCE_CHOICE });
+      continue;
+    }
+    const theme = themesHighToLow.find(item => item.themeId === choice);
+    if (!theme) throw new Error(`混搭微调资源包不存在：${choice}`);
+    const mapping = theme.manifest.mappings.filter(item =>
+      sourceRuleMatches(item.source, sourcePath))
+      .sort((left, right) => right.source.length - left.source.length)[0];
+    if (!mapping) throw new Error(`混搭微调资源包未注册路径：${sourcePath}`);
+    const relativeDestination = mapping.destination.endsWith("/")
+      ? `${mapping.destination}${sourcePath.slice(mapping.source.length)}`
+      : mapping.destination;
+    if (!relativeDestination || relativeDestination.endsWith("/"))
+      throw new Error(`混搭微调资源目标不是文件：${sourcePath}`);
+    const destination = `${NATIVE_THEME_ROOT}${theme.themeId}/${relativeDestination}`;
+    if (!safeAbsolutePath(sourcePath) || !safeAbsolutePath(destination))
+      throw new Error(`混搭微调资源路径超过模块限制：${sourcePath}`);
+    overrideRules.push({ source: sourcePath, destination });
+  }
+  for (const overrideRule of overrideRules) {
+    for (let index = rules.length - 1; index >= 0; index--) {
+      if (rules[index].source === overrideRule.source) rules.splice(index, 1);
+    }
+    rules.push(overrideRule);
+  }
+
   if (rules.length > MAX_MAPPING_RULES)
     throw new Error(`合并后映射超过模块上限 ${MAX_MAPPING_RULES} 条`);
   const mappings = rules.length
@@ -286,11 +291,29 @@ export function planActiveMappings(
     : "# No active resource replacements.\n";
   if (utf8Length(mappings) > MAX_CONFIG_BYTES)
     throw new Error("生成的活动 mappings.tsv 超过 32 KiB");
-  if (rules.some(rule => !safeAbsolutePath(rule.source) || !safeAbsolutePath(rule.destination) ||
-      (rule.source.endsWith("/") !== rule.destination.endsWith("/"))))
-    throw new Error("合并后的资源映射路径无效");
+  const invalidRule = rules.some(rule => {
+    if (!safeAbsolutePath(rule.source)) return true;
+    if (rule.destination === SYSTEM_RESOURCE_CHOICE) return rule.source.endsWith("/");
+    return !safeAbsolutePath(rule.destination) ||
+      rule.source.endsWith("/") !== rule.destination.endsWith("/");
+  });
+  if (invalidRule) throw new Error("合并后的资源映射路径无效");
 
   return { mappings, generation: usedGeneration ? generation : null, copies };
+}
+
+async function ensureDirectory(uri: string, file: ResourceAssetFileApi): Promise<void> {
+  try {
+    await file.makeDirectory(uri, true);
+  } catch (error) {
+    try {
+      const info = await file.readFileInfo(uri);
+      if (info.type === "dir") return;
+    } catch (_checkError) {
+      // Preserve the original mkdir error when the path cannot be verified.
+    }
+    throw error;
+  }
 }
 
 async function copyAsset(
@@ -299,7 +322,7 @@ async function copyAsset(
 ): Promise<void> {
   if (copy.sizeBytes === 0) throw new Error(`不能叠加空资源文件：${copy.sourceUri}`);
   const separator = copy.destinationUri.lastIndexOf("/");
-  await file.makeDirectory(copy.destinationUri.slice(0, separator + 1), true);
+  await ensureDirectory(copy.destinationUri.slice(0, separator + 1), file);
   try { await file.deleteFile(copy.destinationUri); }
   catch (error) { if (!file.isFileNotFound(error)) throw error; }
 
@@ -358,7 +381,8 @@ export async function regenerateActiveMappings(
 
   // File lists are needed for overlapping groups and directory overrides that
   // must be materialized to preserve a system-resource hole.
-  const inventoryThemeIds = themesNeedingInventory(themesHighToLow, overrides);
+  const inventoryThemeIds = themesNeedingInventory(
+    themesHighToLow.filter(theme => theme.active !== false));
   for (const theme of themesHighToLow) {
     if (!inventoryThemeIds.has(theme.themeId)) continue;
     let inventory: ThemeAssetFile[] | null = null;

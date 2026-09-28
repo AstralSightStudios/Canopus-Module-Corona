@@ -37,6 +37,16 @@ class ConfigCLI(unittest.TestCase):
         self.assertEqual(sibling.returncode, 0, sibling.stderr)
         self.assertIn('No matching rule', sibling.stdout)
 
+    def test_system_rule_masks_parent_directory_mapping(self):
+        config = (f'/resource/\t{THEME_ROOT}current/\n'
+                  '/resource/icons/a.bin\t@system\n').encode()
+        original = self.run_config(config, '/resource/icons/a.bin')
+        self.assertEqual(original.returncode, 0, original.stderr)
+        self.assertIn('No matching rule; original path: /resource/icons/a.bin', original.stdout)
+        sibling = self.run_config(config, '/resource/icons/b.bin')
+        self.assertEqual(sibling.returncode, 0, sibling.stderr)
+        self.assertIn(f'Mapped path: {THEME_ROOT}current/icons/b.bin', sibling.stdout)
+
     def test_all_firmware_font_files_can_share_one_generation_target(self):
         names = [
             'MiSansF-Semibold.ttf', 'MiSansF-Medium.ttf', 'MiSansF-Demibold.ttf',

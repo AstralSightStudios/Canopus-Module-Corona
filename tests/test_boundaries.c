@@ -49,6 +49,7 @@ int main(void) {
     rejected("/resource/", RH_THEME_ROOT "a:b/");
     rejected("/resource/", RH_THEME_ROOT "a\177/");
     rejected("/resource/", "");
+    rejected("/resource/", RH_SYSTEM_DESTINATION);
     rejected("", RH_THEME_ROOT "base/");
     for (i = 1; i < 32; i++) {
         strcpy(path, "/resource/x/"); path[10] = (char)i;
@@ -62,6 +63,13 @@ int main(void) {
     assert(rh_resolve(&state, "/resource/font/MiSans-Regular-All.ttf.backup", out) == 0);
     rejected("/resource/font/MiSans-Regular-All.ttf", RH_THEME_ROOT "current/font/");
     rejected("/resource/font/", RH_THEME_ROOT "current/font-generation-g1/FusionPixel.ttf");
+    rule("/resource/", RH_THEME_ROOT "base/");
+    strcpy(rules[1].source, "/resource/icons/a.bin");
+    strcpy(rules[1].destination, RH_SYSTEM_DESTINATION);
+    assert(!rh_configure(&state, rules, 2));
+    assert(rh_resolve(&state, "/resource/icons/a.bin", path) == 0);
+    assert(rh_resolve(&state, "/resource/icons/b.bin", path) == 1);
+    assert(!strcmp(path, RH_THEME_ROOT "base/icons/b.bin"));
     rule("/resource/", RH_THEME_ROOT "base/");
     rules[1] = rules[0];
     assert(rh_configure(&state, rules, 2) == -3);

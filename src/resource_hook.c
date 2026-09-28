@@ -28,13 +28,20 @@ static int valid(const char *s) {
     }
     return 1;
 }
+static int system_destination(const char *destination) {
+    static const char system[] = RH_SYSTEM_DESTINATION;
+    return length(destination) == sizeof(system)-1u &&
+           prefix(destination, system, sizeof(system)-1u);
+}
 static int rule_ok(const struct rh_rule *r) {
     static const char root[] = RH_THEME_ROOT;
     uint32_t a = length(r->source), b = length(r->destination);
-    if (!valid(r->source) || !valid(r->destination) ||
-        !prefix(r->destination, root, sizeof(root)-1)) return 0;
+    if (!valid(r->source)) return 0;
+    /* System means leave the exact file on its original firmware path. */
+    if (system_destination(r->destination)) return r->source[a-1u] != '/';
+    if (!valid(r->destination) || !prefix(r->destination, root, sizeof(root)-1u)) return 0;
     /* Directory rules append a suffix; file rules replace one exact path. */
-    return (r->source[a-1] == '/') == (r->destination[b-1] == '/');
+    return (r->source[a-1u] == '/') == (r->destination[b-1u] == '/');
 }
 
 int rh_validate_rules(const struct rh_rule *r, uint32_t n) {
@@ -85,7 +92,7 @@ int rh_resolve_view(const struct rh_mapping_view *view, const char *path,
             best = size; selected = i;
         }
     }
-    if (selected == RH_RULES) return 0;
+    if (selected == RH_RULES || system_destination(view->rules[selected].destination)) return 0;
     dst = length(view->rules[selected].destination);
     if (dst + n - best >= RH_PATH) return -2;
     for (j = 0; j < dst; j++) out[j] = view->rules[selected].destination[j];

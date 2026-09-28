@@ -41,6 +41,28 @@ int main(void) {
     assert(rh_resolve(&s,"/resource/../x",out)<0);
     assert(rh_resolve(&s,"/resource//x",out)<0);
     assert(rh_resolve(&s,"/resource/./x",out)<0);
+    {
+        struct rh_state system_state;
+        struct rh_rule system_rules[2];
+        memset(&system_state,0,sizeof(system_state));
+        memset(system_rules,0,sizeof(system_rules));
+        strcpy(system_rules[0].source,"/resource/");
+        strcpy(system_rules[0].destination,RH_THEME_ROOT "base/");
+        strcpy(system_rules[1].source,"/resource/icons/a.bin");
+        strcpy(system_rules[1].destination,RH_SYSTEM_DESTINATION);
+        assert(!rh_configure(&system_state,system_rules,2));
+        system_state.original=original;
+        system_state.driver=&system_state;
+        calls=0;
+        assert(rh_open(&system_state,&system_state,"/resource/icons/a.bin",2)==1);
+        assert(calls==1&&!strcmp(last,"/resource/icons/a.bin"));
+        calls=0;
+        assert(rh_posix_open(&system_state,&system_state,"resource/icons/a.bin",2)==1);
+        assert(calls==1&&!strcmp(last,"resource/icons/a.bin"));
+        calls=0;
+        assert(rh_posix_open(&system_state,&system_state,"resource/icons/b.bin",2)==1);
+        assert(calls==1&&!strcmp(last,"data/quickapp/files/ng.lst.corona/themes/base/icons/b.bin"));
+    }
     memset(out,'x',sizeof(out));out[0]='/';assert(rh_resolve(&s,out,before)<0);
     strcpy(before,s.rules[0].destination);
     strcpy(rules[0].destination,RH_THEME_ROOT "new/");
