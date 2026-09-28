@@ -1,0 +1,242 @@
+<import name="time-banner" src="../../components/time"></import>
+
+<template>
+  <div class="page">
+    <div class="header">
+      <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
+    </div>
+
+    <text if="{{statusText}}" class="status">{{statusText}}</text>
+    <scroll if="{{loaded && rows.length}}" id="choice-list" class="choice-list"
+      scroll-y="true" scroll-x="false" bounces="false">
+      <div for="{{row in rows}}" tid="choiceId"
+        class="choice-row {{row.previewUri ? 'preview-row' : 'compact-row'}}"
+        onclick="selectChoice(row.choiceId)">
+        <div class="choice-card {{row.previewUri ? 'preview-card' : 'compact-card'}}">
+          <div if="{{row.previewUri}}" class="choice-preview-wrap">
+            <img class="choice-preview" src="{{row.previewUri}}" />
+          </div>
+          <div class="choice-footer {{row.previewUri ? 'preview-footer' : 'compact-footer'}}">
+            <text class="choice-name">{{row.name}}</text>
+            <img class="choice-mark" src="{{row.selected ? '/common/images/true.png' : '/common/images/false.png'}}" />
+          </div>
+        </div>
+      </div>
+    </scroll>
+  </div>
+</template>
+
+<script>
+import prompt from "@system.prompt"
+import router from "@system.router"
+import * as file from "../../ts/file"
+import { readInstalledThemeIds, loadResourceOrder } from "../../ts/resource-order"
+import {
+  DEFAULT_RESOURCE_CHOICE,
+  loadRegisteredResourcePaths,
+  reconcileResourceOverrides,
+  saveResourceOverride,
+  SYSTEM_RESOURCE_CHOICE
+} from "../../ts/resource-overrides"
+
+export default {
+  private: {
+    headerTitle: "< 选择来源",
+    sourcePath: "",
+    rows: [],
+    statusText: "正在读取可选资源…",
+    loaded: false,
+    saving: false,
+    selectedChoice: DEFAULT_RESOURCE_CHOICE
+  },
+
+  onInit() {
+    this.loadChoices()
+  },
+
+  async loadChoices() {
+    this.loaded = false
+    this.statusText = "正在读取可选资源…"
+    if (typeof this.sourcePath !== "string" || this.sourcePath[0] !== "/" ||
+        this.sourcePath.endsWith("/")) {
+      this.statusText = "替换资源路径无效"
+      return
+    }
+    try {
+      const installedThemeIds = await readInstalledThemeIds(file)
+      const order = await loadResourceOrder(installedThemeIds, file)
+      const catalog = await loadRegisteredResourcePaths(installedThemeIds, file)
+      const overrides = await reconcileResourceOverrides(catalog, file)
+      const registration = catalog.find(item => item.sourcePath === this.sourcePath)
+      if (!registration) {
+        this.statusText = "这个路径已没有资源包注册"
+        return
+      }
+      const orderIndex = Object.create(null)
+      order.forEach((themeId, index) => { orderIndex[themeId] = index })
+      this.selectedChoice = overrides[this.sourcePath] || DEFAULT_RESOURCE_CHOICE
+      const options = [
+        { choiceId: DEFAULT_RESOURCE_CHOICE, name: "默认", previewUri: "" },
+        { choiceId: SYSTEM_RESOURCE_CHOICE, name: "系统", previewUri: "" },
+        ...registration.themes.slice().sort((left, right) =>
+          (orderIndex[left.themeId] === undefined ? Number.MAX_SAFE_INTEGER : orderIndex[left.themeId]) -
+          (orderIndex[right.themeId] === undefined ? Number.MAX_SAFE_INTEGER : orderIndex[right.themeId]))
+          .map(theme => ({ choiceId: theme.themeId, name: theme.name, previewUri: theme.previewUri }))
+      ]
+      this.rows = options.map(option => ({
+        choiceId: option.choiceId,
+        name: option.name,
+        previewUri: option.previewUri,
+        selected: option.choiceId === this.selectedChoice
+      }))
+      this.loaded = true
+      this.statusText = ""
+    } catch (error) {
+      this.rows = []
+      this.statusText = String(error && error.message || "读取可选资源失败")
+    }
+  },
+
+  async selectChoice(choiceId) {
+    if (this.saving || !this.rows.some(row => row.choiceId === choiceId)) return
+    this.saving = true
+    try {
+      await saveResourceOverride(this.sourcePath, choiceId, file)
+      this.selectedChoice = choiceId
+      this.rows = this.rows.map(row => ({
+        choiceId: row.choiceId,
+        name: row.name,
+        previewUri: row.previewUri,
+        selected: row.choiceId === choiceId
+      }))
+      this.saving = false
+    } catch (error) {
+      this.saving = false
+      this.statusText = String(error && error.message || "保存选择失败")
+      prompt.showToast({ message: "保存选择失败" })
+    }
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #000000;
+}
+
+.header {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 100%;
+  height: 77px;
+  align-items: center;
+}
+
+.choice-list {
+  position: absolute;
+  left: 0;
+  top: 96px;
+  width: 100%;
+  height: 372px;
+  padding-left: 8px;
+  padding-right: 8px;
+  flex-direction: column;
+}
+
+.choice-row {
+  width: 196px;
+  flex-shrink: 0;
+}
+
+.preview-row {
+  height: 168px;
+}
+
+.compact-row {
+  height: 84px;
+}
+
+.choice-card {
+  width: 196px;
+  margin-bottom: 8px;
+  padding-left: 14px;
+  padding-right: 13px;
+  border-radius: 24px;
+  background-color: #262626;
+  align-items: center;
+}
+
+.preview-card {
+  height: 160px;
+  flex-direction: column;
+}
+
+.compact-card {
+  height: 76px;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.choice-preview-wrap {
+  width: 168px;
+  height: 96px;
+  align-items: center;
+  justify-content: center;
+}
+
+.choice-preview {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.choice-footer {
+  width: 168px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.preview-footer {
+  height: 56px;
+}
+
+.compact-footer {
+  height: 76px;
+}
+
+.choice-name {
+  width: 135px;
+  color: #FFFFFF;
+  font-size: 35px;
+  font-weight: bold;
+  line-height: 40px;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.choice-mark {
+  width: 32px;
+  height: 32px;
+}
+
+.status {
+  position: absolute;
+  left: 14px;
+  top: 230px;
+  width: 180px;
+  color: #BBBBBB;
+  font-size: 15px;
+  line-height: 21px;
+  text-align: center;
+  lines: 4;
+  text-overflow: ellipsis;
+}
+</style>

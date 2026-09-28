@@ -1,17 +1,21 @@
 import { parseResourcePackManifest } from "./resource-pack";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import {
+  enumerateThemeFiles,
   mappingMatchesRelativeFile,
   readThemeFileInventory,
-  SYSTEM_STYLE_ID,
-  writeThemeFileInventory
+  SYSTEM_STYLE_ID
 } from "./resource-order";
 import type { ResourceAssetFileApi, ThemeAssetFile } from "./resource-order";
+import {
+  DEFAULT_RESOURCE_CHOICE,
+  SYSTEM_RESOURCE_CHOICE
+} from "./resource-overrides";
+import type { ResourceOverrides } from "./resource-overrides";
 
 export const ACTIVE_MAPPINGS_URI = "internal://files/mappings.tsv";
 export const ACTIVE_GENERATIONS_URI = "internal://files/resource-active-generations.json";
 
-const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json";
 const THEME_ROOT_URI = "internal://files/themes/";
 const NATIVE_ROOT = "/data/quickapp/files/ng.lst.corona/";
 const NATIVE_THEME_ROOT = `${NATIVE_ROOT}themes/`;
@@ -25,6 +29,7 @@ interface ThemeRules {
   themeId: string;
   manifest: ResourcePackManifest;
   files: ThemeAssetFile[] | null;
+  active?: boolean;
 }
 
 export interface ActiveMappingRule {
@@ -50,6 +55,7 @@ interface SourceGroupEntry {
   mappingIndex: number;
   mapping: ResourcePackMapping;
   files: ThemeAssetFile[] | null;
+  active: boolean;
 }
 
 interface StoredGenerationIndex {
@@ -117,7 +123,8 @@ function collectSourceGroups(themesHighToLow: ThemeRules[]): SourceGroupEntry[][
         themeIndex,
         mappingIndex,
         mapping: theme.manifest.mappings[mappingIndex],
-        files: theme.files
+        files: theme.files,
+        active: theme.active !== false
       };
       const merged = [entry];
       let joined = true;
@@ -139,35 +146,53 @@ function collectSourceGroups(themesHighToLow: ThemeRules[]): SourceGroupEntry[][
   return groups;
 }
 
-function needsMaterialization(entries: SourceGroupEntry[]): boolean {
-  return entries.length > 1 && entries.some(entry => entry.mapping.source.endsWith("/"));
+function needsMaterialization(
+  entries: SourceGroupEntry[],
+  overrides: ResourceOverrides,
+): boolean {
+  if (entries.length > 1 && entries.some(entry => entry.mapping.source.endsWith("/"))) return true;
+  return Object.keys(overrides).some(sourcePath =>
+    overrides[sourcePath] !== DEFAULT_RESOURCE_CHOICE &&
+    entries.some(entry => entry.mapping.source.endsWith("/") &&
+      sourceRuleMatches(entry.mapping.source, sourcePath)));
 }
 
-function themesNeedingInventory(themesHighToLow: ThemeRules[]): Set<string> {
+function themesNeedingInventory(
+  themesHighToLow: ThemeRules[],
+  overrides: ResourceOverrides,
+): Set<string> {
   const needed = new Set<string>();
   for (const group of collectSourceGroups(themesHighToLow)) {
-    if (needsMaterialization(group)) group.forEach(entry => needed.add(entry.themeId));
+    if (needsMaterialization(group, overrides)) group.forEach(entry => needed.add(entry.themeId));
   }
   return needed;
 }
 
-/** Builds an order-aware static overlay for every overlapping source-path group. */
+/** Builds the ordered mappings, then applies per-file overrides before TSV serialization. */
 export function planActiveMappings(
   themesHighToLow: ThemeRules[],
   generation: string,
+  overrides: ResourceOverrides = Object.create(null) as ResourceOverrides,
 ): ActiveMappingsPlan {
   if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
   const groups = collectSourceGroups(themesHighToLow);
-  if (groups.length > MAX_MAPPING_RULES)
-    throw new Error(`合并后映射超过模块上限 ${MAX_MAPPING_RULES} 条`);
-
   const rules: ActiveMappingRule[] = [];
   const copies: ActiveFileCopy[] = [];
   let usedGeneration = false;
   for (let ruleIndex = 0; ruleIndex < groups.length; ruleIndex++) {
     const entries = groups[ruleIndex];
-    if (!needsMaterialization(entries)) {
-      const winner = entries[0];
+    if (!needsMaterialization(entries, overrides)) {
+      const sourcePath = entries[0].mapping.source;
+      const choice = overrides[sourcePath];
+      if (choice === SYSTEM_RESOURCE_CHOICE) continue;
+      let winner: SourceGroupEntry | undefined;
+      if (choice && choice !== DEFAULT_RESOURCE_CHOICE) {
+        winner = entries.find(entry => entry.themeId === choice);
+        if (!winner) throw new Error(`混搭微调资源包未注册路径：${sourcePath}`);
+      } else {
+        winner = entries.find(entry => entry.active);
+      }
+      if (!winner) continue;
       rules.push({ source: winner.mapping.source,
         destination: `${NATIVE_THEME_ROOT}${winner.themeId}/${winner.mapping.destination}` });
       continue;
@@ -187,9 +212,10 @@ export function planActiveMappings(
     if (!safeAbsolutePath(activeDestination)) throw new Error("生成的活动资源目录路径过长");
     rules.push({ source: sourceRoot, destination: activeDestination });
 
-    // Resolve each concrete source path by pack priority. Within one pack, the
-    // longest matching manifest source retains the hook's existing specificity rule.
-    const winners = new Map<string, { entry: SourceGroupEntry; asset: ThemeAssetFile }>();
+    // Resolve each concrete path by normal pack order, then replace that decision
+    // with an explicit pack choice. System choices remain absent from the overlay;
+    // the hook then falls back to the original firmware resource.
+    const candidatesByTheme = new Map<string, Map<string, { entry: SourceGroupEntry; asset: ThemeAssetFile }>>();
     const themeIds = Array.from(new Set(entries.map(entry => entry.themeId)));
     for (const themeId of themeIds) {
       const themeEntries = entries.filter(entry => entry.themeId === themeId);
@@ -201,10 +227,13 @@ export function planActiveMappings(
             ? asset.relativePath.slice(entry.mapping.destination.length) : "";
           if (entry.mapping.destination.endsWith("/") && !suffix) continue;
           const sourcePath = `${entry.mapping.source}${suffix}`;
-          if (!sourcePath.startsWith(sourceRoot) || !safeAbsolutePath(sourcePath))
-            throw new Error(`资源路径展开后超过模块限制：${sourcePath}`);
-          // A more-specific rule masks this broad rule in the module even when
-          // its own package destination lacks this particular file.
+          if (!sourcePath.startsWith(sourceRoot))
+            throw new Error(`资源映射展开后超出活动根路径：${sourcePath}`);
+          if (utf8Length(sourcePath) >= MAX_PATH_BYTES) continue;
+          if (!safeAbsolutePath(sourcePath))
+            throw new Error(`资源路径展开后无效：${sourcePath}`);
+          // A more-specific rule masks this broad rule even if its destination
+          // does not contain the concrete file.
           if (themeEntries.some(other => other !== entry &&
               other.mapping.source.length > entry.mapping.source.length &&
               sourceRuleMatches(other.mapping.source, sourcePath))) continue;
@@ -213,13 +242,30 @@ export function planActiveMappings(
             candidates.set(sourcePath, { entry, asset });
         }
       }
-      // Theme IDs are traversed in high-to-low order, so first concrete file wins.
-      candidates.forEach((candidate, sourcePath) => {
-        if (!winners.has(sourcePath)) winners.set(sourcePath, candidate);
-      });
+      candidatesByTheme.set(themeId, candidates);
     }
 
-    winners.forEach((winner, sourcePath) => {
+    const sourcePaths = new Set<string>();
+    candidatesByTheme.forEach(candidates => candidates.forEach((_candidate, sourcePath) => {
+      sourcePaths.add(sourcePath);
+    }));
+    sourcePaths.forEach(sourcePath => {
+      const choice = overrides[sourcePath];
+      if (choice === SYSTEM_RESOURCE_CHOICE) return;
+      let winner: { entry: SourceGroupEntry; asset: ThemeAssetFile } | undefined;
+      if (choice && choice !== DEFAULT_RESOURCE_CHOICE) {
+        winner = candidatesByTheme.get(choice)?.get(sourcePath);
+        if (!winner) throw new Error(`混搭微调资源包缺少文件：${sourcePath}`);
+      } else {
+        for (const themeId of themeIds) {
+          const candidate = candidatesByTheme.get(themeId)?.get(sourcePath);
+          if (candidate && candidate.entry.active) {
+            winner = candidate;
+            break;
+          }
+        }
+      }
+      if (!winner) return;
       const suffix = sourcePath.slice(sourceRoot.length);
       if (!suffix) throw new Error(`资源映射未指向具体文件：${sourcePath}`);
       const nativeDestination = `${activeDestination}${suffix}`;
@@ -233,9 +279,11 @@ export function planActiveMappings(
     });
   }
 
+  if (rules.length > MAX_MAPPING_RULES)
+    throw new Error(`合并后映射超过模块上限 ${MAX_MAPPING_RULES} 条`);
   const mappings = rules.length
     ? rules.map(rule => `${rule.source}\t${rule.destination}\n`).join("")
-    : "# No active resource packs above the system style.\n";
+    : "# No active resource replacements.\n";
   if (utf8Length(mappings) > MAX_CONFIG_BYTES)
     throw new Error("生成的活动 mappings.tsv 超过 32 KiB");
   if (rules.some(rule => !safeAbsolutePath(rule.source) || !safeAbsolutePath(rule.destination) ||
@@ -243,36 +291,6 @@ export function planActiveMappings(
     throw new Error("合并后的资源映射路径无效");
 
   return { mappings, generation: usedGeneration ? generation : null, copies };
-}
-
-async function enumerateThemeFiles(
-  themeId: string,
-  file: ResourceAssetFileApi,
-): Promise<ThemeAssetFile[]> {
-  const rootUri = `${THEME_ROOT_URI}${themeId}/`;
-  const files: ThemeAssetFile[] = [];
-  let totalBytes = 0;
-  async function walk(directoryUri: string, depth: number): Promise<void> {
-    if (depth > 16) throw new Error(`资源包 ${themeId} 目录层级过深`);
-    const entries = await file.listDirectory(directoryUri);
-    for (const entry of entries) {
-      if (!entry.uri.startsWith(rootUri))
-        throw new Error(`资源包 ${themeId} 的文件 URI 越界`);
-      const relativePath = entry.uri.slice(rootUri.length).replace(/\/$/, "");
-      const info = await file.readFileInfo(entry.uri);
-      if (info.type === "dir") {
-        await walk(entry.uri.endsWith("/") ? entry.uri : `${entry.uri}/`, depth + 1);
-        continue;
-      }
-      if (!relativePath || relativePath === "mappings.tsv") continue;
-      files.push({ relativePath, sizeBytes: info.length });
-      totalBytes += info.length;
-      if (files.length > 128 || totalBytes > 64 * 1024 * 1024)
-        throw new Error(`资源包 ${themeId} 文件清单超过 CRPack 限制`);
-    }
-  }
-  await walk(rootUri, 0);
-  return files;
 }
 
 async function copyAsset(
@@ -298,35 +316,59 @@ export async function regenerateActiveMappings(
   order: string[],
   generation: string,
   file: ResourceAssetFileApi,
+  overrides: ResourceOverrides = Object.create(null) as ResourceOverrides,
 ): Promise<ActiveMappingsPlan> {
   const systemIndex = order.indexOf(SYSTEM_STYLE_ID);
   if (systemIndex < 0 || order.lastIndexOf(SYSTEM_STYLE_ID) !== systemIndex)
     throw new Error("资源顺序必须包含唯一的系统样式分界");
 
-  const themeIds = order.slice(0, systemIndex);
+  const activeThemeIds = order.slice(0, systemIndex);
+  const installedThemeIds = order.filter(themeId => themeId !== SYSTEM_STYLE_ID);
+  const activeIds = new Set(activeThemeIds);
+  const selectedIds = new Set(Object.keys(overrides).map(sourcePath => overrides[sourcePath])
+    .filter(choice => choice !== DEFAULT_RESOURCE_CHOICE && choice !== SYSTEM_RESOURCE_CHOICE &&
+      installedThemeIds.includes(choice)));
   const themesHighToLow: ThemeRules[] = [];
-  for (const themeId of themeIds) {
+  const loadManifest = async (themeId: string, required: boolean): Promise<ResourcePackManifest | null> => {
     const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
-    if (text === null) throw new Error(`资源包 ${themeId} 的 canora.json 不存在，无法生成映射`);
-    let manifest: ResourcePackManifest;
-    try { manifest = parseResourcePackManifest(text, themeId); }
-    catch (error) { throw new Error(`资源包 ${themeId} 的 manifest 无效：${String((error as Error).message || error)}`); }
-    themesHighToLow.push({ themeId, manifest, files: null });
+    if (text === null) {
+      if (required) throw new Error(`资源包 ${themeId} 的 canora.json 不存在，无法生成映射`);
+      return null;
+    }
+    try { return parseResourcePackManifest(text, themeId); }
+    catch (error) {
+      if (!required) return null;
+      throw new Error(`资源包 ${themeId} 的 manifest 无效：${String((error as Error).message || error)}`);
+    }
+  };
+  for (const themeId of activeThemeIds) {
+    const manifest = await loadManifest(themeId, true);
+    if (manifest) themesHighToLow.push({ themeId, manifest, files: null, active: true });
+  }
+  for (const themeId of order.slice(systemIndex + 1)) {
+    if (!selectedIds.has(themeId) || activeIds.has(themeId)) continue;
+    const manifest = await loadManifest(themeId, false);
+    if (!manifest) continue;
+    const selectedPaths = Object.keys(overrides).filter(sourcePath => overrides[sourcePath] === themeId);
+    const mappings = manifest.mappings.filter(mapping =>
+      selectedPaths.some(sourcePath => sourceRuleMatches(mapping.source, sourcePath)));
+    if (mappings.length)
+      themesHighToLow.push({ themeId, manifest: { ...manifest, mappings }, files: null, active: false });
   }
 
-  // File lists are only needed when source prefixes overlap across active mappings.
-  const inventoryThemeIds = themesNeedingInventory(themesHighToLow);
+  // File lists are needed for overlapping groups and directory overrides that
+  // must be materialized to preserve a system-resource hole.
+  const inventoryThemeIds = themesNeedingInventory(themesHighToLow, overrides);
   for (const theme of themesHighToLow) {
     if (!inventoryThemeIds.has(theme.themeId)) continue;
-    let inventory = await readThemeFileInventory(theme.themeId, file);
-    if (inventory === null) {
-      inventory = await enumerateThemeFiles(theme.themeId, file);
-      await writeThemeFileInventory(theme.themeId, inventory, file);
-    }
+    let inventory: ThemeAssetFile[] | null = null;
+    try { inventory = await readThemeFileInventory(theme.themeId, file); }
+    catch (_error) { /* Fall back to the installed files if the shared index is damaged. */ }
+    if (!inventory || !inventory.length) inventory = await enumerateThemeFiles(theme.themeId, file);
     theme.files = inventory;
   }
 
-  const plan = planActiveMappings(themesHighToLow, generation);
+  const plan = planActiveMappings(themesHighToLow, generation, overrides);
   const previousText = await file.readOptionalText(ACTIVE_GENERATIONS_URI);
   const generationIndex = parseGenerationIndex(previousText);
   if (plan.generation && generationIndex.generations.indexOf(plan.generation) >= 0)

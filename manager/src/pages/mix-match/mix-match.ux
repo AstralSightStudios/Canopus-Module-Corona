@@ -1,0 +1,179 @@
+<import name="time-banner" src="../../components/time"></import>
+
+<template>
+  <div class="page">
+    <div class="header">
+      <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
+    </div>
+
+    <text if="{{statusText}}" class="status">{{statusText}}</text>
+    <scroll if="{{loaded && rows.length}}" id="resource-path-list" class="resource-list"
+      scroll-y="true" scroll-x="false" bounces="false">
+      <div for="{{row in rows}}" tid="sourcePath" class="resource-row"
+        onclick="openPath(row.sourcePath)">
+        <div class="resource-item">
+          <div class="resource-copy">
+            <text class="resource-path">{{row.sourcePath}}</text>
+            <text class="resource-choice">{{row.choiceName}}</text>
+          </div>
+        </div>
+      </div>
+    </scroll>
+    <text if="{{loaded && !rows.length}}" class="empty-state">暂时没有已注册的替换资源</text>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import * as file from "../../ts/file"
+import { readInstalledThemeIds } from "../../ts/resource-order"
+import {
+  DEFAULT_RESOURCE_CHOICE,
+  loadRegisteredResourcePaths,
+  reconcileResourceOverrides,
+  SYSTEM_RESOURCE_CHOICE
+} from "../../ts/resource-overrides"
+
+export default {
+  private: {
+    headerTitle: "< 混搭微调",
+    rows: [],
+    statusText: "正在读取替换资源…",
+    loaded: false,
+    visible: false,
+    loadVersion: 0
+  },
+
+  onShow() {
+    this.visible = true
+    this.loadCatalog()
+  },
+
+  onHide() {
+    this.visible = false
+    this.loadVersion += 1
+  },
+
+  async loadCatalog() {
+    const version = ++this.loadVersion
+    this.loaded = false
+    this.statusText = "正在读取替换资源…"
+    try {
+      const installedThemeIds = await readInstalledThemeIds(file)
+      const catalog = await loadRegisteredResourcePaths(installedThemeIds, file)
+      const overrides = await reconcileResourceOverrides(catalog, file)
+      if (version !== this.loadVersion || !this.visible) return
+      this.rows = catalog.map(item => {
+        const choice = overrides[item.sourcePath] || DEFAULT_RESOURCE_CHOICE
+        const selectedTheme = item.themes.find(theme => theme.themeId === choice)
+        return {
+          sourcePath: item.sourcePath,
+          choiceName: choice === DEFAULT_RESOURCE_CHOICE
+            ? "默认"
+            : (choice === SYSTEM_RESOURCE_CHOICE ? "系统" : (selectedTheme ? selectedTheme.name : "默认"))
+        }
+      })
+      this.rows.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+      this.loaded = true
+      this.statusText = ""
+    } catch (error) {
+      if (version !== this.loadVersion || !this.visible) return
+      this.rows = []
+      this.loaded = false
+      this.statusText = String(error && error.message || "读取混搭资源失败")
+    }
+  },
+
+  openPath(sourcePath) {
+    if (typeof sourcePath !== "string" || sourcePath[0] !== "/") return
+    router.push({ uri: "pages/mix-match-select", params: { sourcePath } })
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #000000;
+}
+
+.header {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 100%;
+  height: 77px;
+  align-items: center;
+}
+
+.resource-list {
+  position: absolute;
+  left: 0;
+  top: 96px;
+  width: 100%;
+  height: 372px;
+  flex-direction: column;
+}
+
+.resource-row {
+  width: 100%;
+  height: 141px;
+  flex-shrink: 0;
+}
+
+.resource-item {
+  width: 100%;
+  height: 132px;
+  margin-bottom: 9px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 30px;
+  background-color: #262626;
+  align-items: center;
+}
+
+.resource-copy {
+  width: 184px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.resource-path {
+  width: 184px;
+  color: #FFFFFF;
+  font-size: 26px;
+  font-weight: bold;
+  line-height: 29px;
+  lines: 3;
+  text-overflow: ellipsis;
+}
+
+.resource-choice {
+  width: 184px;
+  margin-top: 2px;
+  color: #BBBBBB;
+  font-size: 22px;
+  line-height: 26px;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.status,
+.empty-state {
+  position: absolute;
+  left: 14px;
+  top: 218px;
+  width: 180px;
+  color: #BBBBBB;
+  font-size: 15px;
+  line-height: 21px;
+  text-align: center;
+  lines: 4;
+  text-overflow: ellipsis;
+}
+</style>

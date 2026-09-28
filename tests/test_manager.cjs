@@ -7,7 +7,8 @@ const tests = [
   'test_interconnect.cjs',
   'test_resource_storage.cjs',
   'test_reload_signal.cjs',
-  'test_resource_order.cjs'
+  'test_resource_order.cjs',
+  'test_resource_overrides.cjs'
 ];
 
 for (const test of tests) {

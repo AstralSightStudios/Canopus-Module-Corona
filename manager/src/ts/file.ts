@@ -7,8 +7,10 @@ type Callbacks<T> = {
 };
 
 export interface FileInfo {
+  uri?: string;
   length: number;
   type?: string;
+  subFiles?: FileInfo[];
 }
 
 export interface FileListEntry {
@@ -37,7 +39,7 @@ export interface FileApi {
       position?: number;
     },
   ): void;
-  get(options: Callbacks<FileInfo> & { uri: string }): void;
+  get(options: Callbacks<FileInfo> & { uri: string; recursive?: boolean }): void;
   list(options: Callbacks<{ fileList: FileListEntry[] }> & { uri: string }): void;
   mkdir(options: Callbacks<void> & { uri: string; recursive?: boolean }): void;
   delete(options: Callbacks<void> & { uri: string }): void;
@@ -159,11 +161,18 @@ export async function readOptionalArrayBuffer(
   }
 }
 
-export async function readFileInfo(uri: string): Promise<FileInfo> {
-  const result = await invoke<FileInfo>("检查文件", uri, (callbacks) =>
-    api.get({ uri, ...callbacks }),
-  );
-  return { length: result.length, type: result.type };
+export async function readFileInfo(uri: string, recursive = false): Promise<FileInfo> {
+  const result = await invoke<FileInfo>("检查文件", uri, (callbacks) => {
+    const options: Parameters<FileApi["get"]>[0] = { uri, ...callbacks };
+    if (recursive) options.recursive = true;
+    api.get(options);
+  });
+  return {
+    ...(typeof result.uri === "string" ? { uri: result.uri } : {}),
+    length: result.length,
+    type: result.type,
+    ...(Array.isArray(result.subFiles) ? { subFiles: result.subFiles } : {})
+  };
 }
 
 export async function listDirectory(uri: string): Promise<FileListEntry[]> {

@@ -46,6 +46,16 @@ async function main() {
 
   api.get = o => { options = o; o.success({ length: 3, type: 'file', ignored: 1 }); };
   assert.deepEqual(await file.readFileInfo(uri), { length: 3, type: 'file' });
+  assert(!Object.hasOwn(options, 'recursive'));
+  const recursiveUri = 'internal://files/themes/current/';
+  const subFiles = [{ uri: `${recursiveUri}app/settings/icon.bin`, length: 123, type: 'file' }];
+  api.get = o => { options = o; o.success({
+    uri: recursiveUri, length: 0, type: 'dir', subFiles
+  }); };
+  assert.deepEqual(await file.readFileInfo(recursiveUri, true), {
+    uri: recursiveUri, length: 0, type: 'dir', subFiles
+  });
+  assert.equal(options.recursive, true);
   api.get = o => o.success({ length: 0 });
   assert.deepEqual(await file.readFileInfo(uri), { length: 0, type: undefined });
   api.list = o => { options = o; o.success({ fileList: [{ uri: `${uri}.child`, length: 2 }] }); };

@@ -11,6 +11,7 @@ const mappingsUri = 'internal://files/mappings.tsv';
 const nativeThemePrefix = '/data/quickapp/files/ng.lst.corona/themes/';
 const orderUri = 'internal://files/resource-order.json';
 const fileIndexUri = 'internal://files/resource-files.json';
+const overridesUri = 'internal://files/resource-overrides.json';
 
 function makeStorage(overrides = {}) {
   const text = new Map([
@@ -20,6 +21,9 @@ function makeStorage(overrides = {}) {
     [fileIndexUri, JSON.stringify({ version: 1, themes: {
       dark: [{ relativePath: 'dark.bin', sizeBytes: 1 }],
       light: [{ relativePath: 'light.bin', sizeBytes: 1 }]
+    } })],
+    [overridesUri, JSON.stringify({ version: 1, overrides: {
+      '/resource/dark.bin': 'dark', '/resource/light.bin': '@system'
     } })]
   ]);
   const removedDirectories = [];
@@ -43,7 +47,10 @@ function makeStorage(overrides = {}) {
 
 async function main() {
   execFileSync(path.join(root, 'manager/node_modules/.bin/tsc'), [
-    path.join(root, 'manager/src/ts/resource-storage.ts'), '--outDir', temporary,
+    path.join(root, 'manager/src/ts/resource-storage.ts'),
+    path.join(root, 'manager/src/ts/resource-overrides.ts'),
+    path.join(root, 'manager/src/ts/resource-order.ts'),
+    path.join(root, 'manager/src/ts/resource-pack.ts'), '--outDir', temporary,
     '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck'
   ], { stdio: 'inherit' });
   const { removeInstalledTheme } = require(path.join(temporary, 'resource-storage.js'));
@@ -57,6 +64,9 @@ async function main() {
       { version: 1, order: ['light', '@system'] });
     assert.deepEqual(JSON.parse(storage.text.get(fileIndexUri)),
       { version: 1, themes: { light: [{ relativePath: 'light.bin', sizeBytes: 1 }] } });
+    assert.deepEqual(JSON.parse(storage.text.get(overridesUri)), { version: 1, overrides: {
+      '/resource/dark.bin': '@default', '/resource/light.bin': '@system'
+    } });
   }
 
   {

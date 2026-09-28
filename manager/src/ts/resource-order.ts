@@ -31,8 +31,15 @@ export interface ThemeAssetFile {
   sizeBytes: number;
 }
 
+export interface ResourceAssetFileInfo {
+  uri?: string;
+  length: number;
+  type?: string;
+  subFiles?: ResourceAssetFileInfo[];
+}
+
 export interface ResourceAssetFileApi extends ResourceOrderFileApi {
-  readFileInfo(uri: string): Promise<{ length: number; type?: string }>;
+  readFileInfo(uri: string, recursive?: boolean): Promise<ResourceAssetFileInfo>;
   listDirectory(uri: string): Promise<Array<{ uri: string; length: number }>>;
   readArrayBuffer(uri: string, position?: number, length?: number): Promise<Uint8Array>;
   writeArrayBuffer(uri: string, buffer: Uint8Array, position?: number): Promise<void>;
@@ -55,6 +62,94 @@ function validRelativePath(value: unknown): value is string {
   const segments = value.split("/");
   return segments.every(segment => segment !== "" && segment !== "." && segment !== ".." &&
     !/[\\:\u0000-\u001f\u007f]/.test(segment));
+}
+
+/** Reads a package's on-disk files without depending on the optional persisted inventory. */
+export async function enumerateThemeFiles(
+  themeId: string,
+  file: ResourceAssetFileApi,
+): Promise<ThemeAssetFile[]> {
+  const rootUri = `internal://files/themes/${themeId}/`;
+  const files = new Map<string, ThemeAssetFile>();
+  let totalBytes = 0;
+
+  function addFile(uri: string, sizeBytes: number): void {
+    let relativePath: string | null = null;
+    if (uri.startsWith(rootUri)) relativePath = uri.slice(rootUri.length);
+    else if (!uri.startsWith("/") && uri.indexOf("://") < 0)
+      relativePath = uri.startsWith("./") ? uri.slice(2) : uri;
+    if (relativePath && relativePath.endsWith("/")) relativePath = relativePath.slice(0, -1);
+    if (!relativePath || relativePath === "mappings.tsv") return;
+    if (!validRelativePath(relativePath)) throw new Error(`资源包 ${themeId} 文件路径无效：${relativePath}`);
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > 64 * 1024 * 1024)
+      throw new Error(`资源包 ${themeId} 文件大小无效：${relativePath}`);
+    const existing = files.get(relativePath);
+    if (existing) {
+      if (existing.sizeBytes !== sizeBytes) throw new Error(`资源包 ${themeId} 文件清单重复：${relativePath}`);
+      return;
+    }
+    files.set(relativePath, { relativePath, sizeBytes });
+    totalBytes += sizeBytes;
+    if (files.size > MAX_THEME_FILES || totalBytes > 64 * 1024 * 1024)
+      throw new Error(`资源包 ${themeId} 文件清单超出限制`);
+  }
+
+  try {
+    const root = await file.readFileInfo(rootUri, true);
+    if (root.type === "dir" && Array.isArray(root.subFiles) && root.subFiles.length) {
+      let complete = true;
+      const visit = (entries: ResourceAssetFileInfo[]) => {
+        for (const entry of entries) {
+          if (entry.type === "dir") {
+            if (Array.isArray(entry.subFiles)) visit(entry.subFiles);
+            continue;
+          }
+          if (entry.type !== "file" || typeof entry.uri !== "string") {
+            complete = false;
+            continue;
+          }
+          addFile(entry.uri, entry.length);
+        }
+      };
+      visit(root.subFiles);
+      if (complete && files.size) return Array.from(files.values()).sort((a, b) =>
+        a.relativePath.localeCompare(b.relativePath));
+    }
+  } catch (_error) {
+    // Fall back to list/get for runtimes without recursive get support.
+  }
+
+  files.clear();
+  totalBytes = 0;
+  async function walk(directoryUri: string, depth: number): Promise<void> {
+    if (depth > 16) throw new Error(`资源包 ${themeId} 目录层级过深`);
+    const entries = await file.listDirectory(directoryUri);
+    for (const entry of entries) {
+      let uri = entry.uri;
+      if (!uri.startsWith(rootUri)) {
+        if (uri.startsWith("/") || uri.indexOf("://") >= 0)
+          throw new Error(`资源包 ${themeId} 文件 URI 越界`);
+        uri = `${directoryUri}${uri.startsWith("./") ? uri.slice(2) : uri}`;
+      }
+      if (!uri.startsWith(rootUri)) throw new Error(`资源包 ${themeId} 文件 URI 越界`);
+      if (uri.endsWith("/")) {
+        await walk(uri, depth + 1);
+        continue;
+      }
+      const relativePath = uri.slice(rootUri.length);
+      if (!relativePath || relativePath === "mappings.tsv") continue;
+      const info = await file.readFileInfo(uri);
+      if (info.type === "dir") {
+        await walk(`${uri}/`, depth + 1);
+        continue;
+      }
+      const sizeBytes = Number.isSafeInteger(entry.length) && entry.length >= 0
+        ? entry.length : info.length;
+      addFile(uri, sizeBytes);
+    }
+  }
+  await walk(rootUri, 0);
+  return Array.from(files.values()).sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
 function parseOrder(text: string): string[] {

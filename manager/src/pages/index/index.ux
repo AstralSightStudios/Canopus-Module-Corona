@@ -11,7 +11,7 @@
         <text class="itemtext">资源管理</text>
         <img class="enter" src="/common/images/enter.png" />
       </list-item>
-      <list-item type="item" class="item" onclick="noop">
+      <list-item type="item" class="item" onclick="openMixMatch">
         <text class="itemtext">混搭微调</text>
         <img class="enter" src="/common/images/enter.png" />
       </list-item>
@@ -29,6 +29,7 @@ import router from "@system.router"
 import { sendReloadSignal, waitForReloadOutcome } from "../../ts/reload-signal"
 import { cleanupInactiveGenerations, regenerateActiveMappings } from "../../ts/resource-activation"
 import { loadResourceOrder, readInstalledThemeIds } from "../../ts/resource-order"
+import { loadRegisteredResourcePaths, reconcileResourceOverrides } from "../../ts/resource-overrides"
 
 export default {
   private: {
@@ -38,6 +39,10 @@ export default {
 
   openResources() {
     router.push({ uri: "pages/resources" })
+  },
+
+  openMixMatch() {
+    router.push({ uri: "pages/mix-match" })
   },
 
   async requestReload() {
@@ -50,7 +55,9 @@ export default {
       const revision = `${this.reloadRevision}-${Math.floor(Math.random() * 1000000).toString(36)}`
       const installedThemeIds = await readInstalledThemeIds(file)
       const order = await loadResourceOrder(installedThemeIds, file)
-      const plan = await regenerateActiveMappings(order, revision, file)
+      const catalog = await loadRegisteredResourcePaths(installedThemeIds, file)
+      const overrides = await reconcileResourceOverrides(catalog, file)
+      const plan = await regenerateActiveMappings(order, revision, file, overrides)
       mappingsGenerated = true
       await sendReloadSignal(revision, file)
       signalSent = true
@@ -71,7 +78,6 @@ export default {
     }
   },
 
-  noop() {}
 }
 </script>
 

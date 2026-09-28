@@ -44,6 +44,12 @@
       },
       "pages/resource-detail": {
         "component": "resource-detail"
+      },
+      "pages/mix-match": {
+        "component": "mix-match"
+      },
+      "pages/mix-match-select": {
+        "component": "mix-match-select"
       }
     }
   }

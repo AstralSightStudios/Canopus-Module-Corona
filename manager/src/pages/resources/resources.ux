@@ -44,7 +44,7 @@ const THEME_ROOT_URI = "internal://files/themes/"
 const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
 const VIEW_TOP = 96
 const VIEW_HEIGHT = 372
-const ROW_HEIGHT = 112
+const ROW_HEIGHT = 140
 const HOLD_MS = 450
 const MOVE_SLOP = 8
 const EDGE_SIZE = 42
@@ -377,13 +377,13 @@ export default {
 
 .resource-row {
   width: 196px;
-  height: 112px;
+  height: 140px;
   flex-shrink: 0;
 }
 
 .resource-item {
   width: 196px;
-  height: 104px;
+  height: 132px;
   margin-bottom: 8px;
   padding-left: 12px;
   border-radius: 24px;
@@ -404,8 +404,9 @@ export default {
 .theme-name {
   width: 172px;
   color: #FFFFFF;
-  font-size: 22px;
+  font-size: 35px;
   font-weight: bold;
+  line-height: 40px;
   lines: 1;
   text-overflow: ellipsis;
 }
@@ -414,17 +415,18 @@ export default {
   width: 172px;
   margin-top: 3px;
   color: #BBBBBB;
-  font-size: 13px;
+  font-size: 18px;
+  line-height: 22px;
   lines: 1;
   text-overflow: ellipsis;
 }
 
 .description-preview {
   width: 172px;
-  margin-top: 5px;
+  margin-top: 4px;
   color: #BBBBBB;
-  font-size: 12px;
-  line-height: 15px;
+  font-size: 16px;
+  line-height: 19px;
   lines: 2;
   text-overflow: ellipsis;
 }

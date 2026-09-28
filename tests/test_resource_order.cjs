@@ -172,10 +172,13 @@ async function main() {
     });
     file.binary.set('internal://files/themes/top/icons/top.bin', Uint8Array.from([7]));
     file.binary.set('internal://files/themes/base/assets/base.bin', Uint8Array.from([3]));
-    await activation.regenerateActiveMappings(['top', 'base', systemId], 'legacy1', file);
-    const inventory = JSON.parse(file.text.get(fileIndexUri)).themes;
-    assert.deepEqual(inventory.top.map(item => item.relativePath), ['canora.json', 'icons/top.bin']);
-    assert.deepEqual(inventory.base.map(item => item.relativePath), ['canora.json', 'assets/base.bin']);
+    const plan = await activation.regenerateActiveMappings(['top', 'base', systemId], 'legacy1', file);
+    assert.deepEqual(plan.copies.map(copy => copy.sourceUri), [
+      'internal://files/themes/top/icons/top.bin',
+      'internal://files/themes/base/assets/base.bin'
+    ], 'activation uses an in-memory inventory when the optional index is absent');
+    assert.equal(file.text.get(fileIndexUri), undefined,
+      'rebuilding mappings does not require an optional inventory index write');
   }
 
   {
@@ -225,6 +228,42 @@ async function main() {
 
   {
     const file = makeFileApi();
+    file.text.set('internal://files/themes/top/canora.json', manifest('top', {
+      source: '/resource/', destination: 'top/'
+    }));
+    file.text.set('internal://files/themes/picked/canora.json', manifest('picked', {
+      source: '/resource/', destination: 'picked/'
+    }));
+    file.text.set(fileIndexUri, JSON.stringify({ version: 1, themes: {
+      top: [
+        { relativePath: 'top/a.bin', sizeBytes: 1 },
+        { relativePath: 'top/b.bin', sizeBytes: 1 },
+        { relativePath: 'top/c.bin', sizeBytes: 1 }
+      ],
+      picked: [
+        { relativePath: 'picked/a.bin', sizeBytes: 1 },
+        { relativePath: 'picked/b.bin', sizeBytes: 1 },
+        { relativePath: 'picked/c.bin', sizeBytes: 1 }
+      ]
+    } }));
+    file.binary.set('internal://files/themes/top/top/a.bin', Uint8Array.from([1]));
+    file.binary.set('internal://files/themes/top/top/b.bin', Uint8Array.from([2]));
+    file.binary.set('internal://files/themes/top/top/c.bin', Uint8Array.from([5]));
+    file.binary.set('internal://files/themes/picked/picked/a.bin', Uint8Array.from([3]));
+    file.binary.set('internal://files/themes/picked/picked/b.bin', Uint8Array.from([4]));
+    file.binary.set('internal://files/themes/picked/picked/c.bin', Uint8Array.from([6]));
+    const plan = await activation.regenerateActiveMappings(
+      ['top', systemId, 'picked'], 'g-picked', file,
+      { '/resource/a.bin': 'picked', '/resource/b.bin': '@system' });
+    assert.deepEqual(plan.copies.map(copy => copy.sourceUri), [
+      'internal://files/themes/picked/picked/a.bin',
+      'internal://files/themes/top/top/c.bin'
+    ], 'the final overlay applies explicit choices after order while unselected files keep normal priority');
+    assert.match(file.text.get(mappingsUri), /^\/resource\/\t\/data\/quickapp\/files\/ng\.lst\.corona\/themes\/.active-g-picked\/r0\/\n$/);
+  }
+
+  {
+    const file = makeFileApi();
     file.text.set(mappingsUri, 'old active config');
     file.text.set('internal://files/themes/top/canora.json', manifest('top', {
       source: '/resource/', destination: 'top/'
@@ -256,7 +295,84 @@ async function main() {
     assert.equal(unique.copies.length, 0);
   }
 
-  console.log('Resource order persistence, new-pack priority, pack overlays and active generation cleanup passed.');
+  {
+    const plan = activation.planActiveMappings([
+      { themeId: 'top', active: true, manifest: { mappings: [
+        { source: '/resource/', destination: 'top/' }
+      ] }, files: [
+        { relativePath: 'top/a.bin', sizeBytes: 1 },
+        { relativePath: 'top/b.bin', sizeBytes: 1 }
+      ] },
+      { themeId: 'low', active: false, manifest: { mappings: [
+        { source: '/resource/', destination: 'low/' }
+      ] }, files: [
+        { relativePath: 'low/a.bin', sizeBytes: 1 },
+        { relativePath: 'low/b.bin', sizeBytes: 1 }
+      ] }
+    ], 'g-override', { '/resource/a.bin': 'low' });
+    assert(plan.copies.some(copy => copy.sourceUri === 'internal://files/themes/low/low/a.bin'),
+      'an explicit pack selection wins even below the system boundary');
+    assert(plan.copies.some(copy => copy.sourceUri === 'internal://files/themes/top/top/b.bin'),
+      'unselected files continue to follow normal resource order');
+  }
+
+  {
+    const plan = activation.planActiveMappings([
+      { themeId: 'top', active: true, manifest: { mappings: [
+        { source: '/resource/', destination: 'top/' }
+      ] }, files: [
+        { relativePath: 'top/a.bin', sizeBytes: 1 },
+        { relativePath: 'top/b.bin', sizeBytes: 1 }
+      ] },
+      { themeId: 'specific', active: true, manifest: { mappings: [
+        { source: '/resource/a.bin', destination: 'special.bin' }
+      ] }, files: [{ relativePath: 'special.bin', sizeBytes: 1 }] }
+    ], 'g-system', { '/resource/a.bin': '@system' });
+    assert(plan.mappings.startsWith('/resource/\t'), 'the parent rule stays backed by a materialized overlay');
+    assert(!plan.copies.some(copy => copy.destinationUri.endsWith('/a.bin')),
+      'a System override leaves a hole in the directory overlay so the hook falls back to firmware');
+    assert(plan.copies.some(copy => copy.destinationUri.endsWith('/b.bin')),
+      'other files in the same directory remain mapped');
+  }
+
+  {
+    const oversizedSuffix = 'x'.repeat(250);
+    const plan = activation.planActiveMappings([
+      { themeId: 'top', active: true, manifest: { mappings: [
+        { source: '/resource/', destination: 'top/' }
+      ] }, files: [
+        { relativePath: 'top/a.bin', sizeBytes: 1 },
+        { relativePath: `top/${oversizedSuffix}`, sizeBytes: 1 }
+      ] },
+      { themeId: 'low', active: true, manifest: { mappings: [
+        { source: '/resource/', destination: 'low/' }
+      ] }, files: [
+        { relativePath: 'low/a.bin', sizeBytes: 1 },
+        { relativePath: `low/${oversizedSuffix}`, sizeBytes: 1 }
+      ] }
+    ], 'g-long-path', { '/resource/a.bin': 'low' });
+    assert.deepEqual(plan.copies.map(copy => copy.sourceUri), [
+      'internal://files/themes/low/low/a.bin'
+    ], 'unrepresentable source paths are skipped within a materialized group');
+  }
+
+  {
+    const manyThemes = [];
+    const overrides = {};
+    for (let i = 0; i < 65; i++) {
+      const source = `/resource/${i}.bin`;
+      const themeId = `p${i}`;
+      manyThemes.push({ themeId, active: true, manifest: { mappings: [
+        { source, destination: `${i}.bin` }
+      ] }, files: null });
+      overrides[source] = '@system';
+    }
+    const plan = activation.planActiveMappings(manyThemes, 'g-all-system', overrides);
+    assert.equal(plan.mappings, '# No active resource replacements.\n',
+      'the final rule limit is checked after System overrides remove mappings');
+  }
+
+  console.log('Resource order persistence, priority overlays, per-file overrides and active generation cleanup passed.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

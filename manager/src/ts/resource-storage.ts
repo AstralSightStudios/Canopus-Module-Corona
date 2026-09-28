@@ -1,4 +1,5 @@
 import { removeThemeFileInventory, removeThemeFromResourceOrder } from "./resource-order";
+import { removeThemeFromResourceOverrides } from "./resource-overrides";
 
 export interface ResourceStorageFileApi {
   readOptionalText(uri: string): Promise<string | null>;
@@ -65,6 +66,7 @@ export async function removeInstalledTheme(
   if (mappings !== null && mappingsUseTheme(mappings, themeId))
     throw storageError("active-theme", "正在使用的资源包不能删除");
 
+  await removeThemeFromResourceOverrides(themeId, file);
   try {
     await file.removeDirectory(`${THEME_ROOT_URI}${themeId}/`);
   } catch (error) {
