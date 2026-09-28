@@ -6,7 +6,8 @@ const tests = [
   'test_file.cjs',
   'test_interconnect.cjs',
   'test_resource_storage.cjs',
-  'test_reload_signal.cjs'
+  'test_reload_signal.cjs',
+  'test_resource_order.cjs'
 ];
 
 for (const test of tests) {

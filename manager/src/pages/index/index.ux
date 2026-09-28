@@ -26,7 +26,9 @@
 import prompt from "@system.prompt"
 import * as file from "../../ts/file"
 import router from "@system.router"
-import { sendReloadSignal, waitForReload } from "../../ts/reload-signal"
+import { sendReloadSignal, waitForReloadOutcome } from "../../ts/reload-signal"
+import { cleanupInactiveGenerations, regenerateActiveMappings } from "../../ts/resource-activation"
+import { loadResourceOrder, readInstalledThemeIds } from "../../ts/resource-order"
 
 export default {
   private: {
@@ -42,15 +44,28 @@ export default {
     if (this.sendingReload) return
     this.sendingReload = true
     this.reloadRevision = Math.max(Date.now(), this.reloadRevision + 1)
+    let mappingsGenerated = false
     let signalSent = false
     try {
-      const revision = String(this.reloadRevision)
+      const revision = `${this.reloadRevision}-${Math.floor(Math.random() * 1000000).toString(36)}`
+      const installedThemeIds = await readInstalledThemeIds(file)
+      const order = await loadResourceOrder(installedThemeIds, file)
+      const plan = await regenerateActiveMappings(order, revision, file)
+      mappingsGenerated = true
       await sendReloadSignal(revision, file)
       signalSent = true
-      const message = await waitForReload(revision, file)
+      const outcome = await waitForReloadOutcome(revision, file)
+      prompt.showToast({ message: outcome.message })
+      if (outcome.successful) {
+        try { await cleanupInactiveGenerations(plan.generation, file); }
+        catch (_cleanupError) { /* Keep unused generations rather than risk the active one. */ }
+      }
+    } catch (error) {
+      let message = "重载失败"
+      if (!mappingsGenerated) message = String(error && error.message || "资源映射生成失败")
+      else if (!signalSent) message = "重载信号发送失败"
+      else message = "等待模块响应失败"
       prompt.showToast({ message })
-    } catch (_error) {
-      prompt.showToast({ message: signalSent ? "等待模块响应失败" : "重载信号发送失败" })
     } finally {
       this.sendingReload = false
     }

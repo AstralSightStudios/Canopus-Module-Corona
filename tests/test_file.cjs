@@ -48,6 +48,9 @@ async function main() {
   assert.deepEqual(await file.readFileInfo(uri), { length: 3, type: 'file' });
   api.get = o => o.success({ length: 0 });
   assert.deepEqual(await file.readFileInfo(uri), { length: 0, type: undefined });
+  api.list = o => { options = o; o.success({ fileList: [{ uri: `${uri}.child`, length: 2 }] }); };
+  assert.deepEqual(await file.listDirectory('internal://files/'), [{ uri: `${uri}.child`, length: 2 }]);
+  assert.equal(options.uri, 'internal://files/');
   api.mkdir = o => { options = o; o.success(); };
   assert.equal(await file.makeDirectory(uri), undefined); assert.equal(options.recursive, true);
   await file.makeDirectory(uri, false); assert.equal(options.recursive, false);
@@ -63,6 +66,7 @@ async function main() {
     ['readArrayBuffer', () => file.readArrayBuffer(uri)],
     ['writeArrayBuffer', () => file.writeArrayBuffer(uri, buffer)],
     ['get', () => file.readFileInfo(uri)],
+    ['list', () => file.listDirectory(uri)],
     ['mkdir', () => file.makeDirectory(uri)],
     ['delete', () => file.deleteFile(uri)],
     ['rmdir', () => file.removeDirectory(uri)]

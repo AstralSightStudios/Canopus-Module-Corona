@@ -11,6 +11,11 @@ export interface FileInfo {
   type?: string;
 }
 
+export interface FileListEntry {
+  uri: string;
+  length: number;
+}
+
 export interface FileApi {
   readText(
     options: Callbacks<{ text: string }> & { uri: string; encoding?: string },
@@ -33,6 +38,7 @@ export interface FileApi {
     },
   ): void;
   get(options: Callbacks<FileInfo> & { uri: string }): void;
+  list(options: Callbacks<{ fileList: FileListEntry[] }> & { uri: string }): void;
   mkdir(options: Callbacks<void> & { uri: string; recursive?: boolean }): void;
   delete(options: Callbacks<void> & { uri: string }): void;
   rmdir(options: Callbacks<void> & { uri: string; recursive?: boolean }): void;
@@ -158,6 +164,16 @@ export async function readFileInfo(uri: string): Promise<FileInfo> {
     api.get({ uri, ...callbacks }),
   );
   return { length: result.length, type: result.type };
+}
+
+export async function listDirectory(uri: string): Promise<FileListEntry[]> {
+  const result = await invoke<{ fileList: FileListEntry[] }>("列出目录", uri, (callbacks) =>
+    api.list({ uri, ...callbacks }),
+  );
+  if (!Array.isArray(result.fileList) || result.fileList.some(entry =>
+    !entry || typeof entry.uri !== "string" || typeof entry.length !== "number"))
+    throw new Error(`目录清单格式无效：${uri}`);
+  return result.fileList.map(entry => ({ uri: entry.uri, length: entry.length }));
 }
 
 export function makeDirectory(uri: string, recursive = true): Promise<void> {

@@ -9,11 +9,18 @@ const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'resourc
 const indexUri = 'internal://files/interconnect-themes.json';
 const mappingsUri = 'internal://files/mappings.tsv';
 const nativeThemePrefix = '/data/quickapp/files/ng.lst.corona/themes/';
+const orderUri = 'internal://files/resource-order.json';
+const fileIndexUri = 'internal://files/resource-files.json';
 
 function makeStorage(overrides = {}) {
   const text = new Map([
     [indexUri, JSON.stringify(['dark', 'light', 'dark'])],
-    [mappingsUri, '']
+    [mappingsUri, ''],
+    [orderUri, JSON.stringify({ version: 1, order: ['dark', 'light', '@system'] })],
+    [fileIndexUri, JSON.stringify({ version: 1, themes: {
+      dark: [{ relativePath: 'dark.bin', sizeBytes: 1 }],
+      light: [{ relativePath: 'light.bin', sizeBytes: 1 }]
+    } })]
   ]);
   const removedDirectories = [];
   const api = {
@@ -46,6 +53,10 @@ async function main() {
     await removeInstalledTheme('dark', storage.api);
     assert.deepEqual(storage.removedDirectories, ['internal://files/themes/dark/']);
     assert.equal(storage.text.get(indexUri), '["light"]');
+    assert.deepEqual(JSON.parse(storage.text.get(orderUri)),
+      { version: 1, order: ['light', '@system'] });
+    assert.deepEqual(JSON.parse(storage.text.get(fileIndexUri)),
+      { version: 1, themes: { light: [{ relativePath: 'light.bin', sizeBytes: 1 }] } });
   }
 
   {

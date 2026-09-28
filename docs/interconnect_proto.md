@@ -13,7 +13,7 @@ interconnect 的应用层载荷使用文本。当前目标设备上实测单条�
 
 ## 可分享资源包格式（CRPack v1）
 
-`.crpack` 是给用户保存和分享的 ZIP 容器，不是链路载荷。发送端识别容器、展示元数据并安全解包后，将根目录下的 `canora.json` 和资源文件组成目录树交给传输协议；`canora.json` 原样传输并保存到设备主题目录，供 Manager 展示包信息及规则。包内资源相对路径保持不变；协议中的 `T` 文件清单仍由发送端按实际待传输文件生成，和这里的 JSON manifest 不是同一份清单。分享包不包含 `mappings.tsv`：接收完成后，设备 Manager 从 `canora.json` 生成并保存主题目录内的派生 `mappings.tsv`；用户激活主题时，再根据同一份 manifest 生成模块读取的活动配置 `internal://files/mappings.tsv`。
+`.crpack` 是给用户保存和分享的 ZIP 容器，不是链路载荷。发送端识别容器、展示元数据并安全解包后，将根目录下的 `canora.json` 和资源文件组成目录树交给传输协议；`canora.json` 原样传输并保存到设备主题目录，供 Manager 展示包信息及规则。包内资源相对路径保持不变；协议中的 `T` 文件清单仍由发送端按实际待传输文件生成，和这里的 JSON manifest 不是同一份清单。分享包不包含 `mappings.tsv`：接收完成后，设备 Manager 从 `canora.json` 生成主题目录内派生 `mappings.tsv`，另保存资源文件清单以便目录映射做静态分层合并。资源管理页保存资源包顺序和“系统样式”分界；首页重载时才从分界上方的资源包生成模块读取的活动 `internal://files/mappings.tsv`。
 
 ### 识别与布局
 
@@ -47,14 +47,14 @@ dark.crpack  (ZIP)
 }
 ```
 
-`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 是规范的唯一映射来源，最多 64 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。两者目录/文件结尾斜杠类型须相同。Manager 拼接 `/data/quickapp/files/ng.lst.corona/themes/<themeId>/` 与 `destination`，生成设备绝对目标路径；拼接后的源、目标路径仍须符合模块的路径及长度限制。映射字段不得包含 TAB、CR、LF 或控制字符。允许 `mappings` 为空，但 Manager 应提示该主题不会产生重定向。Manager 按顺序将每项序列化为 `source<TAB>绝对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；激活时从 manifest 重新生成活动配置，避免把派生文件当作权威来源。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
+`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 是规范的唯一映射来源，最多 64 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。两者目录/文件结尾斜杠类型须相同。Manager 拼接 `/data/quickapp/files/ng.lst.corona/themes/<themeId>/` 与 `destination`，生成设备绝对目标路径；拼接后的源、目标路径仍须符合模块的路径及长度限制。映射字段不得包含 TAB、CR、LF 或控制字符。允许 `mappings` 为空，但 Manager 应提示该主题不会产生重定向。Manager 按顺序将每项序列化为 `source<TAB>绝对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 64、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
 
 ### 解包与发送校验
 
 - 普通文件条目必须位于 ZIP 根下，不能多套一层 wrapper 目录；安全的目录条目可忽略，拒绝加密条目、符号链接及其他特殊文件、重复路径、绝对路径、反斜杠、空段、`.` / `..`、越界路径、超限 manifest 及解压后超限内容。不得通过路径规范化来“修复”不安全条目。仅支持 ZIP Store/Deflate；校验 CRC，并按实际解压字节数执行限额，不能只信任 ZIP 目录中声明的大小。
 - ZIP 内所有普通文件都是待传输文件，包括 `canora.json`；空目录不传输。`fileCount` 和 `totalBytes` 均包含该文件，接收后路径为 `themes/<themeId>/canora.json`。CRPack v1 中不允许携带包内 `mappings.tsv`，避免两份映射来源不一致。
 - 待传输文件数最多 128、解压总量最多 64 MiB；`canora.json` 最多 64 KiB，并且在 `.crpack` 中必须恰有一份。Manager 生成的主题派生及活动 `mappings.tsv` 最多 32 KiB；派生文件不计入传输 `fileCount` / `totalBytes`。单文件还必须能在协商的 `chunkSizeBytes` 和本地 2,048 片上限内传完。路径安全规则与下方协议接收端校验一致。
-- 导入层负责解析并校验 `canora.json` 的映射数组及资源包约束；之后的 Interconnect 传输层仍只传路径、大小和文件数据，不传 ZIP、不重写映射。接收端在登记前验证 `canora.json` 与传输 `themeId` 一致，并从其规则生成主题目录内的派生 `mappings.tsv`；设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；元数据文件在登记后损坏时退回显示 `themeId`。当前仓库没有分享包发送端或主题激活 UI 实现。
+- 导入层负责解析并校验 `canora.json` 的映射数组及资源包约束；之后的 Interconnect 传输层仍只传路径、大小和文件数据，不传 ZIP、不重写映射。接收端在登记前验证 `canora.json` 与传输 `themeId` 一致，并从其规则生成主题目录内的派生 `mappings.tsv`；设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；元数据文件在登记后损坏时退回显示 `themeId`。设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；新包进入排序列表顶部。资源管理页保存包括“系统样式”分界项在内的顺序；分界上方参与活动映射生成，下方不生效。
 - marker 用于识别格式，不代表发布者可信或文件安全；v1 没有签名。ZIP CRC 只能发现部分传输损坏，不能证明来源或内容真实性。
 
 ## 路径约定
@@ -79,7 +79,7 @@ themes/dark/icons/confirm.bin
 
 CRPack v1 的 `themeId` 取自 `canora.json`，限定为 1–12 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`canora.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
 
-Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及模块限制，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；未来激活时仍从 manifest 重新生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。当前模块仍要求最多 64 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数。发送端导入检查文件路径安全、文件数和总大小；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
+Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级合并到不可变活动代次，低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块仍要求最多 64 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数。发送端导入检查文件路径安全、文件数和总大小；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
 
 ## 消息格式
 
@@ -178,8 +178,8 @@ E{"themeId":"dark","fileIndex":1,"errorCode":"write-failed"}
 
 ## 完成与切换
 
-1. 所有清单文件均收到 `C` 后，发送 `T{"operation":"finish","themeId":"dark"}`；接收端验证 `canora.json`，生成主题目录内的派生 `mappings.tsv`，确认全包文件完成后登记主题，并回 `T{"operation":"status","themeId":"dark","status":"ready"}`。`canora.json` 原样留在主题目录。
-2. 用户在 Manager 选择主题后，Manager 读取并校验 `canora.json`，按规则数组顺序重新生成活动 `mappings.tsv` 并应用。Interconnect 传输层不拼接规则、不修改映射路径。写入活动配置、发送重载信号并收到模块回执后，才标记为 active。
-3. 更新 active 主题时先切换到其他主题或默认资源，再删除 `themes/<themeId>/` 并重传。传输期间旧主题包不可用，但当前活动主题不受影响。
+1. 所有清单文件均收到 `C` 后，发送 `T{"operation":"finish","themeId":"dark"}`；接收端验证 `canora.json`、映射目标与已传文件的对应关系，生成主题目录内派生 `mappings.tsv` 和全包文件清单，确认全包文件完成后登记主题并更新排序；新包排在顶部，然后回 `T{"operation":"status","themeId":"dark","status":"ready"}`。`canora.json` 原样留在主题目录。
+2. 资源管理页按顶部优先顺序展示已安装包，并插入可拖动的“系统样式”分界；其上方参与覆盖，其下方暂不生效。每次放手后 Manager 将完整顺序立即写入自己的 `resource-order.json`。新安装包插入顶部；删除包时从顺序及文件清单中移除。
+3. 排序不会立即修改模块活动映射。用户点主页重载时，Manager 从已保存顺序读取分界上方的包，重新校验 manifest 并生成活动 `mappings.tsv`。跨包重叠源路径按包优先级静态合并，避免高层缺失文件跳过低层资源；同一包内的重叠源规则仍遵守模块最长前缀规则。生成失败时不发送重载信号；活动配置写入后发送信号并等待匹配版本的模块回执，成功后清理旧活动代次。更新同一包时保留其排序槽位。
 
-因此链路上不传 ZIP，也没有 `packageId`；分享用 `.crpack` ZIP 由发送端解包后按树逐文件传输。CRPack v1 仅有 `canora.json` 和资源文件，Manager 激活时才生成模块需要的 TSV 配置。
+因此链路上不传 ZIP，也没有 `packageId`；分享用 `.crpack` ZIP 由发送端解包后按树逐文件传输。CRPack v1 仅有 `canora.json` 和资源文件，Manager 重载时才生成模块需要的活动 TSV 配置。

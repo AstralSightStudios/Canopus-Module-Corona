@@ -1,3 +1,5 @@
+import { removeThemeFileInventory, removeThemeFromResourceOrder } from "./resource-order";
+
 export interface ResourceStorageFileApi {
   readOptionalText(uri: string): Promise<string | null>;
   writeText(uri: string, text: string): Promise<void>;
@@ -72,4 +74,6 @@ export async function removeInstalledTheme(
   const remainingThemeIds = installedThemeIds.filter((item) => item !== themeId);
   if (indexText !== null && remainingThemeIds.length !== installedThemeIds.length)
     await file.writeText(INSTALLED_THEMES_URI, JSON.stringify(remainingThemeIds));
+  await removeThemeFromResourceOrder(themeId, file);
+  await removeThemeFileInventory(themeId, file);
 }

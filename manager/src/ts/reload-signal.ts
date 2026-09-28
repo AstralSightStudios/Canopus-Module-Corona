@@ -56,30 +56,48 @@ export function parseReloadResult(text: string, revision: string): ReloadResult 
   return { version: Number(fields[1]), result, pending: fields[3] === "1", changed };
 }
 
+export interface ReloadOutcome {
+  successful: boolean;
+  message: string;
+}
+
 /** Waits for a response matching this exact request revision. */
+export async function waitForReloadOutcome(
+  revision: string,
+  file: Pick<ReloadSignalFileApi, "readOptionalText">,
+  attempts = 30,
+  intervalMs = 1000,
+): Promise<ReloadOutcome> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let text: string | null;
+    try {
+      text = await file.readOptionalText(RELOAD_RESULT_URI);
+    } catch (_error) {
+      return { successful: false, message: "无法读取模块响应" };
+    }
+
+    const result = text === null ? null : parseReloadResult(text, revision);
+    if (result) {
+      if (result.result < 0)
+        return { successful: false, message: `模块拒绝重载（${result.result}）` };
+      if (!result.pending && result.result === 0)
+        return {
+          successful: true,
+          message: result.changed > 0 ? `重载完成，更新 ${result.changed} 项资源` : "模块已响应，重载完成"
+        };
+    }
+
+    if (attempt + 1 < attempts && intervalMs > 0)
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return { successful: false, message: "未收到模块响应" };
+}
+
 export async function waitForReload(
   revision: string,
   file: Pick<ReloadSignalFileApi, "readOptionalText">,
   attempts = 30,
   intervalMs = 1000,
 ): Promise<string> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    let text: string | null;
-    try {
-      text = await file.readOptionalText(RELOAD_RESULT_URI);
-    } catch (_error) {
-      return "无法读取模块响应";
-    }
-
-    const result = text === null ? null : parseReloadResult(text, revision);
-    if (result) {
-      if (result.result < 0) return `模块拒绝重载（${result.result}）`;
-      if (!result.pending && result.result === 0)
-        return result.changed > 0 ? `重载完成，更新 ${result.changed} 项资源` : "模块已响应，重载完成";
-    }
-
-    if (attempt + 1 < attempts && intervalMs > 0)
-      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return "未收到模块响应";
+  return (await waitForReloadOutcome(revision, file, attempts, intervalMs)).message;
 }

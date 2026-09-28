@@ -135,7 +135,7 @@ async function main() {
   };
   const receiverModule = require(path.join(temporary, 'interconnect.js'));
   const { InterconnectThemeReceiver, decodeBase91, validateThemeRelativePath } = receiverModule;
-  const { parseResourcePackManifest, serializeResourcePackMappings } =
+  const { parseResourcePackManifest, serializeResourcePackMappings, validateResourcePackFiles } =
     require(path.join(temporary, 'resource-pack.js'));
   assert.equal(Buffer.from(decodeBase91('fPNKd')).toString(), 'test');
   assert.deepEqual([...decodeBase91(encodeBase91([0, 1, 2, 255]))], [0, 1, 2, 255]);
@@ -170,6 +170,8 @@ async function main() {
   assert.equal(parsedCanora.mappings.length, 1);
   assert.equal(serializeResourcePackMappings(parsedCanora),
     '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/dark/icons/\n');
+  assert.doesNotThrow(() => validateResourcePackFiles(parsedCanora, ['canora.json', 'icons/a.bin']));
+  assert.throws(() => validateResourcePackFiles(parsedCanora, ['canora.json']), /映射目标.*不存在/);
   assert.throws(() => parseResourcePackManifest(canoraText, 'other'), /不匹配/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
     ...canoraObject, mappings: [{ source: '/resource/', destination: '/tmp/theme/' }]
@@ -350,6 +352,10 @@ async function main() {
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
   assert.equal(native.text.get('internal://files/themes/dark/mappings.tsv'),
     '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/dark/icons/\n');
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/resource-order.json')),
+    { version: 1, order: ['dark', '@system'] });
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/resource-files.json')).themes.dark,
+    manifest.map(item => ({ relativePath: item.relativePath, sizeBytes: item.sizeBytes })));
   assert.equal(resumedStates.at(-1).phase, 'success');
   assert.equal(resumedStates.at(-1).percent, 100);
 

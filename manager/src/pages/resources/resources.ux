@@ -1,60 +1,131 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <div class="page">
+  <div class="page" ontouchend="handleTouchEnd" ontouchcancel="cancelGesture">
     <div class="header">
       <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
     </div>
 
-    <text if="{{themes.length == 0}}" class="empty-state">{{statusText}}</text>
-    <list if="{{themes.length > 0}}" class="resource-list">
-      <list-item for="{{theme in themes}}" type="resource" class="resource-item"
-        onclick="openTheme(theme.themeId)">
-        <div class="resource-copy">
-          <text class="theme-name">{{theme.name}}</text>
-          <text class="theme-meta">{{theme.metaLine}}</text>
-          <text class="description-preview">{{theme.descriptionPreview}}</text>
+    <text if="{{loadError}}" class="empty-state">{{statusText}}</text>
+    <scroll id="resource-list" class="resource-list" scroll-y="{{dragId == ''}}"
+      scroll-x="false" bounces="false" onscroll="handleScroll" ontouchend="handleTouchEnd">
+      <div for="{{row in rows}}" tid="orderId" class="resource-row"
+        style="transform: {{row.transform}};"
+        ontouchstart="handleTouchStart(row.orderId)" ontouchmove="handleTouchMove"
+        ontouchend="handleTouchEnd" ontouchcancel="cancelGesture"
+        onclick="openRow(row.orderId)">
+        <div class="resource-item {{row.dragging ? 'dragged-item' : ''}}">
+          <div class="resource-copy">
+            <text class="theme-name">{{row.name}}</text>
+            <text class="theme-meta">{{row.metaLine}}</text>
+            <text class="description-preview">{{row.descriptionPreview}}</text>
+          </div>
         </div>
-      </list-item>
-    </list>
-
+      </div>
+    </scroll>
   </div>
 </template>
 
 <script>
+import prompt from "@system.prompt"
 import router from "@system.router"
 import * as file from "../../ts/file"
 import { parseResourcePackManifest } from "../../ts/resource-pack"
+import {
+  loadResourceOrder,
+  readInstalledThemeIds,
+  serializeResourceOrder,
+  SYSTEM_STYLE_ID,
+  RESOURCE_ORDER_URI
+} from "../../ts/resource-order"
 
-const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json"
 const THEME_ROOT_URI = "internal://files/themes/"
 const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
+const VIEW_TOP = 96
+const VIEW_HEIGHT = 372
+const ROW_HEIGHT = 112
+const HOLD_MS = 450
+const MOVE_SLOP = 8
+const EDGE_SIZE = 42
+const SCROLL_MS = 40
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function translation(y) {
+  return JSON.stringify({ translateY: `${Math.round(y)}px` })
+}
+
+function point(event, scrollOffset) {
+  if (!event || (event.touches && event.touches.length > 1)) return null
+  const touches = event.touches && event.touches.length ? event.touches : event.changedTouches
+  if (!touches || touches.length !== 1 || !touches[0]) return null
+  const touch = touches[0]
+  const x = typeof touch.clientX === "number" ? touch.clientX : touch.pageX
+  const y = typeof touch.clientY === "number" ? touch.clientY
+    : (typeof touch.pageY === "number" ? touch.pageY - scrollOffset : null)
+  if (typeof x !== "number" || typeof y !== "number" || !isFinite(x) || !isFinite(y)) return null
+  return { x, y, id: touch.identifier }
+}
 
 export default {
   private: {
     headerTitle: "< 资源管理",
-    themes: [],
-    statusText: "正在读取资源包…"
+    rows: [],
+    statusText: "正在读取资源包…",
+    loadError: false,
+    loadVersion: 0,
+    visible: false,
+    scrollOffset: 0,
+    touching: false,
+    touchId: null,
+    startX: 0,
+    startY: 0,
+    lastY: 0,
+    startOffset: 0,
+    panning: false,
+    candidateId: "",
+    dragId: "",
+    dragFrom: -1,
+    dragTo: -1,
+    dragDelta: 0,
+    holdTimer: null,
+    scrollTimer: null,
+    scrollPending: false,
+    suppressClick: false,
+    suppressClickTimer: null
   },
 
   onShow() {
+    this.visible = true
     this.loadThemes()
   },
 
+  onHide() {
+    this.suspend()
+  },
+
+  onDestroy() {
+    this.suspend()
+  },
+
+  suspend() {
+    this.visible = false
+    this.loadVersion += 1
+    this.cancelGesture()
+    if (this.suppressClickTimer !== null) clearTimeout(this.suppressClickTimer)
+    this.suppressClickTimer = null
+    this.suppressClick = false
+  },
+
   async loadThemes() {
+    const version = ++this.loadVersion
     this.statusText = "正在读取资源包…"
+    this.loadError = false
     try {
-      const text = await file.readOptionalText(INSTALLED_THEMES_URI)
-      if (text === null) {
-        this.themes = []
-        this.statusText = "尚未接收资源包"
-        return
-      }
-      const themeIds = JSON.parse(text)
-      if (!Array.isArray(themeIds) || themeIds.some(themeId =>
-        typeof themeId !== "string" || !VALID_THEME_ID.test(themeId))) {
-        throw new Error("资源包索引格式无效")
-      }
+      const themeIds = await readInstalledThemeIds(file)
+      const order = await loadResourceOrder(themeIds, file)
       const themes = []
       for (const themeId of themeIds) {
         let manifest = null
@@ -64,36 +135,214 @@ export default {
         } catch (_error) {
           // Keep the installed entry visible if its metadata was removed or damaged.
         }
+        if (version !== this.loadVersion || !this.visible) return
         const author = manifest && manifest.author ? manifest.author : ""
-        const version = manifest && manifest.version ? `v${manifest.version}` : ""
+        const versionText = manifest && manifest.version ? `v${manifest.version}` : ""
         themes.push({
+          orderId: themeId,
           themeId,
+          isSystem: false,
           name: manifest ? manifest.name : themeId,
           metaLine: manifest
-            ? ([author, version].filter(Boolean).join(" · ") || "资源包详情")
+            ? ([author, versionText].filter(Boolean).join(" · ") || "资源包详情")
             : "canora.json 不可用",
-          descriptionPreview: manifest
+          description: manifest
             ? (manifest.description || "点按查看资源包详情")
-            : "包信息不可用"
+            : "包信息不可用",
+          descriptionPreview: ""
         })
       }
-      this.themes = themes
-      this.statusText = themes.length ? "" : "尚未接收资源包"
+      const byId = Object.create(null)
+      themes.forEach(theme => { byId[theme.themeId] = theme })
+      const rows = order.map(orderId => orderId === SYSTEM_STYLE_ID ? {
+        orderId: SYSTEM_STYLE_ID,
+        themeId: "",
+        isSystem: true,
+        name: "系统样式",
+        metaLine: "设备内置样式",
+        description: "系统默认资源",
+        descriptionPreview: ""
+      } : byId[orderId]).filter(Boolean)
+      if (version !== this.loadVersion || !this.visible) return
+      this.rows = rows
+      this.scrollOffset = 0
+      this.renderRows()
+      this.statusText = ""
     } catch (_error) {
-      this.themes = []
-      this.statusText = "读取资源包列表失败，请返回后重试。"
+      if (version !== this.loadVersion || !this.visible) return
+      this.rows = []
+      this.loadError = true
+      this.statusText = "读取资源包顺序失败，请返回后重试。"
     }
   },
 
-  openTheme(themeId) {
-    if (typeof themeId !== "string" || !VALID_THEME_ID.test(themeId)) return
-    router.push({ uri: "pages/resource-detail", params: { themeId } })
+  renderRows() {
+    this.rows.forEach((row, index) => {
+      let slot = index
+      const dragging = row.orderId === this.dragId
+      if (dragging) slot = this.dragTo
+      else if (this.dragId && this.dragFrom < index && index <= this.dragTo) slot -= 1
+      else if (this.dragId && this.dragTo <= index && index < this.dragFrom) slot += 1
+      row.rank = slot + 1
+      row.dragging = dragging
+      row.transform = translation(dragging ? this.dragDelta : (slot - index) * ROW_HEIGHT)
+      row.descriptionPreview = row.description
+    })
+  },
+
+  markClickSuppressed() {
+    this.suppressClick = true
+    if (this.suppressClickTimer !== null) clearTimeout(this.suppressClickTimer)
+    this.suppressClickTimer = setTimeout(() => {
+      this.suppressClick = false
+      this.suppressClickTimer = null
+    }, 450)
+  },
+
+  clearHold() {
+    if (this.holdTimer !== null) clearTimeout(this.holdTimer)
+    this.holdTimer = null
+  },
+
+  handleScroll(event) {
+    if (!event || typeof event.scrollY !== "number" || !isFinite(event.scrollY)) return
+    this.scrollOffset = clamp(event.scrollY, 0, Math.max(0, this.rows.length * ROW_HEIGHT - VIEW_HEIGHT))
+    this.scrollPending = false
+    if (this.dragId) this.updateDrag()
+    else if (this.touching && Math.abs(this.scrollOffset - this.startOffset) > MOVE_SLOP) {
+      this.clearHold()
+      this.candidateId = ""
+      this.markClickSuppressed()
+    }
+  },
+
+  scrollAtEdge() {
+    if (!this.dragId || !this.touching || !this.visible || this.scrollPending) return
+    let depth = 0
+    if (this.lastY < VIEW_TOP + EDGE_SIZE) depth = this.lastY - (VIEW_TOP + EDGE_SIZE)
+    else if (this.lastY > VIEW_TOP + VIEW_HEIGHT - EDGE_SIZE)
+      depth = this.lastY - (VIEW_TOP + VIEW_HEIGHT - EDGE_SIZE)
+    if (!depth) return
+    const step = (depth < 0 ? -1 : 1) *
+      (2 + 6 * clamp(Math.abs(depth) / EDGE_SIZE, 0, 1))
+    const top = clamp(this.scrollOffset + step, 0,
+      Math.max(0, this.rows.length * ROW_HEIGHT - VIEW_HEIGHT))
+    if (top === this.scrollOffset) return
+    this.scrollPending = true
+    try { this.$element("resource-list").scrollTo({ top, behavior: "instant" }); }
+    catch (_error) { this.cancelGesture(); }
+  },
+
+  handleTouchStart(orderId, event) {
+    if (this.touching || !this.visible || this.loadError) {
+      if (this.touching) this.cancelGesture()
+      return
+    }
+    const pointValue = point(event, this.scrollOffset)
+    const index = this.rows.findIndex(row => row.orderId === orderId)
+    if (!pointValue || index < 0) return
+    this.touching = true
+    this.touchId = pointValue.id
+    this.startX = pointValue.x
+    this.startY = pointValue.y
+    this.lastY = pointValue.y
+    this.startOffset = this.scrollOffset
+    this.candidateId = orderId
+    this.panning = false
+    this.holdTimer = setTimeout(() => {
+      this.holdTimer = null
+      if (!this.touching || !this.visible || !this.candidateId) return
+      this.dragId = this.candidateId
+      this.dragFrom = index
+      this.dragTo = index
+      this.markClickSuppressed()
+      this.updateDrag()
+      this.scrollTimer = setInterval(() => this.scrollAtEdge(), SCROLL_MS)
+    }, HOLD_MS)
+  },
+
+  handleTouchMove(event) {
+    if (!this.touching) return
+    const pointValue = point(event, this.scrollOffset)
+    if (!pointValue || (pointValue.id != null && this.touchId != null && pointValue.id !== this.touchId)) {
+      this.cancelGesture()
+      return
+    }
+    this.lastY = pointValue.y
+    if (this.dragId) {
+      this.updateDrag()
+      return
+    }
+    const dx = pointValue.x - this.startX
+    const dy = pointValue.y - this.startY
+    if (dx * dx + dy * dy <= MOVE_SLOP * MOVE_SLOP) return
+    this.panning = true
+    this.clearHold()
+    this.candidateId = ""
+    this.markClickSuppressed()
+  },
+
+  updateDrag() {
+    if (!this.dragId) return
+    const origin = this.dragFrom * ROW_HEIGHT
+    const top = clamp(origin + this.lastY - this.startY + this.scrollOffset - this.startOffset,
+      0, Math.max(0, (this.rows.length - 1) * ROW_HEIGHT))
+    this.dragDelta = top - origin
+    this.dragTo = Math.round(top / ROW_HEIGHT)
+    this.renderRows()
+  },
+
+  handleTouchEnd() {
+    this.finishGesture(true)
+  },
+
+  cancelGesture() {
+    this.finishGesture(false)
+  },
+
+  async finishGesture(commit) {
+    this.clearHold()
+    if (this.scrollTimer !== null) clearInterval(this.scrollTimer)
+    this.scrollTimer = null
+    this.scrollPending = false
+    const from = this.dragFrom
+    const to = this.dragTo
+    const reorder = commit && this.dragId && from !== to
+    const previousRows = this.rows.slice()
+    this.touching = false
+    this.touchId = null
+    this.candidateId = ""
+    this.dragId = ""
+    this.dragFrom = -1
+    this.dragTo = -1
+    this.dragDelta = 0
+    if (reorder) {
+      const rows = this.rows.slice()
+      rows.splice(to, 0, rows.splice(from, 1)[0])
+      this.rows = rows
+    }
+    this.renderRows()
+    if (!reorder) return
+    try {
+      await file.writeText(RESOURCE_ORDER_URI,
+        serializeResourceOrder(this.rows.map(row => row.orderId)))
+    } catch (_error) {
+      this.rows = previousRows
+      this.renderRows()
+      prompt.showToast({ message: "排序保存失败，已恢复原顺序" })
+    }
+  },
+
+  openRow(orderId) {
+    if (this.suppressClick) return
+    if (typeof orderId !== "string" || !VALID_THEME_ID.test(orderId)) return
+    router.push({ uri: "pages/resource-detail", params: { themeId: orderId } })
   },
 
   goBack() {
+    this.suspend()
     router.back()
-  },
-
+  }
 }
 </script>
 
@@ -118,9 +367,16 @@ export default {
   left: 0;
   top: 96px;
   width: 100%;
-  height: 338px;
+  height: 372px;
   padding-left: 8px;
   padding-right: 8px;
+  flex-direction: column;
+}
+
+.resource-row {
+  width: 196px;
+  height: 112px;
+  flex-shrink: 0;
 }
 
 .resource-item {
@@ -131,6 +387,10 @@ export default {
   border-radius: 24px;
   background-color: #262626;
   align-items: center;
+}
+
+.dragged-item {
+  background-color: #444444;
 }
 
 .resource-copy {

@@ -170,6 +170,19 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
   };
 }
 
+/** Reject mapping destinations that are not backed by an installed package file. */
+export function validateResourcePackFiles(
+  manifest: ResourcePackManifest,
+  relativePaths: string[],
+): void {
+  for (const mapping of manifest.mappings) {
+    const exists = mapping.destination.endsWith("/")
+      ? relativePaths.some(path => path.startsWith(mapping.destination))
+      : relativePaths.indexOf(mapping.destination) >= 0;
+    if (!exists) throw new Error(`映射目标 ${mapping.destination} 不存在于资源包文件中`);
+  }
+}
+
 /** Build the module's active TSV configuration from validated manifest rules. */
 export function serializeResourcePackMappings(manifest: ResourcePackManifest): string {
   return serializeMappings(manifest.mappings, manifest.themeId);

@@ -76,7 +76,7 @@ RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.155
 - 不全局停止动画，不把 stop/update/start 称为无损 resume。动画派生类、回调帧、
   canvas/snapshot、打包资源和离开 LVGL 屏幕树的 owner，仍需各自的安全重载协议。
 - **不 Hook watchface loader，不重建页面作为替代方案，不承诺任意 RAM/ROM 资源可替换。**
-- 不自动重启 miwear，不保证 Hook 早于首次资源读取；Manager 可接收 CRPack v1 解包后的主题文件树并展示 `canora.json` 包信息，但不展示映射规则，也没有 ZIP 发送端或主题选择/激活 UI。
+- 不自动重启 miwear，不保证 Hook 早于首次资源读取；Manager 可接收 CRPack v1 解包后的主题文件树，资源管理页可排序资源包并以“系统样式”划定活动范围，主页重载时生成并应用活动映射；Manager 不展示映射规则，也不包含 ZIP 发送端。
   `restart_miwear.sh` 故意退出 78；stop/deactivate 的 reboot-required 不表示已拆除 Hook。
 
 项目/管理器包标识为 `ng.lst.corona`；运行时/收据标识为 `corona`。
@@ -201,7 +201,7 @@ AP 固件及 stage1/stage2/Supervisor 测试资源；完整加载测试还需要
 配置样例：[examples/mappings.tsv](examples/mappings.tsv)，其中分隔符是真实 TAB。
 目录映射的源/目标都以 `/` 结尾并追加剩余路径；文件映射两端都不以 `/` 结尾，只匹配完整路径。启动配置文件不存在、为空或仅含注释时，模块以零规则启动 pass-through hook 和轮询器，不重定向资源或刷新 UI；之后写入映射并更新信号即可加载主题。模块运行后也可用 0 条规则清除全部映射。非法配置及其他读取错误会保留
 last-known-good。控制目录的变更标记格式为
-`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 的 Interconnect 接收端要求 `canora.json`，逐文件保存资源和元数据，并由其生成主题目录内的派生 `mappings.tsv`；资源管理页展示包信息，不展示映射规则，但不会选择/激活主题或生成活动 `mappings.tsv`，也不接收 ZIP 本体。首页重载按钮只向 `internal://files/reload.request` 写入版本化信号，针对现有活动配置触发重载，不会应用收到的主题包；按钮等待本次版本匹配的模块回执后再显示结果 toast，超时会提示未收到响应。Manager 通过 `internal://files/` 访问同一 app-scoped 文件区。固件实验字体热重载不再由 Manager 提供测试 UI。构建需要含已批准 errno veneer
+`resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`；变更规则会退休旧、新映射命中的图片缓存并刷新可支持的 owner。默认构建不能替换页面已持有的字体对象。Manager 的 Interconnect 接收端要求 `canora.json`，逐文件保存资源、每包派生 `mappings.tsv` 与资源文件清单。资源管理页按“顶部优先”拖动排序，并提供可拖动的“系统样式”分界：其上资源包参与覆盖，其下资源包保留但不生效；顺序保存到 app 文件区，接收新包时置顶。首页重载按钮按已保存顺序重新生成活动 `mappings.tsv`，再发送版本化信号并等待本次模块回执后提示。跨包重叠的源路径按资源包优先级静态合并，低层文件填补高层缺项；同一包内部重叠规则仍按模块最长前缀语义解析。生成失败时不发送重载信号。Manager 通过 `internal://files/` 访问同一 app-scoped 文件区。固件实验字体热重载不再由 Manager 提供测试 UI。构建需要含已批准 errno veneer
 的 Canopus 目标包（`.139` / `.155`）。
 完整协议、错误码、版本映射和回退步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
 固件证据：[.139 审计](targets/xiaomi-band-11-4.100.139/ui-reload-audit.md)、

@@ -164,7 +164,7 @@ RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
 旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
 miwear。
 
-当前 Manager 提供按 [Interconnect 协议](interconnect_proto.md)接收主题文件树的页面；CRPack v1 使用 `canora.json` 描述元数据和映射，接收端校验后原样保存，资源管理页可查看包信息，不显示映射规则。Manager 接收时会根据 manifest 生成主题目录内的派生 `mappings.tsv`，但尚不提供主题选择/激活或生成活动 `mappings.tsv`；首页重载按钮只针对现有活动配置发送 `reload.request`，不应用收到的主题包；发送后等待与本次版本匹配的模块回执，再显示结果 toast。Manager 不展示模块 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，映射仍需通过 Manager 以外的工具管理，且未覆盖 GPU 故障恢复或框架重启。
+当前 Manager 提供按 [Interconnect 协议](interconnect_proto.md)接收 CRPack v1 资源包的页面；`canora.json` 描述元数据和映射，接收时派生每包 `mappings.tsv` 并记录资源文件清单。资源管理页按顶部优先排序，包含可拖动的“系统样式”分界；分界上方参与覆盖，下方不生效。每次放下后，完整顺序保存到 `resource-order.json`；新接收包插入顶部。排序本身不修改模块活动配置，首页重载时才按顺序生成 `mappings.tsv` 并发送 `reload.request`。跨包重叠源路径按包顺序静态合并，低优先级资源填补高层缺项；同一包内重叠源规则仍由模块最长前缀决定。生成失败不发送信号。Manager 不展示模块 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，但未覆盖 GPU 故障恢复或框架重启。
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
@@ -229,7 +229,7 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 Umem；每次解析变更配置最多另需 32 KiB scratch，分配失败会保留当前规则并在后续轮询重试。
 默认构建仅改写字体注册路径，不能替换页面已持有的字体对象，不代表完整 UI/字体热重载；仅 `.155` opt-in 实验构建支持受限字体事务，详见 [字体实验说明](FONT_RELOAD_EXPERIMENT.md)。
 
-Manager 的 Interconnect 页面接收解包后的 CRPack v1 文件树，要求唯一根目录 `canora.json`，并将元数据和资源逐个写入原相对路径；资源管理页展示名称、作者、版本、描述和目标设备，不显示映射规则。Manager 接收时生成主题目录内的派生 `mappings.tsv`，但不接收 ZIP 本体、不应用映射、不生成活动 `mappings.tsv`，也不是通用配置编辑器。首页的重载按钮按当前配置写入版本化 `reload.request`，并等待与本次请求版本匹配的模块回执后再显示结果 toast；超时会提示未收到响应。接收端使用 `internal://files/` 访问 app-scoped 文件区。固件字体实验属于模块侧能力，不再附带设置图标或字体测试资产/操作；若使用实验构建，需由其他受信任工具写入不可变字体代次、映射和重载信号。模块侧使用 native 绝对路径；快应用文件 API 应使用 `internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
+Manager 的 Interconnect 页面接收解包后的 CRPack v1 文件树，要求唯一根目录 `canora.json`，并将元数据和资源逐个写入原相对路径；接收时验证 manifest 映射目标确实存在于包文件清单，保存每包文件清单并生成派生 `mappings.tsv`。资源管理页保留现有列表样式，长按即可调序；新增包置顶。“系统样式”是分界项，默认在底部；分界上方参与生成，下方保留但不生效。每次放下顺序写入 app-scoped `resource-order.json`，排序不立即切换当前主题。首页重载时才从分界上方的 `canora.json` 生成活动 `mappings.tsv`：跨包重叠的源路径按顶部优先解析并静态复制到不可变活动代次，高层只覆盖其实际提供的文件，因此缺项可以回退到下一层；同一包内重叠源规则仍遵循模块最长前缀匹配。超过模块 64 条规则、32 KiB 配置限制或生成失败时不发送信号。配置写入后，Manager 等待与本次请求版本匹配的模块回执，再提示结果；成功确认后清理旧活动代次。接收端使用 `internal://files/` 访问 app-scoped 文件区。固件字体实验属于模块侧能力，不再附带设置图标或字体测试资产/操作；若使用实验构建，需由其他受信任工具写入不可变字体代次、映射和重载信号。模块侧使用 native 绝对路径；快应用文件 API 应使用 `internal://files/`，不要通过 `system.file` 传 native 绝对路径（QJS 会按快应用规则改写）。
 stop/deactivate 仍需完整重启卸载，不支持热卸载。
 
 ## 状态与错误

@@ -23,7 +23,7 @@ async function main() {
     path.join(root, 'manager/src/ts/reload-signal.ts'), '--outDir', temporary,
     '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck'
   ], { stdio: 'inherit' });
-  const { sendReloadSignal, parseReloadResult, waitForReload } =
+  const { sendReloadSignal, parseReloadResult, waitForReload, waitForReloadOutcome } =
     require(path.join(temporary, 'reload-signal.js'));
 
   {
@@ -89,6 +89,13 @@ async function main() {
     assert.equal(message, '重载完成，更新 1 项资源');
     assert.equal(polls, 2);
   }
+
+  assert.deepEqual(await waitForReloadOutcome('123456', {
+    async readOptionalText() { return response; }
+  }, 1, 0), { successful: true, message: '重载完成，更新 1 项资源' });
+  assert.deepEqual(await waitForReloadOutcome('123456', {
+    async readOptionalText() { return makeResponse('123456', { result: -2103 }); }
+  }, 1, 0), { successful: false, message: '模块拒绝重载（-2103）' });
 
   assert.equal(await waitForReload('123456', {
     async readOptionalText() { return makeResponse('123456', { result: -2103 }); }

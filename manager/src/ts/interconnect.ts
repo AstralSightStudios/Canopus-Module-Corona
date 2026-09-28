@@ -3,6 +3,8 @@ import * as file from "./file";
 import type { FileOperationError } from "./file";
 import { parseResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
 import type { ResourcePackManifest } from "./resource-pack";
+import { validateResourcePackFiles } from "./resource-pack";
+import { registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
 
 const VERSION = 2;
 const TRANSFER_STATE_VERSION = 1;
@@ -836,11 +838,13 @@ export class InterconnectThemeReceiver {
     try {
       const text = await file.readText(this.themeFileUri(state.themeId, "canora.json"));
       manifest = parseResourcePackManifest(text, state.themeId);
+      validateResourcePackFiles(manifest, state.files.map(entry => entry.relativePath));
     } catch (error) {
       throw protocolError("invalid-manifest", `canora.json 无效：${String((error as Error).message || error)}`);
     }
     await file.writeText(this.themeFileUri(state.themeId, "mappings.tsv"),
       serializeResourcePackMappings(manifest));
+    await writeThemeFileInventory(state.themeId, state.files, file);
     if (!state.finished) await this.persist({ ...state, finished: true });
     await this.registerTheme(state.themeId);
     await this.sendStatus(state.themeId, "ready");
@@ -980,6 +984,7 @@ export class InterconnectThemeReceiver {
 
   private async registerTheme(themeId: string): Promise<void> {
     const themes = await this.readInstalledThemes();
+    await registerThemeInResourceOrder(themeId, themes, file);
     if (themes.indexOf(themeId) < 0) {
       themes.push(themeId);
       await file.writeText(INSTALLED_THEMES_URI, JSON.stringify(themes));
