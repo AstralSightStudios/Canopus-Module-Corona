@@ -225,4 +225,43 @@ export default {
   text-align: center;
 }
 
+@media (width: 160) {
+  .time-section {
+    top: 0px;
+    height: 60px;
+  }
+
+  .hero {
+    left: 68px;
+    top: 72px;
+  }
+
+  .hero-small {
+    left: 108px;
+    top: 112px;
+  }
+
+  .phase-title {
+    top: 258px;
+  }
+
+  .message {
+    left: 0px;
+    top: 302px;
+    width: 100%;
+  }
+
+  .transfer-info {
+    left: 0px;
+    top: 343px;
+    width: 100%;
+  }
+
+  .progress,
+  .filename,
+  .detail {
+    width: 100%;
+  }
+}
+
 </style>

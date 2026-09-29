@@ -8,6 +8,10 @@
       <text class="time" style="left:126.1px;top:3.8px;transform: rotate(21deg)">{{time[3]}}</text>
       <text class="pagetitle">{{title}}</text>
     </div>
+    <div class="wide-bar">
+      <text class="wide-bar__text">{{title}}</text>
+      <text class="wide-bar__time">{{clock}}</text>
+    </div>
   </div>
 </template>
 
@@ -54,6 +58,51 @@
   letter-spacing: normal;
   color: rgba(255, 255, 255, 1);
 }
+
+.wide-bar {
+  display: none;
+}
+
+/* 小米手环 9/10 Pro：336×480，水平 dp 160。 */
+@media (width: 160) {
+  .time-content {
+    display: none;
+  }
+
+  .time-banner {
+    height: 60px;
+    justify-content: flex-start;
+    align-items: center;
+  }
+
+  .wide-bar {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 14px;
+    padding-right: 16px;
+    padding-bottom: 14px;
+    padding-left: 14px;
+  }
+
+  .wide-bar__text {
+    height: 32px;
+    font-size: 32px;
+    line-height: 32px;
+    color: #ffffff;
+  }
+
+  .wide-bar__time {
+    height: 32px;
+    font-size: 32px;
+    line-height: 32px;
+    color: #ffffff;
+    text-align: right;
+  }
+}
 </style>
 
 <script>
@@ -62,6 +111,7 @@ export default {
 
   private: {
     time: "0000",
+    clock: "00:00",
     timer: null
   },
 
@@ -83,7 +133,10 @@ export default {
 
   updateTime() {
     const now = new Date()
-    this.time = `${now.getHours().toString().padStart(2, "0")}${now.getMinutes().toString().padStart(2, "0")}`
+    const hours = now.getHours().toString().padStart(2, "0")
+    const minutes = now.getMinutes().toString().padStart(2, "0")
+    this.time = `${hours}${minutes}`
+    this.clock = `${hours}:${minutes}`
   }
 }
 </script>

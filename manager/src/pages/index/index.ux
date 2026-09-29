@@ -145,4 +145,37 @@ export default {
   width: 150px;
   height: 78px;
 }
+
+@media (width: 160) {
+  .page {
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: flex-start;
+  }
+
+  .time-section {
+    top: 0px;
+    height: 60px;
+    align-self: flex-start;
+  }
+
+  .card-list {
+    top: 60px;
+    height: 460px;
+  }
+
+  .item {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .itemtext {
+    width: 100%;
+    margin-left: 0px;
+  }
+
+  .enter {
+    display: none;
+  }
+}
 </style>

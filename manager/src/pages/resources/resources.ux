@@ -361,6 +361,7 @@ export default {
   top: 12px;
   width: 100%;
   height: 77px;
+  flex-direction: column;
   align-items: center;
 }
 
@@ -441,6 +442,39 @@ export default {
   line-height: 26px;
   text-align: center;
   lines: 2;
+}
+
+@media (width: 160) {
+  .header {
+    top: 0px;
+    height: 60px;
+  }
+
+  .resource-list {
+    top: 60px;
+    height: 408px;
+  }
+
+  .resource-row,
+  .resource-item {
+    width: 100%;
+  }
+
+  .resource-item {
+    padding-right: 12px;
+  }
+
+  .resource-copy,
+  .theme-name,
+  .theme-meta,
+  .description-preview {
+    width: 100%;
+  }
+
+  .empty-state {
+    left: 0px;
+    width: 100%;
+  }
 }
 
 </style>
