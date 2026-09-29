@@ -124,7 +124,8 @@ export async function enumerateThemeFiles(
   async function walk(directoryUri: string, depth: number): Promise<void> {
     if (depth > 16) throw new Error(`资源包 ${themeId} 目录层级过深`);
     const entries = await file.listDirectory(directoryUri);
-    for (const entry of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       let uri = entry.uri;
       if (!uri.startsWith(rootUri)) {
         if (uri.startsWith("/") || uri.indexOf("://") >= 0)

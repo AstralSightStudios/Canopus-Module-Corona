@@ -9,7 +9,7 @@ importers:
   .:
     devDependencies:
       '@aiot-toolkit/jsc':
-        specifier: ^1.0.3
+        specifier: ^1.0.9
         version: 1.0.9
       aiot-toolkit:
         specifier: ^2.0.5
