@@ -23,6 +23,8 @@
 #define RH_FW_OBJECT_STYLE_GET        0x0c1068a9u
 #define RH_FW_OBJECT_STYLE_REFRESH    0x0c1070adu
 
+/* nx_open returns -errno instead of setting task errno. */
+#define RH_FW_OPEN_NEGATIVE_ERRNO     1
 #define RH_FW_OPEN                    0x0c1d0a29u
 #define RH_FW_READ                    0x0c1d129du
 #define RH_FW_WRITE                   0x0c1d2641u
@@ -87,6 +89,8 @@
 #define RH_FW_OBJECT_STYLE_REFRESH 0x0c38525du
 
 /* Independently checked in the .155 AP; unchanged from .139. */
+/* POSIX open returns -1 and sets task errno. */
+#define RH_FW_OPEN_NEGATIVE_ERRNO 0
 #define RH_FW_OPEN                0x0c342c55u
 #define RH_FW_READ                0x0c33d785u
 #define RH_FW_WRITE               0x0c33dc4fu

@@ -44,7 +44,7 @@ class Reload(unittest.TestCase):
         objects = []
         clang = os.environ.get('CLANG', shutil.which('clang'))
         linker = os.environ.get('LD_LLD', shutil.which('ld.lld'))
-        for name in ('platform_band11', 'resource_hook'):
+        for name in ('platform', 'platform_band11', 'resource_hook'):
             obj = Path(cls.tmp.name) / f'{name}-{port}.o'
             subprocess.run([clang, '--target=arm-none-eabi', '-mcpu=cortex-m33',
                 '-mthumb', '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin',

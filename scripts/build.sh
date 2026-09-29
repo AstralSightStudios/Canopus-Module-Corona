@@ -8,9 +8,9 @@ fi
 [ "$#" -le 1 ] || { printf 'usage: build.sh [target-id]\n' >&2; exit 1; }
 TARGET_ID=${1:-xiaomi-band-11-4.100.139}
 case "$TARGET_ID" in
-    xiaomi-band-11-4.100.139) TARGET_DEFINE= ;;
-    xiaomi-band-11-4.100.155) TARGET_DEFINE=-DRH_TARGET_155=1 ;;
-    xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1 ;;
+    xiaomi-band-11-4.100.139) TARGET_DEFINE=; NATIVE_PLATFORM=platform_band11 ;;
+    xiaomi-band-11-4.100.155) TARGET_DEFINE=-DRH_TARGET_155=1; NATIVE_PLATFORM=platform_band11 ;;
+    xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1; NATIVE_PLATFORM=platform_band10pro ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 FONT_EXPERIMENT=${RH_EXPERIMENTAL_FONT_RELOAD:-0}
@@ -50,7 +50,7 @@ if (metadata.get('target_id') != target or metadata.get('firmware_sha256') != fi
     raise SystemExit('Framework target/firmware identity mismatch')
 PY
 CANOPUS_ROOT="$SDK" CC="$CC" sh "$ROOT/scripts/test-host.sh"
-for name in module resource_hook config platform_band11 font_reload; do
+for name in module resource_hook config platform "$NATIVE_PLATFORM" font_reload; do
     "$CLANG" -Wall -Wextra -Werror --target=arm-none-eabi -mcpu=cortex-m33 -mthumb \
         -mfloat-abi=soft -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
         -Os $TARGET_DEFINE $FONT_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
@@ -62,7 +62,7 @@ done
     -Os -I"$SDK/sdk/c" -c "$SDK/runtime/control/canopus_control.c" -o "$ROOT/build/control.o"
 "$LD_LLD" -r -T "$SDK/scripts/canopus_supervisor_sections.ld" \
     "$ROOT/build/module.o" "$ROOT/build/resource_hook.o" "$ROOT/build/config.o" \
-    "$ROOT/build/platform_band11.o" "$ROOT/build/font_reload.o" \
+    "$ROOT/build/platform.o" "$ROOT/build/$NATIVE_PLATFORM.o" "$ROOT/build/font_reload.o" \
     "$ROOT/build/control.o" -o "$ROOT/build/$ARTIFACT"
 "$CANOPUS_CLI" verify "$ROOT/build/$ARTIFACT" \
     --target "$TARGET_ID" --targets-dir "$SDK/targets"

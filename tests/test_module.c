@@ -14,6 +14,10 @@ static int watcher_scheduled;
 static char result_record[256];
 static unsigned result_position, result_writes;
 static int fail_result_write;
+static char startup_record[2049];
+static unsigned startup_position, startup_writes, startup_opens;
+static int fail_startup_open, fail_startup_write, clobber_startup_errno;
+static int registration_fd = 10;
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
 static int fail_timer, reject_redraw, reject_metadata, unsupported;
@@ -48,7 +52,22 @@ static int other(void *d, const char *p, int mode) { (void)d; (void)p; (void)mod
 static rh_open_fn slot = backend;
 int rh_platform_open(const char *path, int mode) {
     assert(!locked);
-    if (!strcmp(path, "/dev/canopus")) { assert(mode == 2); return 10; }
+    if (!strcmp(path, RH_STARTUP_LOG_PATH)) {
+        assert(mode == RH_STARTUP_LOG_FLAGS);
+        startup_opens++;
+        if (clobber_startup_errno && config_opens) open_errno = 24;
+        if (fail_startup_open) return -1;
+        startup_position = 0;
+        memset(startup_record, 0, sizeof(startup_record));
+        return 15;
+    }
+    if (!strcmp(path, "/dev/canopus")) {
+        const char *fault = getenv("RH_TEST_REGISTRATION");
+        assert(mode == 2);
+        if (fault && !strcmp(fault, "open-fail")) { open_errno = 13; return -1; }
+        if (fault && !strcmp(fault, "fd-zero")) registration_fd = 0;
+        return registration_fd;
+    }
     if (!strcmp(path, "/data/quickapp/files/ng.lst.corona/reload.result")) {
         assert(mode == 2); result_position=0; return 14;
     }
@@ -93,6 +112,18 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
 }
 int rh_platform_write(int fd, const void *data, uint32_t size) {
     const struct canopus_module_registration_v1 *r = data;
+    if (fd == 15) {
+        assert(!locked);
+        startup_writes++;
+        if (fail_startup_write == 1) return -1;
+        if (fail_startup_write == 2) return 0;
+        if (fail_startup_write == 3) return (int)size + 1;
+        if (size > 31u) size = 31u; /* Exercise bounded short-write completion. */
+        assert(startup_position + size < sizeof(startup_record));
+        memcpy(startup_record + startup_position, data, size);
+        startup_position += size;
+        return (int)size;
+    }
     if(fd==14) {
         assert(!locked);
         if(fail_result_write) return -1;
@@ -102,16 +133,21 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
         result_position+=size; result_writes++;
         return (int)size;
     }
-    assert(!locked && fd == 10 && size == sizeof(*r));
+    assert(!locked && fd == registration_fd && size == sizeof(*r));
     assert(r->magic == CANOPUS_MODULE_REGISTRATION_MAGIC);
     assert(!strcmp((const char *)r->module_id, "corona"));
     registrations++;
+    {
+        const char *fault = getenv("RH_TEST_REGISTRATION");
+        if (fault && !strcmp(fault, "write-fail")) { open_errno = 5; return -1; }
+        if (fault && !strcmp(fault, "short-write")) return (int)size - 1;
+    }
     return (int)size;
 }
 void rh_platform_close(int fd) {
     assert(!locked);
-    if(fd==14) return;
-    assert(fd == 10 || fd == 11 || fd == 12 || fd == 13); closes++;
+    if(fd==14 || fd==15) return;
+    assert(fd == registration_fd || fd == 11 || fd == 12 || fd == 13); closes++;
 }
 void *rh_platform_alloc(uint32_t size) {
     assert(!locked && (size == sizeof(struct rh_rule) * RH_RULES + RH_CONFIG_BYTES ||
@@ -233,6 +269,80 @@ static uint32_t u32(const unsigned char *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
+static int test_startup_diagnostics(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    const char *fault = getenv("RH_TEST_REGISTRATION");
+    unsigned before, i;
+    assert(strstr(startup_record, "RHSTART1 target="));
+    assert(strstr(startup_record, "config=" RH_CONFIG_PATH "\n"));
+    assert(strstr(startup_record, "ctor.begin rc=0"));
+    if (fault && !strcmp(fault, "open-fail")) {
+        assert(!registrations && !closes);
+        assert(strstr(startup_record, "register.open rc=-1 errno=13"));
+        assert(strstr(startup_record, "ctor.end rc=-1 errno=13"));
+        return 0;
+    }
+    assert(registrations == 1 && closes == 1);
+    if (fault && !strcmp(fault, "write-fail")) {
+        assert(strstr(startup_record, "register.write rc=-1 errno=5"));
+        assert(strstr(startup_record, "ctor.end rc=-1 errno=5"));
+        return 0;
+    }
+    if (fault && !strcmp(fault, "short-write")) {
+        assert(strstr(startup_record, "register.write rc=39 errno=0"));
+        assert(strstr(startup_record, "ctor.end rc=-1 errno=0"));
+        return 0;
+    }
+    assert(strstr(startup_record, fault ? "register.open rc=0" : "register.open rc=10"));
+    assert(strstr(startup_record, "register.write rc=40 errno=0"));
+    assert(strstr(startup_record, "ctor.end rc=0"));
+    assert(startup_writes > startup_opens); /* Logger completes short writes. */
+
+    /* Diagnostic opens must not replace the errno belonging to config.open. */
+    fail_open = 1; open_errno = 13; clobber_startup_errno = 1;
+    assert(d->activate(NULL) == -2005 && slot == backend);
+    assert(strstr(startup_record, "config.open rc=-1 errno=13"));
+    assert(strstr(startup_record, "prepare.end rc=-2005 errno=13"));
+    assert(strstr(startup_record, "activate.end rc=-2005"));
+    clobber_startup_errno = 0;
+
+    /* Log open/write failures are best-effort, never a new lifecycle failure. */
+    fail_startup_open = 1; open_errno = RH_ENOENT;
+    assert(d->prepare(NULL) == 0);
+    before = startup_writes;
+    driver_valid = 0;
+    assert(d->activate(NULL) == -2008 && startup_writes == before);
+    fail_startup_open = 0;
+    for (i = 1; i <= 3; i++) {
+        fail_startup_write = (int)i;
+        assert(d->activate(NULL) == -2008 && !locked && slot == backend);
+    }
+    fail_startup_write = 0;
+    assert(d->activate(NULL) == -2008);
+    assert(strstr(startup_record, "driver.valid rc=0"));
+    assert(strstr(startup_record, "hook.end rc=-2008"));
+    driver_valid = 1; slot = other;
+    assert(d->activate(NULL) == -2009);
+    assert(strstr(startup_record, "slot.expected rc=0"));
+    assert(strstr(startup_record, "slot.observed rc=0"));
+    assert(strstr(startup_record, "hook.end rc=-2009"));
+    slot = backend; fail_timer = 1;
+    assert(d->activate(NULL) == -2012);
+    assert(strstr(startup_record, "watch.end rc=-2012"));
+    fail_timer = 0;
+    assert(d->activate(NULL) == 0);
+    assert(strstr(startup_record, "activate.end rc=0"));
+    assert(slot != backend && active_timers(1000u) == 1);
+    for (i = 0; i < 40; i++) {
+        assert(d->activate(NULL) == 0);
+        assert(startup_position <= 2048u && startup_record[startup_position] == 0);
+        assert(!strncmp(startup_record, "RHSTART1", 8));
+        assert(strstr(startup_record, "activate.end rc=0"));
+        fire_timers(1000u);
+    }
+    puts("startup logging, registration faults, errno capture and bounded failures passed");
+    return 0;
+}
 static int test_empty_startup_then_theme_reload(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
@@ -374,6 +484,8 @@ static int test_experimental_font_integration(void) {
 }
 #endif
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--startup-diagnostics"))
+        return test_startup_diagnostics();
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     if (argc == 2 && !strcmp(argv[1], "--experimental-fonts"))
         return test_experimental_font_integration();

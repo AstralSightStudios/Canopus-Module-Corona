@@ -47,6 +47,10 @@ for target in 139 155 1043; do
             "$ROOT/build/test_module_${target}_${mode}"
             "$ROOT/build/test_module_${target}_${mode}" --empty-startup
         fi
+        "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
+        for fault in open-fail write-fail short-write fd-zero; do
+            RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
+        done
         "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
             $TARGET_DEFINE $FONT_DEFINE -I"$ROOT/include" \
             "$ROOT/tests/test_font_reload.c" "$ROOT/src/resource_hook.c" \
@@ -54,6 +58,7 @@ for target in 139 155 1043; do
         "$ROOT/build/test_font_reload_${target}_${mode}"
     done
 done
+CC="$CC" python3 "$ROOT/tests/test_platform_io.py"
 CC="$CC" python3 "$ROOT/tests/test_font_reload_targets.py"
 "$CC" -std=c11 -Wall -Wextra -Werror -I"$ROOT/include" \
     "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" "$ROOT/tools/check_config.c" \

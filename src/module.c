@@ -52,6 +52,50 @@ static uint32_t last_reload_signal_size;
 static unsigned last_reload_signal_valid;
 static unsigned refresh_pending, cache_dropped, images_done, fonts_done, refreshing;
 static void publish_current_result(void);
+static char *result_number(char *, uint32_t);
+
+/* Best-effort, bounded lifecycle diagnostics. No heap, graphics calls or I/O
+ * under the IRQ lock; the lifecycle caller must already be serialized.
+ * Rewrite a snapshot so neither repeated failures nor UI restarts grow a file
+ * indefinitely. A failed log write never changes registration/start results. */
+#define RH_STARTUP_LOG_BYTES 2048u
+static char startup_log[RH_STARTUP_LOG_BYTES];
+static uint32_t startup_log_used;
+static char *log_text(char *out, const char *text) {
+    while (*text) *out++ = *text++;
+    return out;
+}
+static void startup_record(const char *stage, int32_t rc, int error, uintptr_t detail) {
+    char *p;
+    uint32_t used = 0, shift;
+    int fd, written;
+    /* All stage names are fixed literals, at most 32 bytes. Reserve one full
+     * line before formatting; a rollover keeps the newest activation visible. */
+    if (!startup_log_used || startup_log_used > RH_STARTUP_LOG_BYTES - 160u) {
+        p = log_text(startup_log, "RHSTART1 target=" RH_TARGET_ID " version=" RH_VERSION
+                     "\nconfig=" RH_CONTROL_CONFIG "\n");
+        startup_log_used = (uint32_t)(p - startup_log);
+    }
+    p = log_text(startup_log + startup_log_used, stage);
+    p = log_text(p, " rc=");
+    if (rc < 0) *p++ = '-';
+    p = result_number(p, rc < 0 ? 0u - (uint32_t)rc : (uint32_t)rc);
+    p = log_text(p, " errno=");
+    p = result_number(p, error > 0 ? (uint32_t)error : 0u);
+    p = log_text(p, " detail=0x");
+    for (shift = (uint32_t)sizeof(detail) * 8u; shift; shift -= 4u)
+        *p++ = "0123456789abcdef"[(detail >> (shift - 4u)) & 15u];
+    *p++ = '\n';
+    startup_log_used = (uint32_t)(p - startup_log);
+    fd = rh_platform_open(RH_STARTUP_LOG_PATH, RH_STARTUP_LOG_FLAGS);
+    if (fd < 0) return;
+    while (used < startup_log_used) {
+        written = rh_platform_write(fd, startup_log + used, startup_log_used - used);
+        if (written <= 0 || (uint32_t)written > startup_log_used - used) break;
+        used += (uint32_t)written;
+    }
+    rh_platform_close(fd);
+}
 
 /* Point every registered font family whose file falls under a mapping rule at
  * the themed file. A retargeted entry is re-added at the end of the registry, so
@@ -444,21 +488,32 @@ static int schedule_watch_timer(void) {
 static int32_t prepare(const struct canopus_context_v1 *c) {
     struct rh_rule *staging;
     char *text;
-    int fd, rc = 0;
+    int fd, rc = 0, error;
     (void)c;
-    if (S.installed) return -2004;
+    startup_record("prepare.begin", 0, 0, (uintptr_t)S.installed);
+    if (S.installed) {
+        startup_record("prepare.end", -2004, 0, S.count);
+        return -2004;
+    }
     fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
+    error = fd < 0 ? rh_platform_errno() : 0;
+    startup_record("config.open", fd, error, 0);
     if (fd < 0) {
-        if (rh_platform_errno() != RH_ENOENT) return -2005;
+        if (error != RH_ENOENT) {
+            startup_record("prepare.end", -2005, error, 0);
+            return -2005;
+        }
         /* Start with an empty snapshot; activation will keep the pass-through
          * hook and watcher resident so a later theme can be loaded by signal. */
         S.count = 0;
     } else {
         staging = rh_platform_alloc(sizeof(*staging) * RH_RULES + RH_CONFIG_BYTES);
+        startup_record("config.alloc", staging ? 0 : -2006, 0, (uintptr_t)staging);
         if (!staging) rc = -2006;
         else {
             text = (char *)(staging + RH_RULES);
             rc = rh_read_config(&S, config_read, &fd, text, RH_CONFIG_BYTES, staging);
+            startup_record("config.read", rc, 0, S.count);
             rh_platform_free(staging);
             if (rc) rc = -2007;
         }
@@ -467,6 +522,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     if (!rc && !rule_banks[1]) {
         rule_banks[1] = rh_platform_alloc(sizeof(struct rh_rule) * RH_RULES);
         if (!rule_banks[1]) rc = -2013;
+        startup_record("snapshot.alloc", rc, 0, (uintptr_t)rule_banks[1]);
     }
     if (!rc) {
         rule_banks[0] = S.rules;
@@ -477,6 +533,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         active_rule_bank = 0;
         configured = 1;
     } else if (!S.count) configured = 0;
+    startup_record("prepare.end", rc, 0, S.count);
     return rc;
 }
 /* Rebinding requires a caller-owned UI transaction. Installing this callback
@@ -486,24 +543,33 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
 static int32_t activate(const struct canopus_context_v1 *c) {
     rh_open_fn *slot;
     uint32_t irq;
-    int rc = 0;
+    int rc = 0, valid;
+    uintptr_t observed = 0, expected;
 #if RH_FONT_EXPERIMENT
     unsigned font_restart = 0;
 #endif
+    /* Keep a complete activation together, including the final return code. */
+    if (startup_log_used > RH_STARTUP_LOG_BYTES - 1536u) startup_log_used = 0;
+    startup_record("activate.begin", 0, 0, (uintptr_t)configured);
     /* Supervisor marks descriptors READY without calling prepare. */
     if (!configured) {
         rc = prepare(c);
-        if (rc) return rc;
-        /* Defensive path if a prepare implementation declines to publish state. */
-        if (!configured) return 0;
+        if (rc || !configured) {
+            startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
+            return rc;
+        }
     }
+    startup_record("hook.begin", 0, 0, active_rule_bank);
     /* No allocation or firmware I/O is allowed while publishing the callback.
      * On the single-core target, prevent scheduling between state and slot. */
     irq = rh_platform_lock();
     slot = rh_platform_slot();
+    valid = rh_platform_driver_valid();
+    expected = (uintptr_t)rh_platform_original();
+    if (slot) observed = (uintptr_t)*slot;
     if (active_rule_bank > 1u || !configured || !rule_banks[active_rule_bank] ||
-        !rh_platform_driver_valid()) rc = -2008;
-    else if (!slot || (*slot != rh_platform_original() && *slot != rh_wrapper)) rc = -2009;
+        !valid) rc = -2008;
+    else if (!slot || (observed != expected && *slot != rh_wrapper)) rc = -2009;
     else {
 #if RH_FONT_EXPERIMENT
         font_restart = S.installed && *slot != rh_wrapper;
@@ -512,6 +578,10 @@ static int32_t activate(const struct canopus_context_v1 *c) {
                               rh_platform_original(), rh_wrapper)) rc = -2010;
     }
     rh_platform_unlock(irq);
+    startup_record("driver.valid", valid, 0, (uintptr_t)slot);
+    startup_record("slot.expected", 0, 0, expected);
+    startup_record("slot.observed", 0, 0, observed);
+    startup_record("hook.end", rc, 0, (uintptr_t)S.installed);
 #if RH_FONT_EXPERIMENT
     if (font_restart) {
         /* Never dereference a font snapshot from the previous UI lifetime. */
@@ -519,8 +589,13 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     }
 #endif
     if (!rc) {
-        int refresh_rc = S.count || refresh_pending ? request_refresh() : 0;
-        int watch_rc = schedule_watch_timer();
+        int refresh_rc, watch_rc;
+        startup_record("refresh.begin", 0, 0, S.count);
+        refresh_rc = S.count || refresh_pending ? request_refresh() : 0;
+        startup_record("refresh.end", refresh_rc, 0, (uintptr_t)refresh_timer);
+        startup_record("watch.begin", 0, 0, RH_RELOAD_POLL_MS);
+        watch_rc = schedule_watch_timer();
+        startup_record("watch.end", watch_rc, 0, (uintptr_t)watch_timer);
         rc = refresh_rc ? refresh_rc : watch_rc;
     }
 #if RH_FONT_EXPERIMENT
@@ -528,6 +603,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
      * restart must remain visible until the timer reaches the disabled adapter. */
     if (font_restart) font_result = -2014;
 #endif
+    startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
     return rc;
 }
 static int32_t stop(const struct canopus_context_v1 *c) {
@@ -581,7 +657,8 @@ static void cp(char *d, const char *s, unsigned n) {
 }
 __attribute__((constructor)) static void ctor(void) {
     struct canopus_module_registration_v1 r;
-    int fd;
+    int fd, error, written = -1;
+    startup_record("ctor.begin", 0, 0, 0);
     canopus_module_descriptor.struct_size = sizeof(canopus_module_descriptor);
     canopus_module_descriptor.abi_major = 1;
     canopus_module_descriptor.abi_minor = 2;
@@ -599,12 +676,18 @@ __attribute__((constructor)) static void ctor(void) {
     r.magic = CANOPUS_MODULE_REGISTRATION_MAGIC;
     r.descriptor = (uint32_t)(uintptr_t)&canopus_module_descriptor;
     cp((char *)r.module_id, RH_MODULE_ID, 32);
+    startup_record("register.begin", 0, 0, r.descriptor);
     fd = rh_platform_open("/dev/canopus", 2);
+    error = fd < 0 ? rh_platform_errno() : 0;
+    startup_record("register.open", fd, error, 0);
     if (fd >= 0) {
-        /* Registration is one device message; Supervisor rejects a missing or
-         * incomplete descriptor registration before activation. */
-        (void)rh_platform_write(fd, &r, sizeof(r));
+        /* Registration is one atomic device message: never retry short writes.
+         * Log errors without changing descriptor/image lifetime semantics. */
+        written = rh_platform_write(fd, &r, sizeof(r));
+        error = written < 0 ? rh_platform_errno() : 0;
+        startup_record("register.write", written, error, sizeof(r));
         rh_platform_close(fd);
     }
+    startup_record("ctor.end", written == (int)sizeof(r) ? 0 : -1, error, 0);
 }
 __attribute__((destructor)) static void dtor(void) { (void)stop(0); }

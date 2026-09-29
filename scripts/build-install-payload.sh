@@ -44,6 +44,7 @@ openssl pkey -in "$KEY" -pubout -out "$STAGE/signer-public.pem"
 python3 "$ROOT/scripts/verify-payload.py" "$STAGE" --target "$TARGET_ID" --public-key "$STAGE/signer-public.pem"
 cp "$ROOT/examples/mappings.tsv" "$STAGE/mappings.tsv.example"
 cp "$ROOT/docs/INSTALL.md" "$STAGE/INSTALL.md"
+cp "$ROOT/docs/STARTUP_DIAGNOSTICS.md" "$STAGE/STARTUP_DIAGNOSTICS.md"
 cp "$ROOT/scripts/verify-payload.py" "$STAGE/verify-payload.py"
 python3 - "$STAGE" "$TARGET_ID" "$FIRMWARE" "$ROOT/Canopus.toml" <<'PY'
 import hashlib
