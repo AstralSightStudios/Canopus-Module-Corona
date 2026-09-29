@@ -10,6 +10,7 @@ TARGET_ID=${1:-xiaomi-band-11-4.100.139}
 case "$TARGET_ID" in
     xiaomi-band-11-4.100.139) TARGET_DEFINE= ;;
     xiaomi-band-11-4.100.155) TARGET_DEFINE=-DRH_TARGET_155=1 ;;
+    xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1 ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 FONT_EXPERIMENT=${RH_EXPERIMENTAL_FONT_RELOAD:-0}

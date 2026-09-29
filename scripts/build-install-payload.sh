@@ -14,7 +14,7 @@ TARGET_ID=${1:?usage: build-install-payload.sh target-id NEW-output-dir}
 OUT=${2:?usage: build-install-payload.sh target-id NEW-output-dir}
 [ "$#" -eq 2 ] || { printf 'Expected target-id and new output directory.\n' >&2; exit 1; }
 case "$TARGET_ID" in
-    xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.155) ;;
+    xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043) ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 [ ! -e "$OUT" ] && [ ! -L "$OUT" ] || { printf 'Output already exists; use a new directory: %s\n' "$OUT" >&2; exit 1; }

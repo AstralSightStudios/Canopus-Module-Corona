@@ -16,7 +16,9 @@
 #define RH_RELOAD_PREFIX "resource-hook-reload-v1\t"
 #define RH_RELOAD_SIGNAL_MAX 128u
 #define RH_RELOAD_POLL_MS 1000u
-#if defined(RH_TARGET_155) && RH_TARGET_155
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#define RH_TARGET_ID "xiaomi-band-10-pro-3.101.043"
+#elif defined(RH_TARGET_155) && RH_TARGET_155
 #define RH_TARGET_ID "xiaomi-band-11-4.100.155"
 #else
 #define RH_TARGET_ID "xiaomi-band-11-4.100.139"

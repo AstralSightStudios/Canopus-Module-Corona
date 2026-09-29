@@ -393,7 +393,9 @@ int main(int argc, char **argv) {
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
     assert(!strcmp((const char *)d->module_id, "corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
-#if defined(RH_TARGET_155) && RH_TARGET_155
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    assert(!strcmp((const char *)d->target_id, "xiaomi-band-10-pro-3.101.043"));
+#elif defined(RH_TARGET_155) && RH_TARGET_155
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.155"));
 #else
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.139"));

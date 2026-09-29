@@ -11,6 +11,7 @@ TARGET = "xiaomi-band-11-4.100.139"
 TARGETS = {
     TARGET: "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
     "xiaomi-band-11-4.100.155": "ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f",
+    "xiaomi-band-10-pro-3.101.043": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
 }
 FIRMWARE = TARGETS[TARGET]  # Backward-compatible .139 default.
 MODULE_ID = "corona"

@@ -105,6 +105,18 @@ class TargetReceipts(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(target, result.stdout)
 
+    def test_cli_requires_explicit_1043_target(self):
+        target = 'xiaomi-band-10-pro-3.101.043'
+        self.payload(target)
+        command = [sys.executable, str(ROOT / 'scripts/verify-payload.py'),
+                   str(self.directory), '--public-key', str(self.public)]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('target ID', result.stderr)
+        result = subprocess.run(command + ['--target', target], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(target, result.stdout)
+
     def test_malformed_section_table_rejected_without_crashing(self):
         elf = bytearray(fixture_elf(verifier.TARGET))
         for offset, value in ((32, 0xffffffff), (144, 0xffffffff), (160, 0xffffffff)):

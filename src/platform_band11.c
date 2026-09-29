@@ -1,15 +1,22 @@
 #include "resource_hook_platform.h"
-#include "canopus_band11_memory.h"
 #include "resource_hook_target.h"
+#if !(defined(RH_TARGET_1043) && RH_TARGET_1043)
+#include "canopus_band11_memory.h"
+#endif
 #include "canopus_veneer.h"
 
-/* Only the selected, fingerprinted .139 or .155 AP image is supported. */
+/* Only the selected, fingerprinted .139, .155 or 10 Pro .043 AP image is supported. */
 int rh_platform_open(const char *path, int mode) {
     return ((int (*)(const char *, int, ...))(uintptr_t)RH_FW_OPEN)(path, mode);
 }
 int rh_platform_errno(void) {
+#if defined(RH_FW_ERRNO_LOCATION)
+    const int *value = ((const int *(*)(void))(uintptr_t)RH_FW_ERRNO_LOCATION)();
+    return value ? *value : 0;
+#else
     const int *value = canopus_fw_errno_location();
     return value ? *value : 0;
+#endif
 }
 int rh_platform_read(int fd, void *out, uint32_t size) {
     return ((int (*)(int, void *, uint32_t))(uintptr_t)RH_FW_READ)(fd, out, size);
@@ -20,8 +27,6 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
 void rh_platform_close(int fd) {
     ((int (*)(int))(uintptr_t)RH_FW_CLOSE)(fd);
 }
-void *rh_platform_alloc(uint32_t size) { return b11_temp_alloc(8u, size); }
-void rh_platform_free(void *p) { b11_temp_free(p); }
 void *rh_platform_driver(void) { return (void *)(uintptr_t)RH_FW_POSIX_DRIVER; }
 rh_open_fn *rh_platform_slot(void) { return (rh_open_fn *)(uintptr_t)RH_FW_POSIX_OPEN_SLOT; }
 rh_open_fn rh_platform_original(void) { return (rh_open_fn)(uintptr_t)RH_FW_POSIX_OPEN; }
@@ -29,11 +34,33 @@ int rh_platform_driver_valid(void) {
     return *(volatile unsigned char *)(uintptr_t)RH_FW_POSIX_DRIVER == '/' &&
            *(volatile uint32_t *)(uintptr_t)RH_FW_POSIX_CACHE_SIZE == 4096u;
 }
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+void *rh_platform_alloc(uint32_t size) {
+    return ((void *(*)(uint32_t))(uintptr_t)RH_FW_MALLOC)(size);
+}
+void rh_platform_free(void *p) {
+    if (p) {
+        ((void (*)(void *))(uintptr_t)RH_FW_FREE)(p);
+    }
+}
+uint32_t rh_platform_lock(void) {
+    uint32_t p;
+    __asm__ volatile("mrs %0, primask\ncpsid i" : "=r"(p) :: "memory");
+    return p;
+}
+void rh_platform_unlock(uint32_t irq) {
+    __asm__ volatile("dsb sy\nisb sy" ::: "memory");
+    __asm__ volatile("msr primask, %0" :: "r"(irq) : "memory");
+}
+#else
+void *rh_platform_alloc(uint32_t size) { return b11_temp_alloc(8u, size); }
+void rh_platform_free(void *p) { b11_temp_free(p); }
 uint32_t rh_platform_lock(void) { return b11_irq_lock(); }
 void rh_platform_unlock(uint32_t irq) {
     b11_barrier();
     b11_irq_unlock(irq);
 }
+#endif
 /* Exact .139/.155 owner adapter. Both APs use the validated LRU/RB entry-list
  * shape; target-specific cache/object classes and callable addresses live in
  * resource_hook_target.h. Never retire unrelated global cache entries. */
@@ -308,8 +335,14 @@ int rh_platform_font_retarget(uint32_t index, const char *path) {
     if (!copy_string(name, *(volatile uint32_t *)(uintptr_t)node)) return -1;
     ((void (*)(uint32_t))(uintptr_t)RH_FW_FONT_REMOVE_PATH)(node);
     ((uint32_t (*)(const char *, const char *))(uintptr_t)RH_FW_FONT_ADD_PATH)(name, path);
+#if defined(RH_FW_FONT_RESOLVE_PATH) && RH_FW_FONT_RESOLVE_PATH
     resolved = ((uint32_t (*)(uint32_t, const char *))(uintptr_t)RH_FW_FONT_RESOLVE_PATH)(manager, name);
     return same_string(resolved, path) ? 0 : -1;
+#else
+    node = font_path_node(manager, index);
+    resolved = node ? *(volatile uint32_t *)(uintptr_t)(node + 4u) : 0u;
+    return same_string(resolved, path) ? 0 : -1;
+#endif
 }
 void *rh_platform_timer_create(uint32_t interval_ms, void (*callback)(void *)) {
     if (!interval_ms || !callback) return 0;

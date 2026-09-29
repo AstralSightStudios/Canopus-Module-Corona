@@ -17,9 +17,19 @@ for test in hook boundaries; do
 done
 # Compile the actual shared transaction for each exact address selection.
 # Also test absent and explicitly disabled opt-in, without native leaf stubs.
-for target in 139 155; do
-    if [ "$target" = 155 ]; then TARGET_DEFINE=-DRH_TARGET_155=1; else TARGET_DEFINE=; fi
-    for mode in default disabled experimental; do
+for target in 139 155 1043; do
+    if [ "$target" = 1043 ]; then
+        TARGET_DEFINE=-DRH_TARGET_1043=1
+    elif [ "$target" = 155 ]; then
+        TARGET_DEFINE=-DRH_TARGET_155=1
+    else
+        TARGET_DEFINE=
+    fi
+    modes="default disabled"
+    if [ "$target" != 1043 ]; then
+        modes="default disabled experimental"
+    fi
+    for mode in $modes; do
         case "$mode" in
             default) FONT_DEFINE= ;;
             disabled) FONT_DEFINE=-DRH_EXPERIMENTAL_FONT_RELOAD=0 ;;
