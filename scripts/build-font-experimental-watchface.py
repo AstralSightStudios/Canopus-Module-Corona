@@ -16,7 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CANOPUS = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus-Private')).resolve()
-TARGET = 'xiaomi-band-11-4.100.155'
+TARGETS = ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155']
 DEFAULT_CERTS = [
     Path.home() / 'develop/Astrobox-certs/module-installer-ed25519.pem.zip',
     Path.home() / 'develop/AstroBox-Certs/module-installer-ed25519.pem.zip',
@@ -25,7 +25,6 @@ DEFAULT_CERT = next((p for p in DEFAULT_CERTS if p.is_file()), DEFAULT_CERTS[0])
 SUPERVISOR = CANOPUS / 'manager/service/canopus_supervisor_platform.c'
 RECEIPT_BUILDER = CANOPUS / 'scripts/build-module-installer-receipt.py'
 WATCHFACE_BUILDER = CANOPUS / 'scripts/build_module_installer_prod.py'
-OUTPUT_NAME = 'module-installer-font-experimental-0.3.0-band11-4.100.155'
 
 
 def run(command, *, env=None):
@@ -78,8 +77,10 @@ def copy_tree(source, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dist' / OUTPUT_NAME,
-                        help='new output directory (must not already exist)')
+    parser.add_argument('--output', type=Path, default=None,
+                        help='new output directory (defaults to module-installer-font-experimental-0.3.0-band11[-<version>])')
+    parser.add_argument('--target', choices=TARGETS, action='append',
+                        help='target to include; repeat for dual bundle (default: both Band 11 targets)')
     parser.add_argument('--certificate-zip', type=Path, default=DEFAULT_CERT,
                         help='AstroBox module-installer Ed25519 certificate ZIP')
     parser.add_argument('--no-build', action='store_true',
@@ -87,7 +88,20 @@ def main():
     parser.add_argument('--overwrite', action='store_true',
                         help='overwrite existing output directory if it already exists')
     args = parser.parse_args()
-    output = args.output.expanduser().absolute()
+    targets = args.target or list(TARGETS)
+    if len(set(targets)) != len(targets):
+        parser.error('duplicate target')
+
+    if args.output is None:
+        if len(targets) == len(TARGETS):
+            output_name = 'module-installer-font-experimental-0.3.0-band11'
+        else:
+            suffix = targets[0].split('-')[-1]
+            output_name = f'module-installer-font-experimental-0.3.0-band11-{suffix}'
+        output = (ROOT / 'dist' / output_name).expanduser().absolute()
+    else:
+        output = args.output.expanduser().absolute()
+
     cert = args.certificate_zip.expanduser().resolve()
     if (output.exists() or output.is_symlink()) and not args.overwrite:
         parser.error(f'output already exists; refusing to overwrite: {output}')
@@ -97,9 +111,12 @@ def main():
             and WATCHFACE_BUILDER.is_file()):
         parser.error(f'Canopus production installer tooling not found under: {CANOPUS}')
     output.parent.mkdir(parents=True, exist_ok=True)
-    firmware_sha = CANOPUS / 'targets' / TARGET / 'target.toml'
+
     import tomllib
-    firmware = tomllib.loads(firmware_sha.read_text())['firmware_sha256']
+    firmwares = {}
+    for target in targets:
+        firmware_sha = CANOPUS / 'targets' / target / 'target.toml'
+        firmwares[target] = tomllib.loads(firmware_sha.read_text())['firmware_sha256']
     private_trust = trusted_public_key()
 
     with tempfile.TemporaryDirectory(prefix=output.name + '.staging-', dir=output.parent) as temporary:
@@ -111,47 +128,55 @@ def main():
         public_key, public_fingerprint = assert_key_matches_supervisor(
             private_key, private_trust, secure)
 
-        env = dict(os.environ)
-        env['CANOPUS_ROOT'] = str(CANOPUS)
-        env['RESOURCE_HOOK_TARGET'] = TARGET
-        env['RH_EXPERIMENTAL_FONT_RELOAD'] = '1'
-        if not args.no_build:
-            run(['sh', ROOT / 'scripts/build.sh', TARGET], env=env)
-        elf = ROOT / 'build/resource-hook-font-experimental.elf'
-        if not elf.is_file():
-            raise ValueError(f'missing opt-in module ELF: {elf}')
+        modules = {}
+        receipts = {}
+        for target in targets:
+            env = dict(os.environ)
+            env['CANOPUS_ROOT'] = str(CANOPUS)
+            env['RESOURCE_HOOK_TARGET'] = target
+            env['RH_EXPERIMENTAL_FONT_RELOAD'] = '1'
+            if not args.no_build:
+                run(['sh', ROOT / 'scripts/build.sh', target], env=env)
+            elf = ROOT / 'build/resource-hook-font-experimental.elf'
+            if not elf.is_file():
+                raise ValueError(f'missing opt-in module ELF for {target}: {elf}')
 
-        payload = stage / 'payload' / TARGET
-        payload.mkdir(parents=True)
-        module = payload / 'resource-hook.elf'
-        shutil.copyfile(elf, module)
-        receipt = payload / 'receipt.bin'
-        run([sys.executable, RECEIPT_BUILDER,
-             '--module', module, '--module-id', 'corona', '--version', 3,
-             '--lifecycle', 1, '--target-id', TARGET, '--firmware-sha256', firmware,
-             '--private-key', private_key, '--output', receipt])
-        run([sys.executable, ROOT / 'scripts/verify-payload.py', payload,
-             '--target', TARGET, '--public-key', public_key])
+            payload = stage / 'payload' / target
+            payload.mkdir(parents=True)
+            module = payload / 'resource-hook.elf'
+            shutil.copyfile(elf, module)
+            receipt = payload / 'receipt.bin'
+            run([sys.executable, RECEIPT_BUILDER,
+                 '--module', module, '--module-id', 'corona', '--version', 3,
+                 '--lifecycle', 1, '--target-id', target, '--firmware-sha256', firmwares[target],
+                 '--private-key', private_key, '--output', receipt])
+            run([sys.executable, ROOT / 'scripts/verify-payload.py', payload,
+                 '--target', target, '--public-key', public_key])
+            modules[target] = module
+            receipts[target] = receipt
 
         generated = stage / 'watchface'
+        target_args = [arg for target in targets for arg in ('--target', target)]
         run([sys.executable, WATCHFACE_BUILDER, '--product', 'resource-hook',
              '--module-id', 'corona',
-             '--target', TARGET, '--payload-dir', stage / 'payload',
+             *target_args, '--payload-dir', stage / 'payload',
              '--assets-dir', ROOT / 'examples', '--output-dir', generated])
         device = generated / 'xiaomi-band-11'
-        bundled_module = device / f'resource-hook-{TARGET}.bin'
-        bundled_receipt = device / f'resource-hook-{TARGET}.cmi.bin'
-        if bundled_module.read_bytes() != module.read_bytes():
-            raise ValueError('watchface does not contain the exact verified experimental ELF')
-        if bundled_receipt.read_bytes() != receipt.read_bytes():
-            raise ValueError('watchface receipt differs from the AstroBox-signed receipt')
+        for target in targets:
+            bundled_module = device / f'resource-hook-{target}.bin'
+            bundled_receipt = device / f'resource-hook-{target}.cmi.bin'
+            if bundled_module.read_bytes() != modules[target].read_bytes():
+                raise ValueError(f'watchface does not contain the exact verified experimental ELF for {target}')
+            if bundled_receipt.read_bytes() != receipts[target].read_bytes():
+                raise ValueError(f'watchface receipt differs from the AstroBox-signed receipt for {target}')
 
+        target_versions = ', '.join(t.split('-')[-1] for t in targets)
         device_docs = device / 'docs/README.md'
         device_docs.write_text(
-            '# Resource Hook experimental-font installer\n\n'
-            'Target: Xiaomi Band 11, firmware 4.100.155 only. This watchface installs '
+            f'# Resource Hook experimental-font installer\n\n'
+            f'Targets: Xiaomi Band 11, firmware {target_versions}. This watchface installs '
             'the opt-in `resource-hook-0.3.0-font-exp` module in the disabled state.\n\n'
-            'Pack only `main.lua` and the three `.bin` files in this directory. '
+            'Pack only `main.lua` and the .bin files in this directory. '
             'Requires a Canopus Supervisor whose Ed25519 trust key matches this receipt. '
             'Opening the watchface installs the module; it does not enable/restart the framework.\n\n'
             'Font reload remains experimental: use Manager 1.2.2 or newer for transaction '
@@ -167,17 +192,20 @@ def main():
         # Refresh the watchface archive after adding experimental metadata.
         archive_path = device / 'build/resource-hook-prod.zip'
         with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
-            for name in ('main.lua', f'resource-hook-{TARGET}.bin',
-                         f'resource-hook-{TARGET}.cmi.bin'):
-                archive.write(device / name, name)
+            archive.write(device / 'main.lua', 'main.lua')
+            for target in targets:
+                archive.write(device / f'resource-hook-{target}.bin',
+                              f'resource-hook-{target}.bin')
+                archive.write(device / f'resource-hook-{target}.cmi.bin',
+                              f'resource-hook-{target}.cmi.bin')
 
         package = stage / 'package'
         package.mkdir()
         (package / 'docs').mkdir()
         (package / 'docs/README.md').write_text(
-            '# Signed experimental-font installer watchface\n\n'
-            'This complete package targets Xiaomi Band 11 firmware 4.100.155 and installs '
-            'the opt-in `.155` experimental font-reload module.\n\n'
+            f'# Signed experimental-font installer watchface\n\n'
+            f'This complete package targets Xiaomi Band 11 firmware {target_versions} and installs '
+            f'the opt-in experimental font-reload module.\n\n'
             'Open `xiaomi-band-11/` in the watchface packer, or use its '
             '`build/resource-hook-prod.zip` as the flat watchface input. Keep the '
             '`.cmi.bin` beside the module `.bin`.\n\n'
@@ -189,7 +217,7 @@ def main():
             'restart safety remain unsupported.\n')
         copy_tree(device, package / 'xiaomi-band-11')
         (package / 'README.md').write_text(
-            '# Resource Hook .155 experimental font installer\n\n'
+            f'# Resource Hook experimental font installer (Band 11 {target_versions})\n\n'
             'Build output from the latest checked `resource-hook-0.3.0-font-exp` ELF. '
             'The module receipt is signed by the user-selected AstroBox certificate and '
             'verified against the Canopus Supervisor public trust key.\n\n'
@@ -197,15 +225,28 @@ def main():
             '- `xiaomi-band-11/build/manifest.json`: target, resource hashes and signer identity.\n'
             '- `SHA256SUMS`: package file checksums.\n\n'
             'Hardware acceptance is NOT_PROBED. Do not use on other firmware targets.\n')
-        (package / 'build.json').write_text(json.dumps({
-            'name': output.name, 'target': TARGET, 'firmware_sha256': firmware,
+        target_details = {}
+        for target in targets:
+            target_details[target] = {
+                'firmware_sha256': firmwares[target],
+                'module_sha256': hashlib.sha256(modules[target].read_bytes()).hexdigest(),
+                'receipt_sha256': hashlib.sha256(receipts[target].read_bytes()).hexdigest(),
+            }
+        build_meta = {
+            'name': output.name,
+            'targets': targets,
             'module_build_id': 'resource-hook-0.3.0-font-exp',
-            'module_sha256': hashlib.sha256(module.read_bytes()).hexdigest(),
-            'receipt_sha256': hashlib.sha256(receipt.read_bytes()).hexdigest(),
+            'target_details': target_details,
             'signer_public_key_sha256': public_fingerprint,
             'signer_certificate_archive': cert.name,
             'hardware_status': 'NOT_PROBED',
-        }, indent=2) + '\n')
+        }
+        if len(targets) == 1:
+            build_meta['target'] = targets[0]
+            build_meta['firmware_sha256'] = firmwares[targets[0]]
+            build_meta['module_sha256'] = target_details[targets[0]]['module_sha256']
+            build_meta['receipt_sha256'] = target_details[targets[0]]['receipt_sha256']
+        (package / 'build.json').write_text(json.dumps(build_meta, indent=2) + '\n')
         files = sorted(item for item in package.rglob('*') if item.is_file())
         (package / 'SHA256SUMS').write_text(''.join(
             f'{hashlib.sha256(item.read_bytes()).hexdigest()}  {item.relative_to(package).as_posix()}\n'
@@ -216,14 +257,18 @@ def main():
                 archive.write(item, item.relative_to(package))
 
         # Verify the final nested watchface bundle contains exactly the installer payload.
+        expected_names = {'main.lua'}
+        for target in targets:
+            expected_names.add(f'resource-hook-{target}.bin')
+            expected_names.add(f'resource-hook-{target}.cmi.bin')
         with zipfile.ZipFile(archive_path) as archive:
-            if set(archive.namelist()) != {'main.lua', f'resource-hook-{TARGET}.bin',
-                                          f'resource-hook-{TARGET}.cmi.bin'}:
+            if set(archive.namelist()) != expected_names:
                 raise ValueError('unexpected watchface archive contents')
-            if archive.read(f'resource-hook-{TARGET}.bin') != module.read_bytes():
-                raise ValueError('watchface ZIP module differs from built experimental ELF')
-            if archive.read(f'resource-hook-{TARGET}.cmi.bin') != receipt.read_bytes():
-                raise ValueError('watchface ZIP receipt differs from signed receipt')
+            for target in targets:
+                if archive.read(f'resource-hook-{target}.bin') != modules[target].read_bytes():
+                    raise ValueError(f'watchface ZIP module differs from built experimental ELF for {target}')
+                if archive.read(f'resource-hook-{target}.cmi.bin') != receipts[target].read_bytes():
+                    raise ValueError(f'watchface ZIP receipt differs from signed receipt for {target}')
 
         if output.exists() or output.is_symlink():
             if not args.overwrite:
@@ -233,7 +278,9 @@ def main():
 
     print(f'Complete signed watchface package: {output}')
     print(f'Watchface input ZIP: {output}/xiaomi-band-11/build/resource-hook-prod.zip')
-    print(f'Experimental ELF SHA-256: {hashlib.sha256((output / "xiaomi-band-11" / f"resource-hook-{TARGET}.bin").read_bytes()).hexdigest()}')
+    for target in targets:
+        elf_sha = hashlib.sha256((output / 'xiaomi-band-11' / f'resource-hook-{target}.bin').read_bytes()).hexdigest()
+        print(f'Experimental ELF SHA-256 ({target}): {elf_sha}')
     print(f'Supervisor-matched AstroBox signing key SHA-256: {public_fingerprint}')
     print('Private key excluded. Hardware acceptance: NOT_PROBED.')
 
