@@ -1,9 +1,10 @@
 import { parseResourcePackManifest } from "./resource-pack";
-import type { ResourcePackMapping } from "./resource-pack";
+import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import {
   enumerateThemeFiles,
   mappingMatchesRelativeFile,
-  readThemeFileInventory
+  readInstalledThemeIds,
+  readThemeFileInventories
 } from "./resource-order";
 import type { ResourceAssetFileApi, ThemeAssetFile } from "./resource-order";
 
@@ -29,6 +30,120 @@ export interface RegisteredResourcePath {
 
 export interface ResourceOverrides {
   [sourcePath: string]: string;
+}
+
+export interface ResourcePackSnapshot {
+  installedThemeIds: string[];
+  themes: Map<string, {
+    themeId: string;
+    manifest: ResourcePackManifest;
+    files: ThemeAssetFile[];
+  }>;
+  paths: RegisteredResourcePath[];
+  byPath: Map<string, RegisteredResourcePath>;
+}
+
+export interface ResourceCatalog extends ResourcePackSnapshot {
+  session: object;
+  revision: number;
+}
+
+interface ResourceCatalogSession {
+  revision: number;
+  file?: ResourceAssetFileApi;
+  catalogLoads: WeakMap<ResourceAssetFileApi, {
+    revision: number;
+    promise: Promise<ResourceCatalog>;
+  }>;
+  overrideTransactions: WeakMap<object, Promise<void>>;
+  operationQueue: Promise<void>;
+}
+
+type ResourceGlobals = typeof globalThis & { resourceCatalogSession?: ResourceCatalogSession };
+
+function createSession(file?: ResourceAssetFileApi): ResourceCatalogSession {
+  return { revision: 0, file, catalogLoads: new WeakMap(), overrideTransactions: new WeakMap(),
+    operationQueue: Promise.resolve() };
+}
+
+// Vela bundles each page separately. Only app-owned globals are shared across bundles.
+const localSession = createSession();
+function resourceSession(): ResourceCatalogSession {
+  return (globalThis as ResourceGlobals).resourceCatalogSession || localSession;
+}
+
+/** Keeps reload snapshots immutable relative to receiver writes and package deletion. */
+export function withResourceOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const session = resourceSession();
+  const result = session.operationQueue.then(operation);
+  session.operationQueue = result.then(() => {}, () => {});
+  return result;
+}
+
+/** Native callbacks should belong to the application adapter, not a transient page. */
+export function getResourceFileApi<T extends Pick<ResourceAssetFileApi, "readOptionalText">>(
+  file: T,
+): T | ResourceAssetFileApi {
+  return resourceSession().file || file;
+}
+
+export function initializeResourceCatalogSession(file: ResourceAssetFileApi): void {
+  (globalThis as ResourceGlobals).resourceCatalogSession = createSession(file);
+}
+
+export function destroyResourceCatalogSession(): void {
+  const globals = globalThis as ResourceGlobals;
+  if (globals.resourceCatalogSession) globals.resourceCatalogSession.revision++;
+  delete globals.resourceCatalogSession;
+}
+
+/** Invalidates both completed snapshots and in-flight loads, including same-ID updates. */
+export function invalidateResourceCatalog(): void {
+  resourceSession().revision++;
+}
+
+export function isResourceCatalogCurrent(catalog: ResourceCatalog): boolean {
+  const session = resourceSession();
+  return catalog.session === session && catalog.revision === session.revision;
+}
+
+/** Shares one read-only catalog load across pages for the current package revision. */
+export function getResourceCatalog(file: ResourceAssetFileApi): Promise<ResourceCatalog> {
+  const session = resourceSession();
+  // Page-local module namespace objects differ even though they address the same files.
+  file = session.file || file;
+  const existing = session.catalogLoads.get(file);
+  if (existing && existing.revision === session.revision) return existing.promise;
+  const revision = session.revision;
+  const isCurrent = () => resourceSession() === session && revision === session.revision;
+  const retryCurrent = () => {
+    if (session.file && !resourceSession().file) throw new Error("资源目录会话已结束");
+    return getResourceCatalog(file);
+  };
+  const promise: Promise<ResourceCatalog> = (async () => {
+    try {
+      const installedThemeIds = await readInstalledThemeIds(file);
+      if (!isCurrent()) return retryCurrent();
+      const snapshot = await loadResourcePackSnapshot(installedThemeIds, file, isCurrent);
+      if (!isCurrent()) return retryCurrent();
+      return { ...snapshot, session, revision };
+    } catch (error) {
+      if (session.catalogLoads.get(file)?.revision === revision) session.catalogLoads.delete(file);
+      if (!isCurrent()) return retryCurrent();
+      throw error;
+    }
+  })();
+  session.catalogLoads.set(file, { revision, promise });
+  return promise;
+}
+
+function overrideTransaction<T>(file: object, operation: () => Promise<T>): Promise<T> {
+  const transactions = resourceSession().overrideTransactions;
+  const previous = transactions.get(file) || Promise.resolve();
+  const result = previous.then(operation);
+  // Keep failed writes visible to their caller without poisoning the next transaction.
+  transactions.set(file, result.then(() => {}, () => {}));
+  return result;
 }
 
 function utf8Length(value: string): number {
@@ -133,61 +248,130 @@ function registeredFilesForTheme(
   }));
 }
 
-/** Lists concrete replacement files registered by every installed resource pack. */
-export async function loadRegisteredResourcePaths(
+function mergeThemeRegistrations(
+  byPath: Map<string, Map<string, ResourcePackOption>>,
+  manifest: ResourcePackManifest,
+  inventory: ThemeAssetFile[],
+): void {
+  // Keep synchronous iteration separate from awaits: the Vela bytecode compiler rejects
+  // the production minifier's yield/comma expression in a for-of iterable.
+  for (const registration of registeredFilesForTheme(manifest.mappings, inventory)) {
+    const sourcePath = registration.sourcePath;
+    let themes = byPath.get(sourcePath);
+    if (!themes) {
+      themes = new Map<string, ResourcePackOption>();
+      byPath.set(sourcePath, themes);
+    }
+    const themeId = manifest.themeId;
+    const previewUri = registration.relativePath.toLowerCase().endsWith(".bin")
+      ? `${THEME_ROOT_URI}${themeId}/${registration.relativePath}` : "";
+    themes.set(themeId, { themeId, name: manifest.name, previewUri });
+    if (byPath.size > MAX_CATALOG_PATHS)
+      throw new Error("注册的替换路径超过 Manager 列表上限");
+  }
+}
+
+/** Loads a fresh operation snapshot, never reusing the mix-page session cache. */
+export async function loadResourcePackSnapshot(
   installedThemeIds: string[],
   file: ResourceAssetFileApi,
-): Promise<RegisteredResourcePath[]> {
-  const byPath = new Map<string, Map<string, ResourcePackOption>>();
-  for (const themeId of installedThemeIds) {
-    const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
-    if (text === null) throw new Error(`资源包 ${themeId} 缺少 canora.json，无法读取混搭路径`);
-    let manifest;
-    try { manifest = parseResourcePackManifest(text, themeId); }
-    catch (error) {
-      throw new Error(`资源包 ${themeId} 的 manifest 无效：${String((error as Error).message || error)}`);
-    }
-    if (!manifest.mappings.length) continue;
-    let registeredFiles: RegisteredThemeFile[] = [];
-    let inventoryCoversMappings = false;
+  isCurrent: () => boolean = () => true,
+): Promise<ResourcePackSnapshot> {
+  const checkCurrent = () => {
+    if (!isCurrent()) throw new Error("资源目录已更新，请重试");
+  };
+  checkCurrent();
+  installedThemeIds = installedThemeIds.slice();
+  const themes: ResourcePackSnapshot["themes"] = new Map();
+  if (!installedThemeIds.length)
+    return { installedThemeIds, themes, paths: [], byPath: new Map() };
+  const manifests = new Array<ResourcePackManifest>(installedThemeIds.length);
+  let nextIndex = 0;
+  let failed = false;
+  async function readManifests(): Promise<void> {
     try {
-      const inventory = await readThemeFileInventory(themeId, file);
-      if (inventory) {
-        inventoryCoversMappings = manifest.mappings.some(mapping =>
-          inventory.some(asset => mappingMatchesRelativeFile(mapping, asset.relativePath)));
-        registeredFiles = registeredFilesForTheme(manifest.mappings, inventory);
+      while (!failed && nextIndex < installedThemeIds.length) {
+        checkCurrent();
+        const index = nextIndex++;
+        const themeId = installedThemeIds[index];
+        const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
+        checkCurrent();
+        if (failed) return;
+        if (text === null) throw new Error(`资源包 ${themeId} 缺少 canora.json，无法读取混搭路径`);
+        try { manifests[index] = parseResourcePackManifest(text, themeId); }
+        catch (error) {
+          throw new Error(`资源包 ${themeId} 的 manifest 无效：${String((error as Error).message || error)}`);
+        }
       }
-    } catch (_error) {
-      // A stale index is not authoritative; check the installed files below.
-    }
-    if (!inventoryCoversMappings) {
-      const inventory = await enumerateThemeFiles(themeId, file);
-      registeredFiles = registeredFilesForTheme(manifest.mappings, inventory);
-    }
-    for (const registration of registeredFiles) {
-      const sourcePath = registration.sourcePath;
-      let themes = byPath.get(sourcePath);
-      if (!themes) {
-        themes = new Map<string, ResourcePackOption>();
-        byPath.set(sourcePath, themes);
-      }
-      const previewUri = registration.relativePath.toLowerCase().endsWith(".bin")
-        ? `${THEME_ROOT_URI}${themeId}/${registration.relativePath}` : "";
-      themes.set(themeId, { themeId, name: manifest.name, previewUri });
-      if (byPath.size > MAX_CATALOG_PATHS)
-        throw new Error("注册的替换路径超过 Manager 列表上限");
+    } catch (error) {
+      failed = true;
+      throw error;
     }
   }
-  return Array.from(byPath.keys()).sort().map(sourcePath => ({
+  const [inventories] = await Promise.all([
+    // Missing, corrupt or unreadable optional indexes still fall back to disk metadata.
+    readThemeFileInventories(file).catch(() => null),
+    Promise.all(Array.from({ length: Math.min(2, installedThemeIds.length) }, () => readManifests()))
+  ]);
+  checkCurrent();
+  const byPath = new Map<string, Map<string, ResourcePackOption>>();
+  for (let index = 0; index < installedThemeIds.length; index++) {
+    checkCurrent();
+    const themeId = installedThemeIds[index];
+    const manifest = manifests[index];
+    let inventory = inventories ? inventories[themeId] : null;
+    const inventoryCoversMappings = inventory && manifest.mappings.some(mapping =>
+      inventory!.some(asset => mappingMatchesRelativeFile(mapping, asset.relativePath)));
+    if (manifest.mappings.length && !inventoryCoversMappings) {
+      // Scan at most one package at a time; activation reuses the resolved fallback.
+      inventory = await enumerateThemeFiles(themeId, file, isCurrent);
+      checkCurrent();
+    }
+    const files = inventory || [];
+    themes.set(themeId, { themeId, manifest, files });
+    mergeThemeRegistrations(byPath, manifest, files);
+  }
+  const paths = Array.from(byPath.keys()).sort().map(sourcePath => ({
     sourcePath,
     themes: Array.from((byPath.get(sourcePath) as Map<string, ResourcePackOption>).values())
   }));
+  return { installedThemeIds, themes, paths,
+    byPath: new Map(paths.map(item => [item.sourcePath, item])) };
+}
+
+/** Lists concrete replacement files through the shared fresh-snapshot loader. */
+export async function loadRegisteredResourcePaths(
+  installedThemeIds: string[],
+  file: ResourceAssetFileApi,
+  isCurrent: () => boolean = () => true,
+): Promise<RegisteredResourcePath[]> {
+  return (await loadResourcePackSnapshot(installedThemeIds, file, isCurrent)).paths;
+}
+
+async function readOverrides(
+  file: Pick<ResourceAssetFileApi, "readOptionalText">,
+): Promise<ResourceOverrides> {
+  return parseOverrides(await file.readOptionalText(RESOURCE_OVERRIDES_URI));
 }
 
 export async function loadResourceOverrides(
   file: Pick<ResourceAssetFileApi, "readOptionalText">,
 ): Promise<ResourceOverrides> {
-  return parseOverrides(await file.readOptionalText(RESOURCE_OVERRIDES_URI));
+  const session = resourceSession();
+  file = session.file || file;
+  // Returning pages must observe saves already queued by the selection page.
+  await (session.overrideTransactions.get(file) || Promise.resolve());
+  return readOverrides(file);
+}
+
+/** Resolves display choices without cleaning or writing a possibly outdated snapshot. */
+export function resolveResourceChoice(
+  registration: RegisteredResourcePath,
+  overrides: ResourceOverrides,
+): string {
+  const choice = overrides[registration.sourcePath] || DEFAULT_RESOURCE_CHOICE;
+  return choice === DEFAULT_RESOURCE_CHOICE || choice === SYSTEM_RESOURCE_CHOICE ||
+    registration.themes.some(theme => theme.themeId === choice) ? choice : DEFAULT_RESOURCE_CHOICE;
 }
 
 export async function saveResourceOverride(
@@ -197,9 +381,13 @@ export async function saveResourceOverride(
 ): Promise<void> {
   if (!validSourcePath(sourcePath) || !validChoice(choice))
     throw new Error("混搭微调路径或选项无效");
-  const overrides = await loadResourceOverrides(file);
-  overrides[sourcePath] = choice;
-  await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+  file = resourceSession().file || file;
+  await overrideTransaction(file, async () => {
+    const overrides = await readOverrides(file);
+    if (overrides[sourcePath] === choice) return;
+    overrides[sourcePath] = choice;
+    await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+  });
 }
 
 /** Removes stale paths and falls back to Default if the selected pack was removed. */
@@ -207,26 +395,27 @@ export async function reconcileResourceOverrides(
   catalog: RegisteredResourcePath[],
   file: Pick<ResourceAssetFileApi, "readOptionalText" | "writeText">,
 ): Promise<ResourceOverrides> {
-  const overrides = await loadResourceOverrides(file);
-  const registrations = new Map(catalog.map(item => [item.sourcePath,
-    new Set(item.themes.map(theme => theme.themeId))]));
-  let changed = false;
-  for (const sourcePath of Object.keys(overrides)) {
-    const registeredThemeIds = registrations.get(sourcePath);
-    if (!registeredThemeIds) {
-      delete overrides[sourcePath];
-      changed = true;
-      continue;
+  file = resourceSession().file || file;
+  return overrideTransaction(file, async () => {
+    const overrides = await readOverrides(file);
+    const registrations = new Map(catalog.map(item => [item.sourcePath, item]));
+    let changed = false;
+    for (const sourcePath of Object.keys(overrides)) {
+      const registration = registrations.get(sourcePath);
+      if (!registration) {
+        delete overrides[sourcePath];
+        changed = true;
+        continue;
+      }
+      const choice = resolveResourceChoice(registration, overrides);
+      if (choice !== overrides[sourcePath]) {
+        overrides[sourcePath] = choice;
+        changed = true;
+      }
     }
-    const choice = overrides[sourcePath];
-    if (choice !== DEFAULT_RESOURCE_CHOICE && choice !== SYSTEM_RESOURCE_CHOICE &&
-        !registeredThemeIds.has(choice)) {
-      overrides[sourcePath] = DEFAULT_RESOURCE_CHOICE;
-      changed = true;
-    }
-  }
-  if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
-  return overrides;
+    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+    return overrides;
+  });
 }
 
 /** Changes references to a removed pack into the normal-order default. */
@@ -234,13 +423,16 @@ export async function removeThemeFromResourceOverrides(
   themeId: string,
   file: Pick<ResourceAssetFileApi, "readOptionalText" | "writeText">,
 ): Promise<void> {
-  const overrides = await loadResourceOverrides(file);
-  let changed = false;
-  for (const sourcePath of Object.keys(overrides)) {
-    if (overrides[sourcePath] === themeId) {
-      overrides[sourcePath] = DEFAULT_RESOURCE_CHOICE;
-      changed = true;
+  file = resourceSession().file || file;
+  await overrideTransaction(file, async () => {
+    const overrides = await readOverrides(file);
+    let changed = false;
+    for (const sourcePath of Object.keys(overrides)) {
+      if (overrides[sourcePath] === themeId) {
+        overrides[sourcePath] = DEFAULT_RESOURCE_CHOICE;
+        changed = true;
+      }
     }
-  }
-  if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+  });
 }

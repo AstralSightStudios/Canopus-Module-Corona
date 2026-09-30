@@ -17,7 +17,8 @@
       </list-item>
     </list>
     <div class="reload-action-wrap">
-      <img class="reload-action" src="/common/images/reload.png" onclick="requestReload" />
+      <img class="reload-action" style="opacity: {{sendingReload ? 0.4 : 1}};"
+        src="/common/images/reload.png" onclick="requestReload" />
     </div>
   </div>
 </template>
@@ -29,7 +30,7 @@ import router from "@system.router"
 import { sendReloadSignal, waitForReloadOutcome } from "../../ts/reload-signal"
 import { cleanupInactiveGenerations, regenerateActiveMappings } from "../../ts/resource-activation"
 import { loadResourceOrder, readInstalledThemeIds } from "../../ts/resource-order"
-import { loadRegisteredResourcePaths, reconcileResourceOverrides } from "../../ts/resource-overrides"
+import { getResourceFileApi, invalidateResourceCatalog, loadResourcePackSnapshot, reconcileResourceOverrides, withResourceOperation } from "../../ts/resource-overrides"
 
 export default {
   private: {
@@ -49,22 +50,35 @@ export default {
     if (this.sendingReload) return
     this.sendingReload = true
     this.reloadRevision = Math.max(Date.now(), this.reloadRevision + 1)
+    try {
+      await withResourceOperation(() => this.performReload())
+    } finally {
+      this.sendingReload = false
+    }
+  },
+
+  async performReload() {
     let mappingsGenerated = false
     let signalSent = false
     try {
       const revision = `${this.reloadRevision}-${Math.floor(Math.random() * 1000000).toString(36)}`
-      const installedThemeIds = await readInstalledThemeIds(file)
-      const order = await loadResourceOrder(installedThemeIds, file)
-      const catalog = await loadRegisteredResourcePaths(installedThemeIds, file)
-      const overrides = await reconcileResourceOverrides(catalog, file)
-      const plan = await regenerateActiveMappings(order, revision, file, overrides)
+      const reloadFile = getResourceFileApi(file)
+      // Reload is authoritative, including files changed outside the current page session.
+      invalidateResourceCatalog()
+      const installedThemeIds = await readInstalledThemeIds(reloadFile)
+      const [order, snapshot] = await Promise.all([
+        loadResourceOrder(installedThemeIds, reloadFile),
+        loadResourcePackSnapshot(installedThemeIds, reloadFile)
+      ])
+      const overrides = await reconcileResourceOverrides(snapshot.paths, reloadFile)
+      const plan = await regenerateActiveMappings(order, revision, reloadFile, overrides, snapshot)
       mappingsGenerated = true
-      await sendReloadSignal(revision, file)
+      await sendReloadSignal(revision, reloadFile)
       signalSent = true
-      const outcome = await waitForReloadOutcome(revision, file)
+      const outcome = await waitForReloadOutcome(revision, reloadFile)
       prompt.showToast({ message: outcome.message })
       if (outcome.successful) {
-        try { await cleanupInactiveGenerations(plan.generation, file); }
+        try { await cleanupInactiveGenerations(plan.generation, reloadFile); }
         catch (_cleanupError) { /* Keep unused generations rather than risk the active one. */ }
       }
     } catch (error) {
@@ -73,8 +87,6 @@ export default {
       else if (!signalSent) message = "重载信号发送失败"
       else message = "等待模块响应失败"
       prompt.showToast({ message })
-    } finally {
-      this.sendingReload = false
     }
   },
 

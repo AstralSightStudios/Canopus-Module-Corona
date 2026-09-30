@@ -4,7 +4,7 @@ import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack"
 import {
   enumerateThemeFiles,
   mappingMatchesRelativeFile,
-  readThemeFileInventory,
+  readThemeFileInventories,
   SYSTEM_STYLE_ID
 } from "./resource-order";
 import type { ResourceAssetFileApi, ThemeAssetFile } from "./resource-order";
@@ -12,7 +12,7 @@ import {
   DEFAULT_RESOURCE_CHOICE,
   SYSTEM_RESOURCE_CHOICE
 } from "./resource-overrides";
-import type { ResourceOverrides } from "./resource-overrides";
+import type { ResourceOverrides, ResourcePackSnapshot } from "./resource-overrides";
 
 export const ACTIVE_MAPPINGS_URI = "internal://files/mappings.tsv";
 export const ACTIVE_GENERATIONS_URI = "internal://files/resource-active-generations.json";
@@ -22,7 +22,6 @@ const ACTIVE_DIRECTORY_PREFIX = ".active-";
 const MAX_MAPPING_RULES = 64;
 const MAX_CONFIG_BYTES = 32 * 1024;
 const MAX_PATH_BYTES = 256;
-const COPY_CHUNK_BYTES = 16 * 1024;
 
 interface ThemeRules {
   themeId: string;
@@ -318,19 +317,25 @@ async function ensureDirectory(uri: string, file: ResourceAssetFileApi): Promise
 async function copyAsset(
   copy: ActiveFileCopy,
   file: ResourceAssetFileApi,
+  preparedDirectories: Set<string>,
 ): Promise<void> {
   if (copy.sizeBytes === 0) throw new Error(`不能叠加空资源文件：${copy.sourceUri}`);
   const separator = copy.destinationUri.lastIndexOf("/");
-  await ensureDirectory(copy.destinationUri.slice(0, separator + 1), file);
-  try { await file.deleteFile(copy.destinationUri); }
-  catch (error) { if (!file.isFileNotFound(error)) throw error; }
-
-  for (let position = 0; position < copy.sizeBytes; position += COPY_CHUNK_BYTES) {
-    const length = Math.min(COPY_CHUNK_BYTES, copy.sizeBytes - position);
-    const bytes = await file.readArrayBuffer(copy.sourceUri, position, length);
-    if (bytes.length !== length) throw new Error(`资源文件读取长度不一致：${copy.sourceUri}`);
-    await file.writeArrayBuffer(copy.destinationUri, bytes, position);
+  const directory = copy.destinationUri.slice(0, separator + 1);
+  if (!preparedDirectories.has(directory)) {
+    await ensureDirectory(directory, file);
+    preparedDirectories.add(directory);
   }
+
+  const source = await file.readFileInfo(copy.sourceUri);
+  if (source.length !== copy.sizeBytes || (source.type !== undefined && source.type !== "file"))
+    throw new Error(`资源文件大小与快照不一致：${copy.sourceUri}`);
+  // The native worker truncates an existing destination; errors must not publish mappings.
+  await file.copyFile(copy.sourceUri, copy.destinationUri);
+  const destination = await file.readFileInfo(copy.destinationUri);
+  if (destination.length !== copy.sizeBytes ||
+      (destination.type !== undefined && destination.type !== "file"))
+    throw new Error(`资源文件复制大小不一致：${copy.destinationUri}`);
 }
 
 /** Materializes overlays before mappings.tsv is changed, preserving the prior active generation. */
@@ -339,6 +344,7 @@ export async function regenerateActiveMappings(
   generation: string,
   file: ResourceAssetFileApi,
   overrides: ResourceOverrides = Object.create(null) as ResourceOverrides,
+  snapshot?: ResourcePackSnapshot,
 ): Promise<ActiveMappingsPlan> {
   const systemIndex = order.indexOf(SYSTEM_STYLE_ID);
   if (systemIndex < 0 || order.lastIndexOf(SYSTEM_STYLE_ID) !== systemIndex)
@@ -352,6 +358,14 @@ export async function regenerateActiveMappings(
       installedThemeIds.includes(choice)));
   const themesHighToLow: ThemeRules[] = [];
   const loadManifest = async (themeId: string, required: boolean): Promise<ResourcePackManifest | null> => {
+    if (snapshot) {
+      const theme = snapshot.themes.get(themeId);
+      if (!snapshot.installedThemeIds.includes(themeId) || !theme ||
+          theme.themeId !== themeId || theme.manifest.themeId !== themeId ||
+          !Array.isArray(theme.files))
+        throw new Error(`资源快照缺少资源包 ${themeId}，无法生成映射`);
+      return theme.manifest;
+    }
     const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
     if (text === null) {
       if (required) throw new Error(`资源包 ${themeId} 的 canora.json 不存在，无法生成映射`);
@@ -382,11 +396,16 @@ export async function regenerateActiveMappings(
   // must be materialized to preserve a system-resource hole.
   const inventoryThemeIds = themesNeedingInventory(
     themesHighToLow.filter(theme => theme.active !== false));
+  // Legacy callers also read the shared optional index at most once per operation.
+  const inventories = !snapshot && inventoryThemeIds.size
+    ? await readThemeFileInventories(file).catch(() => null) : null;
   for (const theme of themesHighToLow) {
     if (!inventoryThemeIds.has(theme.themeId)) continue;
-    let inventory: ThemeAssetFile[] | null = null;
-    try { inventory = await readThemeFileInventory(theme.themeId, file); }
-    catch (_error) { /* Fall back to the installed files if the shared index is damaged. */ }
+    if (snapshot) {
+      theme.files = snapshot.themes.get(theme.themeId)!.files;
+      continue;
+    }
+    let inventory = inventories ? inventories[theme.themeId] : null;
     if (!inventory || !inventory.length) inventory = await enumerateThemeFiles(theme.themeId, file);
     theme.files = inventory;
   }
@@ -402,7 +421,8 @@ export async function regenerateActiveMappings(
   }
 
   try {
-    for (const copy of plan.copies) await copyAsset(copy, file);
+    const preparedDirectories = new Set<string>();
+    for (const copy of plan.copies) await copyAsset(copy, file, preparedDirectories);
     await file.writeText(ACTIVE_MAPPINGS_URI, plan.mappings);
   } catch (error) {
     if (plan.generation) {

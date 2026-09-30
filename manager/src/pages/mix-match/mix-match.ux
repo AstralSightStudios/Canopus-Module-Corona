@@ -27,11 +27,12 @@
 <script>
 import router from "@system.router"
 import * as file from "../../ts/file"
-import { readInstalledThemeIds } from "../../ts/resource-order"
 import {
   DEFAULT_RESOURCE_CHOICE,
-  loadRegisteredResourcePaths,
-  reconcileResourceOverrides,
+  getResourceCatalog,
+  isResourceCatalogCurrent,
+  loadResourceOverrides,
+  resolveResourceChoice,
   SYSTEM_RESOURCE_CHOICE
 } from "../../ts/resource-overrides"
 
@@ -42,7 +43,8 @@ export default {
     statusText: "正在读取替换资源…",
     loaded: false,
     visible: false,
-    loadVersion: 0
+    loadVersion: 0,
+    catalogRevision: -1
   },
 
   onShow() {
@@ -55,26 +57,44 @@ export default {
     this.loadVersion += 1
   },
 
+  onDestroy() {
+    this.visible = false
+    this.loadVersion += 1
+  },
+
   async loadCatalog() {
     const version = ++this.loadVersion
-    this.loaded = false
-    this.statusText = "正在读取替换资源…"
+    if (!this.loaded) this.statusText = "正在读取替换资源…"
     try {
-      const installedThemeIds = await readInstalledThemeIds(file)
-      const catalog = await loadRegisteredResourcePaths(installedThemeIds, file)
-      const overrides = await reconcileResourceOverrides(catalog, file)
+      const [catalog, overrides] = await Promise.all([
+        getResourceCatalog(file),
+        loadResourceOverrides(file)
+      ])
       if (version !== this.loadVersion || !this.visible) return
-      this.rows = catalog.map(item => {
-        const choice = overrides[item.sourcePath] || DEFAULT_RESOURCE_CHOICE
+      if (!isResourceCatalogCurrent(catalog)) return this.loadCatalog()
+      const makeRow = item => {
+        const choice = resolveResourceChoice(item, overrides)
         const selectedTheme = item.themes.find(theme => theme.themeId === choice)
         return {
           sourcePath: item.sourcePath,
+          choiceId: choice,
           choiceName: choice === DEFAULT_RESOURCE_CHOICE
             ? "默认"
             : (choice === SYSTEM_RESOURCE_CHOICE ? "系统" : (selectedTheme ? selectedTheme.name : "默认"))
         }
-      })
-      this.rows.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+      }
+      if (this.loaded && this.catalogRevision === catalog.revision) {
+        // Preserve row identity and scroll position when returning from the choice page.
+        this.rows.forEach(row => {
+          const updated = makeRow(catalog.byPath.get(row.sourcePath))
+          if (row.choiceId !== updated.choiceId) row.choiceId = updated.choiceId
+          if (row.choiceName !== updated.choiceName) row.choiceName = updated.choiceName
+        })
+      } else {
+        this.rows = catalog.paths.map(makeRow)
+        this.rows.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+      }
+      this.catalogRevision = catalog.revision
       this.loaded = true
       this.statusText = ""
     } catch (error) {

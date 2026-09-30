@@ -32,6 +32,11 @@ function makeFileApi() {
       if (!value) throw Object.assign(new Error(`missing ${uri}`), { code: 301 });
       return value.slice(position, length === undefined ? undefined : position + length);
     },
+    async copyFile(sourceUri, destinationUri) {
+      const value = binary.get(sourceUri);
+      if (!value) throw Object.assign(new Error(`missing ${sourceUri}`), { code: 301 });
+      binary.set(destinationUri, value.slice());
+    },
     async writeArrayBuffer(uri, value, position = 0) {
       const previous = binary.get(uri) || new Uint8Array(0);
       const next = new Uint8Array(Math.max(previous.length, position + value.length));

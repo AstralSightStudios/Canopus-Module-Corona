@@ -43,13 +43,14 @@ export interface ResourceAssetFileApi extends ResourceOrderFileApi {
   listDirectory(uri: string): Promise<Array<{ uri: string; length: number }>>;
   readArrayBuffer(uri: string, position?: number, length?: number): Promise<Uint8Array>;
   writeArrayBuffer(uri: string, buffer: Uint8Array, position?: number): Promise<void>;
+  copyFile(srcUri: string, dstUri: string): Promise<void>;
   makeDirectory(uri: string, recursive?: boolean): Promise<void>;
   deleteFile(uri: string): Promise<void>;
   removeDirectory(uri: string): Promise<void>;
   isFileNotFound(error: unknown): boolean;
 }
 
-interface ThemeFileRecord {
+export interface ThemeFileRecord {
   [themeId: string]: ThemeAssetFile[];
 }
 
@@ -68,7 +69,12 @@ function validRelativePath(value: unknown): value is string {
 export async function enumerateThemeFiles(
   themeId: string,
   file: ResourceAssetFileApi,
+  isCurrent: () => boolean = () => true,
 ): Promise<ThemeAssetFile[]> {
+  const checkCurrent = () => {
+    if (!isCurrent()) throw new Error("资源目录已更新，请重试");
+  };
+  checkCurrent();
   const rootUri = `internal://files/themes/${themeId}/`;
   const files = new Map<string, ThemeAssetFile>();
   let totalBytes = 0;
@@ -96,6 +102,7 @@ export async function enumerateThemeFiles(
 
   try {
     const root = await file.readFileInfo(rootUri, true);
+    checkCurrent();
     if (root.type === "dir" && Array.isArray(root.subFiles) && root.subFiles.length) {
       let complete = true;
       const visit = (entries: ResourceAssetFileInfo[]) => {
@@ -119,12 +126,16 @@ export async function enumerateThemeFiles(
     // Fall back to list/get for runtimes without recursive get support.
   }
 
+  checkCurrent();
   files.clear();
   totalBytes = 0;
   async function walk(directoryUri: string, depth: number): Promise<void> {
+    checkCurrent();
     if (depth > 16) throw new Error(`资源包 ${themeId} 目录层级过深`);
     const entries = await file.listDirectory(directoryUri);
+    checkCurrent();
     for (let i = 0; i < entries.length; i++) {
+      checkCurrent();
       const entry = entries[i];
       let uri = entry.uri;
       if (!uri.startsWith(rootUri)) {
@@ -140,6 +151,7 @@ export async function enumerateThemeFiles(
       const relativePath = uri.slice(rootUri.length);
       if (!relativePath || relativePath === "mappings.tsv") continue;
       const info = await file.readFileInfo(uri);
+      checkCurrent();
       if (info.type === "dir") {
         await walk(`${uri}/`, depth + 1);
         continue;
@@ -185,18 +197,23 @@ function normalizedOrder(order: string[], installedThemeIds: string[]): string[]
   return [...newItems, ...retained];
 }
 
+/** Resolves a read-only ordering snapshot without writing migration results. */
+export function resolveResourceOrder(installedThemeIds: string[], text: string | null): string[] {
+  if (installedThemeIds.some(item => !validThemeId(item)) ||
+      new Set(installedThemeIds).size !== installedThemeIds.length)
+    throw new Error("已安装资源包索引无效");
+  return text === null
+    ? [...installedThemeIds, SYSTEM_STYLE_ID]
+    : normalizedOrder(parseOrder(text), installedThemeIds);
+}
+
 /** Loads/migrates ordering; newly discovered package IDs are inserted at highest priority. */
 export async function loadResourceOrder(
   installedThemeIds: string[],
   file: ResourceOrderFileApi,
 ): Promise<string[]> {
-  if (installedThemeIds.some(item => !validThemeId(item)) ||
-      new Set(installedThemeIds).size !== installedThemeIds.length)
-    throw new Error("已安装资源包索引无效");
   const text = await file.readOptionalText(RESOURCE_ORDER_URI);
-  const order = text === null
-    ? [...installedThemeIds, SYSTEM_STYLE_ID]
-    : normalizedOrder(parseOrder(text), installedThemeIds);
+  const order = resolveResourceOrder(installedThemeIds, text);
   const serialized = serializeResourceOrder(order);
   if (text !== serialized) await file.writeText(RESOURCE_ORDER_URI, serialized);
   return order;
@@ -282,14 +299,20 @@ function parseThemeFileRecords(text: string): ThemeFileRecord {
   return result;
 }
 
+/** Reads and validates the shared inventory once for a whole catalog load. */
+export async function readThemeFileInventories(
+  file: ResourceOrderFileApi,
+): Promise<ThemeFileRecord | null> {
+  const text = await file.readOptionalText(RESOURCE_FILES_URI);
+  return text === null ? null : parseThemeFileRecords(text);
+}
+
 export async function readThemeFileInventory(
   themeId: string,
   file: ResourceOrderFileApi,
 ): Promise<ThemeAssetFile[] | null> {
-  const text = await file.readOptionalText(RESOURCE_FILES_URI);
-  if (text === null) return null;
-  const record = parseThemeFileRecords(text);
-  return record[themeId] || null;
+  const record = await readThemeFileInventories(file);
+  return record ? record[themeId] || null : null;
 }
 
 export async function removeThemeFileInventory(

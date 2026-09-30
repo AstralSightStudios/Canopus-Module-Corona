@@ -6,6 +6,7 @@ import { parseResourcePackManifest, serializeResourcePackMappings } from "./reso
 import type { ResourcePackManifest } from "./resource-pack";
 import { validateResourcePackFiles } from "./resource-pack";
 import { registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
+import { invalidateResourceCatalog, withResourceOperation } from "./resource-overrides";
 
 const VERSION = 2;
 const TRANSFER_STATE_VERSION = 1;
@@ -384,7 +385,9 @@ export class InterconnectThemeReceiver {
   }
 
   private enqueue(packet: string): void {
-    this.queue = this.queue.then(() => this.handleMessage(packet)).catch(async error => {
+    this.queue = this.queue.then(() => withResourceOperation(async () => {
+      if (!this.stopped) await this.handleMessage(packet);
+    })).catch(async error => {
       if (this.stopped) return;
       const code = errorCode(error, "write-failed");
       this.setPhase("error", `接收错误（${code}）：${String((error as Error).message || error)}`);
@@ -600,8 +603,13 @@ export class InterconnectThemeReceiver {
     if (await this.isThemeActive(themeId))
       throw protocolError("active-theme", `主题 ${themeId} 正在使用；请先切换到其他主题`);
 
-    await this.removeThemeDirectory(themeId);
-    await this.unregisterTheme(themeId);
+    invalidateResourceCatalog();
+    try {
+      await this.removeThemeDirectory(themeId);
+      await this.unregisterTheme(themeId);
+    } finally {
+      invalidateResourceCatalog();
+    }
     const next: TransferState = {
       version: TRANSFER_STATE_VERSION,
       themeId,
@@ -826,11 +834,16 @@ export class InterconnectThemeReceiver {
     } catch (error) {
       throw protocolError("invalid-manifest", `canora.json 无效：${String((error as Error).message || error)}`);
     }
-    await file.writeText(this.themeFileUri(state.themeId, "mappings.tsv"),
-      serializeResourcePackMappings(manifest));
-    await writeThemeFileInventory(state.themeId, state.files, file);
-    if (!state.finished) await this.persist({ ...state, finished: true });
-    await this.registerTheme(state.themeId);
+    invalidateResourceCatalog();
+    try {
+      await file.writeText(this.themeFileUri(state.themeId, "mappings.tsv"),
+        serializeResourcePackMappings(manifest));
+      await writeThemeFileInventory(state.themeId, state.files, file);
+      if (!state.finished) await this.persist({ ...state, finished: true });
+      await this.registerTheme(state.themeId);
+    } finally {
+      invalidateResourceCatalog();
+    }
     await this.sendStatus(state.themeId, "ready");
     this.updateSnapshot({ phase: "success", message: `资源包 ${manifest.name} 接收完成，可由主题管理器查看。`,
       themeId: state.themeId, fileName: "", fileIndex: state.fileCount, fileCount: state.fileCount,

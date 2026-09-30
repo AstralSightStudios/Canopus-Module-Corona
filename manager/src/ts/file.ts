@@ -39,6 +39,7 @@ export interface FileApi {
       position?: number;
     },
   ): void;
+  copy(options: Callbacks<string> & { srcUri: string; dstUri: string }): void;
   get(options: Callbacks<FileInfo> & { uri: string; recursive?: boolean }): void;
   list(options: Callbacks<{ fileList: FileListEntry[] }> & { uri: string }): void;
   mkdir(options: Callbacks<void> & { uri: string; recursive?: boolean }): void;
@@ -148,6 +149,13 @@ export function writeArrayBuffer(
     if (position !== undefined) options.position = position;
     api.writeArrayBuffer(options);
   });
+}
+
+/** Vela copies in its native worker and reports completion with a destination URI. */
+export async function copyFile(srcUri: string, dstUri: string): Promise<void> {
+  await invoke<string>("复制", dstUri, callbacks =>
+    api.copy({ srcUri, dstUri, ...callbacks }),
+  );
 }
 
 export async function readOptionalArrayBuffer(

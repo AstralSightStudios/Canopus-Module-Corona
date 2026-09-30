@@ -31,11 +31,13 @@
 import prompt from "@system.prompt"
 import router from "@system.router"
 import * as file from "../../ts/file"
-import { readInstalledThemeIds, loadResourceOrder } from "../../ts/resource-order"
+import { RESOURCE_ORDER_URI, resolveResourceOrder } from "../../ts/resource-order"
 import {
   DEFAULT_RESOURCE_CHOICE,
-  loadRegisteredResourcePaths,
-  reconcileResourceOverrides,
+  getResourceCatalog,
+  isResourceCatalogCurrent,
+  loadResourceOverrides,
+  resolveResourceChoice,
   saveResourceOverride,
   SYSTEM_RESOURCE_CHOICE
 } from "../../ts/resource-overrides"
@@ -48,34 +50,53 @@ export default {
     statusText: "正在读取可选资源…",
     loaded: false,
     saving: false,
-    selectedChoice: DEFAULT_RESOURCE_CHOICE
+    selectedChoice: DEFAULT_RESOURCE_CHOICE,
+    visible: false,
+    loadVersion: 0
   },
 
-  onInit() {
+  onShow() {
+    this.visible = true
     this.loadChoices()
   },
 
+  onHide() {
+    this.visible = false
+    this.loadVersion += 1
+  },
+
+  onDestroy() {
+    this.visible = false
+    this.loadVersion += 1
+  },
+
   async loadChoices() {
-    this.loaded = false
-    this.statusText = "正在读取可选资源…"
+    const version = ++this.loadVersion
+    if (!this.loaded) this.statusText = "正在读取可选资源…"
     if (typeof this.sourcePath !== "string" || this.sourcePath[0] !== "/" ||
         this.sourcePath.endsWith("/")) {
       this.statusText = "替换资源路径无效"
       return
     }
     try {
-      const installedThemeIds = await readInstalledThemeIds(file)
-      const order = await loadResourceOrder(installedThemeIds, file)
-      const catalog = await loadRegisteredResourcePaths(installedThemeIds, file)
-      const overrides = await reconcileResourceOverrides(catalog, file)
-      const registration = catalog.find(item => item.sourcePath === this.sourcePath)
+      const [catalog, overrides, orderText] = await Promise.all([
+        getResourceCatalog(file),
+        loadResourceOverrides(file),
+        file.readOptionalText(RESOURCE_ORDER_URI)
+      ])
+      if (version !== this.loadVersion || !this.visible) return
+      if (!isResourceCatalogCurrent(catalog)) return this.loadChoices()
+      const order = resolveResourceOrder(catalog.installedThemeIds, orderText)
+      const registration = catalog.byPath.get(this.sourcePath)
       if (!registration) {
+        this.rows = []
+        this.loaded = false
         this.statusText = "这个路径已没有资源包注册"
         return
       }
       const orderIndex = Object.create(null)
       order.forEach((themeId, index) => { orderIndex[themeId] = index })
-      this.selectedChoice = overrides[this.sourcePath] || DEFAULT_RESOURCE_CHOICE
+      this.selectedChoice = resolveResourceChoice(registration, overrides)
       const options = [
         { choiceId: DEFAULT_RESOURCE_CHOICE, name: "默认", previewUri: "" },
         { choiceId: SYSTEM_RESOURCE_CHOICE, name: "系统", previewUri: "" },
@@ -93,28 +114,33 @@ export default {
       this.loaded = true
       this.statusText = ""
     } catch (error) {
+      if (version !== this.loadVersion || !this.visible) return
       this.rows = []
+      this.loaded = false
       this.statusText = String(error && error.message || "读取可选资源失败")
     }
   },
 
   async selectChoice(choiceId) {
-    if (this.saving || !this.rows.some(row => row.choiceId === choiceId)) return
+    if (!this.visible || !this.loaded || this.saving ||
+        !this.rows.some(row => row.choiceId === choiceId)) return
+    const version = this.loadVersion
     this.saving = true
     try {
       await saveResourceOverride(this.sourcePath, choiceId, file)
+      if (version !== this.loadVersion || !this.visible) return
       this.selectedChoice = choiceId
-      this.rows = this.rows.map(row => ({
-        choiceId: row.choiceId,
-        name: row.name,
-        previewUri: row.previewUri,
-        selected: row.choiceId === choiceId
-      }))
-      this.saving = false
+      this.rows.forEach(row => {
+        const selected = row.choiceId === choiceId
+        if (row.selected !== selected) row.selected = selected
+      })
+      this.statusText = ""
     } catch (error) {
-      this.saving = false
+      if (version !== this.loadVersion || !this.visible) return
       this.statusText = String(error && error.message || "保存选择失败")
       prompt.showToast({ message: "保存选择失败" })
+    } finally {
+      this.saving = false
     }
   },
 

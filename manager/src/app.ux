@@ -1,9 +1,12 @@
 <script>
 import router from "@system.router"
 import { InterconnectThemeReceiver } from "./ts/interconnect"
+import * as file from "./ts/file"
+import { initializeResourceCatalogSession, destroyResourceCatalogSession } from "./ts/resource-overrides"
 
 export default {
   onCreate() {
+    initializeResourceCatalogSession(file)
     globalThis.receivePageVisible = false
     const receiver = new InterconnectThemeReceiver(() => {
       if (!globalThis.receivePageVisible) router.push({ uri: "pages/receive" })
@@ -16,6 +19,7 @@ export default {
       globalThis.themeReceiver.stop()
       globalThis.themeReceiver = null
     }
+    destroyResourceCatalogSession()
   }
 }
 </script>

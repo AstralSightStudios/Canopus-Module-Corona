@@ -44,6 +44,17 @@ async function main() {
   await file.writeArrayBuffer(uri, buffer, 0); assert.equal(options.position, 0);
   await file.writeArrayBuffer(uri, buffer, 32768); assert.equal(options.position, 32768);
 
+  const sourceUri = 'internal://files/source.bin';
+  api.copy = function(o) {
+    assert.equal(this, api);
+    options = o;
+    queueMicrotask(() => o.success(o.dstUri));
+  };
+  assert.equal(await file.copyFile(sourceUri, uri), undefined);
+  assert.equal(options.srcUri, sourceUri);
+  assert.equal(options.dstUri, uri);
+  assert(!Object.hasOwn(options, 'uri'), 'native copy uses srcUri/dstUri, not uri');
+
   api.get = o => { options = o; o.success({ length: 3, type: 'file', ignored: 1 }); };
   assert.deepEqual(await file.readFileInfo(uri), { length: 3, type: 'file' });
   assert(!Object.hasOwn(options, 'recursive'));
@@ -75,6 +86,7 @@ async function main() {
     ['writeText', () => file.writeText(uri, 'text')],
     ['readArrayBuffer', () => file.readArrayBuffer(uri)],
     ['writeArrayBuffer', () => file.writeArrayBuffer(uri, buffer)],
+    ['copy', () => file.copyFile(sourceUri, uri)],
     ['get', () => file.readFileInfo(uri)],
     ['list', () => file.listDirectory(uri)],
     ['mkdir', () => file.makeDirectory(uri)],
@@ -105,6 +117,14 @@ async function main() {
     api[method] = () => { throw null; };
     await run().then(() => assert.fail('must reject'), error => assert.equal(error, null));
   }
+  for (const code of [202, 301]) {
+    api.copy = o => o.fail('copy failed', code);
+    await assert.rejects(file.copyFile(sourceUri, uri), error =>
+      error.code === code && error.uri === uri && error.operation === '复制');
+  }
+  delete api.copy;
+  await assert.rejects(file.copyFile(sourceUri, uri), TypeError);
+
   api.readText = o => o.success({ text: '' });
   assert.equal(await file.readOptionalText(uri), '');
   api.readArrayBuffer = o => o.success({ buffer });
@@ -112,7 +132,7 @@ async function main() {
   assert(file.isFileNotFound({ code: 301 }));
   for (const value of [null, undefined, 301, '301', { code: 300 }, { code: '301' }])
     assert.equal(file.isFileNotFound(value), false);
-  console.log('Typed file text/binary/range/metadata, optional reads and callback/synchronous error tests passed.');
+  console.log('Typed file text/binary/range/metadata/native-copy, optional reads and callback/synchronous error tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true });

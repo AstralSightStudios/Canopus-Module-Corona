@@ -1,6 +1,6 @@
 import { THEME_DESTINATION_ROOT } from "./resource-path";
 import { removeThemeFileInventory, removeThemeFromResourceOrder } from "./resource-order";
-import { removeThemeFromResourceOverrides } from "./resource-overrides";
+import { getResourceFileApi, invalidateResourceCatalog, removeThemeFromResourceOverrides, withResourceOperation } from "./resource-overrides";
 
 export interface ResourceStorageFileApi {
   readOptionalText(uri: string): Promise<string | null>;
@@ -41,7 +41,15 @@ function mappingsUseTheme(mappings: string, themeId: string): boolean {
 }
 
 /** Removes an installed resource pack and its index entry unless it is active. */
-export async function removeInstalledTheme(
+export function removeInstalledTheme(
+  themeId: string,
+  file: ResourceStorageFileApi,
+): Promise<void> {
+  const storageFile = getResourceFileApi(file);
+  return withResourceOperation(() => removeInstalledThemeInOperation(themeId, storageFile));
+}
+
+async function removeInstalledThemeInOperation(
   themeId: string,
   file: ResourceStorageFileApi,
 ): Promise<void> {
@@ -66,16 +74,22 @@ export async function removeInstalledTheme(
   if (mappings !== null && mappingsUseTheme(mappings, themeId))
     throw storageError("active-theme", "正在使用的资源包不能删除");
 
-  await removeThemeFromResourceOverrides(themeId, file);
+  invalidateResourceCatalog();
   try {
-    await file.removeDirectory(`${THEME_ROOT_URI}${themeId}/`);
-  } catch (error) {
-    if (!file.isFileNotFound(error)) throw error;
-  }
+    await removeThemeFromResourceOverrides(themeId, file);
+    try {
+      await file.removeDirectory(`${THEME_ROOT_URI}${themeId}/`);
+    } catch (error) {
+      if (!file.isFileNotFound(error)) throw error;
+    }
 
-  const remainingThemeIds = installedThemeIds.filter((item) => item !== themeId);
-  if (indexText !== null && remainingThemeIds.length !== installedThemeIds.length)
-    await file.writeText(INSTALLED_THEMES_URI, JSON.stringify(remainingThemeIds));
-  await removeThemeFromResourceOrder(themeId, file);
-  await removeThemeFileInventory(themeId, file);
+    const remainingThemeIds = installedThemeIds.filter((item) => item !== themeId);
+    if (indexText !== null && remainingThemeIds.length !== installedThemeIds.length)
+      await file.writeText(INSTALLED_THEMES_URI, JSON.stringify(remainingThemeIds));
+    await removeThemeFromResourceOrder(themeId, file);
+    await removeThemeFileInventory(themeId, file);
+  } finally {
+    // Partial failures must not leave a catalog referring to deleted files.
+    invalidateResourceCatalog();
+  }
 }
