@@ -18,6 +18,7 @@
           </div>
         </div>
       </div>
+      <div class="bottom-spacer"></div>
     </scroll>
     <text if="{{loaded && !rows.length}}" class="empty-state">暂时没有已注册的替换资源</text>
   </div>
@@ -176,6 +177,24 @@ export default {
   text-align: center;
   lines: 4;
   text-overflow: ellipsis;
+}
+
+.bottom-spacer {
+  display: none;
+}
+
+/* 212x520 template: use aspect ratio because media-query widths are in dp. */
+@media (aspect-ratio: 53/130) {
+  .resource-list {
+    height: 424px;
+  }
+
+  .bottom-spacer {
+    display: flex;
+    width: 100%;
+    height: 52px;
+    flex-shrink: 0;
+  }
 }
 
 @media (width: 160) {
