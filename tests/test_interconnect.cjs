@@ -169,7 +169,7 @@ async function main() {
   assert.equal(parsedCanora.name, 'Dark');
   assert.equal(parsedCanora.mappings.length, 1);
   assert.equal(serializeResourcePackMappings(parsedCanora),
-    '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/dark/icons/\n');
+    '/resource/icons/\tthemes/dark/icons/\n');
   assert.doesNotThrow(() => validateResourcePackFiles(parsedCanora, ['canora.json', 'icons/a.bin']));
   assert.throws(() => validateResourcePackFiles(parsedCanora, ['canora.json']), /映射目标.*不存在/);
   assert.throws(() => parseResourcePackManifest(canoraText, 'other'), /不匹配/);
@@ -252,7 +252,7 @@ async function main() {
   assert.deepEqual(await deliver(request), [expectedHandshakeResponse]);
 
   native.text.set('internal://files/mappings.tsv',
-    '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/locked/icons/\n');
+    '/resource/icons/\tthemes/locked/icons/\n');
   const activeReply = messages(await deliver('T' + JSON.stringify({
     operation: 'begin', themeId: 'locked', mode: 'replace', fileCount: 1, totalBytes: 2
   })));
@@ -351,7 +351,7 @@ async function main() {
   assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
   assert.equal(native.text.get('internal://files/themes/dark/mappings.tsv'),
-    '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/dark/icons/\n');
+    '/resource/icons/\tthemes/dark/icons/\n');
   assert.deepEqual(JSON.parse(native.text.get('internal://files/resource-order.json')),
     { version: 1, order: ['dark', '@system'] });
   assert.deepEqual(JSON.parse(native.text.get('internal://files/resource-files.json')).themes.dark,

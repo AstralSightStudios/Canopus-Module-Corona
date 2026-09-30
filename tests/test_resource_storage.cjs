@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'resource-hook-storage-')));
 const indexUri = 'internal://files/interconnect-themes.json';
 const mappingsUri = 'internal://files/mappings.tsv';
-const nativeThemePrefix = '/data/quickapp/files/ng.lst.corona/themes/';
+const themeDestinationPrefix = 'themes/';
 const orderUri = 'internal://files/resource-order.json';
 const fileIndexUri = 'internal://files/resource-files.json';
 const overridesUri = 'internal://files/resource-overrides.json';
@@ -73,7 +73,7 @@ async function main() {
     const storage = makeStorage({
       async readOptionalText(uri) {
         if (uri === mappingsUri)
-          return `#/ generated mapping\n/resource/app/\t${nativeThemePrefix}dark/app/`;
+          return `#/ generated mapping\n/resource/app/\t${themeDestinationPrefix}dark/app/`;
         return uri === indexUri ? JSON.stringify(['dark', 'light']) : null;
       }
     });

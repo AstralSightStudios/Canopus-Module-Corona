@@ -59,7 +59,7 @@ shasum -a 256 -c SHA256SUMS
 工具仅支持受限 LVGL v9 I8 格式，先做 PNG 预览，再传输 BIN；它不负责模块安装或激活。
 
 1. 备份快应用文件区中的 `mappings.tsv` 和原主题文件。Manager URI 根为
-   `internal://files/`，模块原生文件根为 `/data/quickapp/files/ng.lst.corona/`。
+   `internal://files/`，模块原生文件根在 11 上为 `/data/quickapp/files/ng.lst.corona/`，10 Pro 上为 `/data/files/ng.lst.corona/`。以下原生传输示例按 11 展示，10 Pro 请使用其对应根目录。
 2. 在 `/data/quickapp/files/ng.lst.corona/themes/current/` 下放置兼容固件的资源文件。
    例如 `/resource/icons/a.bin` 对应
    `/data/quickapp/files/ng.lst.corona/themes/current/icons/a.bin`。
@@ -193,7 +193,7 @@ Mapped path: /data/quickapp/files/ng.lst.corona/themes/current/icons/a.bin
 例如要映射整个 `/resource/icons/` 目录，在电脑上生成真实 TAB 的配置：
 
 ```sh
-printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/icons/\n' > mappings.tsv
+printf '/resource/icons/\tthemes/my-theme/icons/\n' > mappings.tsv
 ./build/check-config mappings.tsv /resource/icons/a.bin
 ```
 
@@ -212,8 +212,8 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 - 每行 `源路径<TAB>目标路径`，必须使用真实制表符；没有 `\\t` 转义语法。
 - LF 或 CRLF；允许末行无换行；空行以及首字节 `#` 的注释行被忽略。
 - 最多 64 条；文件最多 32768 字节；每个路径最多 255 字节（不含 NUL）。
-- 目录映射的源和目标必须都是绝对目录路径，且都以 `/` 结尾；文件映射的源和目标都不以 `/` 结尾，并且只匹配完整路径。精确文件规则的目标也可写为 `@system`，表示保留固件原资源，并屏蔽覆盖该文件的更宽目录规则；目录规则不能使用该保留目标。
-- 普通目标必须位于 `/data/quickapp/files/ng.lst.corona/themes/`；拒绝 `.`、`..`、重复分隔符，
+- 源路径必须为绝对路径，普通目标必须为快应用 files 根目录下的 `themes/...` 相对路径；目录映射的源和目标都以 `/` 结尾；文件映射的源和目标都不以 `/` 结尾，并且只匹配完整路径。精确文件规则的目标也可写为 `@system`，表示保留固件原资源，并屏蔽覆盖该文件的更宽目录规则；目录规则不能使用该保留目标。
+- 模块将普通目标补全到所选设备的原生 `themes/` 子树，旧绝对目标直接拒绝；长度限制包含补全的根目录。拒绝 `.`、`..`、重复分隔符，
   反斜杠、冒号、ASCII 控制字符和 DEL。重复源前缀也会拒绝整份配置。
 - 最长匹配优先：目录规则按最长前缀匹配，精确文件规则只匹配完整路径；映射结果超过 255 字节时保持原始路径；不递归映射。
 - 只重定向 LVGL POSIX driver 的读模式（mode=2），不改变写入/读写操作。
@@ -222,7 +222,7 @@ printf '/resource/icons/\t/data/quickapp/files/ng.lst.corona/themes/my-theme/ico
 
 首次激活读取 `/data/quickapp/files/ng.lst.corona/mappings.tsv`；缺配置、空配置或仅注释配置会以零规则安装透明 hook，并启动轮询，资源仍透传到原始 driver。有效规则配置同样安装 hook；激活后每秒由 UI-owner timer 检查
 `/data/quickapp/files/ng.lst.corona/reload.request`。Manager 使用 `internal://files/`；Vela 按
-当前 app ID 将其映射到上述 native 文件根。只有信号内容变化时才读取同目录
+当前 app ID 和设备固件将其映射到对应 native 文件根（11：`/data/quickapp/files/ng.lst.corona/`；10 Pro：`/data/files/ng.lst.corona/`）。只有信号内容变化时才读取同目录
 `mappings.tsv`；接受的格式为 `resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`。
 新配置必须完整读取并通过校验；运行时允许 0 条规则以清除全部映射。零规则配置会保持透明 hook 和轮询器常驻。读取失败或非法配置会保留 last-known-good，并在后续轮询重试。更新使用双规则 bank 原子切换，并在定向刷新中同时
 考虑旧、新规则，因此删除映射也会刷新回原始资源。第二份规则 bank 增加 32 KiB 常驻

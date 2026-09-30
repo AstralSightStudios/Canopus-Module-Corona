@@ -99,7 +99,7 @@ int main(void) {
     assert(calls==1&&!strcmp(last,"resource/a"));
     assert(rh_configure(&s,rules,0)<0);
     {
-        const char text[] = "# comment\n/resource/\t" RH_THEME_ROOT "current/\r\n";
+        const char text[] = "# comment\n/resource/\tthemes/current/\r\n";
         uint32_t count=99;
         assert(rh_parse_config(text,sizeof(text)-1,rules,RH_RULES,&count)==0);
         assert(count==1);
@@ -110,7 +110,7 @@ int main(void) {
         assert(rh_parse_config("x\0y",3,rules,RH_RULES,&count)<0);
     }
     {
-        const char text[] = "/resource/\t" RH_THEME_ROOT "loaded/\n";
+        const char text[] = "/resource/\tthemes/loaded/\n";
         char buffer[sizeof(text)];
         struct reader r = {text,sizeof(text)-1,0,3,0};
         assert(rh_read_config(&s,read_chunk,&r,buffer,sizeof(buffer),rules)==0);

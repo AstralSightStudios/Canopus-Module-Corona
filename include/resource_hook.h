@@ -3,9 +3,15 @@
 #include <stdint.h>
 #define RH_RULES 64
 #define RH_PATH 256
+/* Native internal://files/ roots differ between Band 10 Pro and Band 11. */
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#define RH_APP_FILES_ROOT "/data/files/ng.lst.corona/"
+#else
 #define RH_APP_FILES_ROOT "/data/quickapp/files/ng.lst.corona/"
+#endif
 #define RH_CONFIG_PATH RH_APP_FILES_ROOT "mappings.tsv"
 #define RH_RELOAD_SIGNAL_PATH RH_APP_FILES_ROOT "reload.request"
+#define RH_RELOAD_RESULT_PATH RH_APP_FILES_ROOT "reload.result"
 #define RH_THEME_ROOT RH_APP_FILES_ROOT "themes/"
 #define RH_SYSTEM_DESTINATION "@system"
 /* Directory rules map source prefixes into the app-private themes tree and
@@ -29,6 +35,8 @@ int rh_reinstall_posix(struct rh_state *, void *, rh_open_fn *, rh_open_fn, rh_o
 int rh_install(struct rh_state *,void *,rh_open_fn *,rh_open_fn);
 int rh_resolve(const struct rh_state *, const char *, char out[RH_PATH]);
 int rh_resolve_view(const struct rh_mapping_view *, const char *, char out[RH_PATH]);
+/* TSV destinations are themes/... relative to app files (or @system).
+ * Parsed rules store target-specific absolute native destinations. */
 int rh_parse_config(const char *, uint32_t, struct rh_rule *, uint32_t, uint32_t *);
 /* Caller owns staging and text buffers; neither may overlap live state.
  * Reader returns bytes read, zero EOF, or a negative error. */

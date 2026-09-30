@@ -137,7 +137,7 @@ async function main() {
       ['top', 'base', systemId, 'inactive'], 'g1', file);
     assert.equal(plan.generation, 'g1');
     assert.equal(plan.copies.length, 2, 'only winning file versions are materialized');
-    assert.match(plan.mappings, /^\/resource\/icons\/\t\/data\/quickapp\/files\/ng\.lst\.corona\/themes\/.active-g1\/r0\/\n$/);
+    assert.match(plan.mappings, /^\/resource\/icons\/\tthemes\/.active-g1\/r0\/\n$/);
     assert(!plan.mappings.includes('inactive'));
     assert.deepEqual([...file.binary.get('internal://files/themes/.active-g1/r0/a.bin')], [9, 9]);
     assert.deepEqual([...file.binary.get('internal://files/themes/.active-g1/r0/b.bin')], [2]);
@@ -267,8 +267,8 @@ async function main() {
     assert.equal(plan.copies.length, 0,
       'per-file choices use direct TSV rules instead of materializing another overlay');
     assert.equal(file.text.get(mappingsUri),
-      `/resource/\t/data/quickapp/files/ng.lst.corona/themes/top/top/\n` +
-      `/resource/a.bin\t/data/quickapp/files/ng.lst.corona/themes/picked/picked/a.bin\n` +
+      `/resource/\tthemes/top/top/\n` +
+      `/resource/a.bin\tthemes/picked/picked/a.bin\n` +
       `/resource/b.bin\t@system\n`,
       'explicit pack and system choices override the normal ordered directory rule');
   }
@@ -324,8 +324,8 @@ async function main() {
     assert.equal(plan.copies.length, 0,
       'an explicit per-file choice does not copy either the selected or default assets');
     assert.equal(plan.mappings,
-      `/resource/\t/data/quickapp/files/ng.lst.corona/themes/top/top/\n` +
-      `/resource/a.bin\t/data/quickapp/files/ng.lst.corona/themes/low/low/a.bin\n`,
+      `/resource/\tthemes/top/top/\n` +
+      `/resource/a.bin\tthemes/low/low/a.bin\n`,
       'an explicit pack selection wins below the system boundary while others follow normal order');
   }
 
@@ -337,7 +337,7 @@ async function main() {
     ], 'g-system', { '/resource/a.bin': '@system' });
     assert.equal(plan.copies.length, 0);
     assert.equal(plan.mappings,
-      `/resource/\t/data/quickapp/files/ng.lst.corona/themes/top/top/\n` +
+      `/resource/\tthemes/top/top/\n` +
       `/resource/a.bin\t@system\n`,
       'the module-level System rule masks the parent directory rule without a fake target');
   }

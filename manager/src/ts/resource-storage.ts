@@ -1,3 +1,4 @@
+import { THEME_DESTINATION_ROOT } from "./resource-path";
 import { removeThemeFileInventory, removeThemeFromResourceOrder } from "./resource-order";
 import { removeThemeFromResourceOverrides } from "./resource-overrides";
 
@@ -15,7 +16,6 @@ export interface ResourceStorageError extends Error {
 const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json";
 const MAPPINGS_URI = "internal://files/mappings.tsv";
 const THEME_ROOT_URI = "internal://files/themes/";
-const NATIVE_THEME_ROOT = "/data/quickapp/files/ng.lst.corona/themes/";
 const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/;
 
 function storageError(
@@ -32,7 +32,7 @@ function isThemeId(value: unknown): value is string {
 }
 
 function mappingsUseTheme(mappings: string, themeId: string): boolean {
-  const destinationPrefix = `${NATIVE_THEME_ROOT}${themeId}/`;
+  const destinationPrefix = `${THEME_DESTINATION_ROOT}${themeId}/`;
   return mappings.split(/\r?\n/).some((line) => {
     if (!line || line[0] === "#") return false;
     const separator = line.indexOf("\t");

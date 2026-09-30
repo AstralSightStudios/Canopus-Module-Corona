@@ -23,13 +23,13 @@ class ConfigCLI(unittest.TestCase):
         self.assertIn(f'Mapped path: {THEME_ROOT}current/icons/a.bin', result.stdout)
 
     def test_unmatched_path_is_explicit(self):
-        result = self.run_config(f'/resource/\t{THEME_ROOT}current/\n'.encode(), '/other/a.bin')
+        result = self.run_config(f'/resource/\tthemes/current/\n'.encode(), '/other/a.bin')
         self.assertEqual(result.returncode, 0)
         self.assertIn('No matching rule', result.stdout)
 
     def test_exact_file_mapping_does_not_match_siblings(self):
         config = (f'/resource/font/MiSans-Regular-All.ttf\t'
-                  f'{THEME_ROOT}font-generation-g1/FusionPixel.ttf\n').encode()
+                  f'themes/font-generation-g1/FusionPixel.ttf\n').encode()
         result = self.run_config(config, '/resource/font/MiSans-Regular-All.ttf')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f'Mapped path: {THEME_ROOT}font-generation-g1/FusionPixel.ttf', result.stdout)
@@ -38,7 +38,7 @@ class ConfigCLI(unittest.TestCase):
         self.assertIn('No matching rule', sibling.stdout)
 
     def test_system_rule_masks_parent_directory_mapping(self):
-        config = (f'/resource/\t{THEME_ROOT}current/\n'
+        config = (f'/resource/\tthemes/current/\n'
                   '/resource/icons/a.bin\t@system\n').encode()
         original = self.run_config(config, '/resource/icons/a.bin')
         self.assertEqual(original.returncode, 0, original.stderr)
@@ -53,22 +53,22 @@ class ConfigCLI(unittest.TestCase):
             'MiSans-Semibold.ttf', 'MiSans-Regular-All.ttf', 'MiSans-Medium.ttf',
             'MiSans-Medium-All.ttf', 'MiSans-Demibold.ttf', 'MiSans-Demibold-All.ttf'
         ]
-        target = f'{THEME_ROOT}font-generations/g1/FusionPixel.ttf'
+        target = 'themes/font-generations/g1/FusionPixel.ttf'
         config = ''.join(f'/resource/font/{name}\t{target}\n' for name in names).encode()
         for name in names:
             with self.subTest(name=name):
                 result = self.run_config(config, f'/resource/font/{name}')
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(f'Mapped path: {target}', result.stdout)
+                self.assertIn(f'Mapped path: {THEME_ROOT}{target[7:]}', result.stdout)
 
     def test_empty_and_malformed_config(self):
-        for data in (b'', b'# comment\n', f'/resource/\\t{THEME_ROOT}current/\n'.encode(),
-                     f'/resource/\t{THEME_ROOT}../outside/\n'.encode(), b'x' * 32769):
+        for data in (b'', b'# comment\n', f'/resource/\\tthemes/current/\n'.encode(),
+                     f'/resource/\tthemes/../outside/\n'.encode(), b'x' * 32769):
             with self.subTest(data=data[:50]):
                 self.assertNotEqual(self.run_config(data).returncode, 0)
 
     def test_invalid_resource_path(self):
-        self.assertNotEqual(self.run_config(f'/resource/\t{THEME_ROOT}current/\n'.encode(),
+        self.assertNotEqual(self.run_config(f'/resource/\tthemes/current/\n'.encode(),
                                            '/resource/../x').returncode, 0)
 
 

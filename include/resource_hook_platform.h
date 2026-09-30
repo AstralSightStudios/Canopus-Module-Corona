@@ -6,7 +6,8 @@
 /* Exact NuttX flags: O_WRONLY=2, O_CREAT=4, O_TRUNC=32. The adapter supplies
  * owner-only permissions. .043 fs_open/mknod confirm the 0x26 combination. */
 #define RH_STARTUP_LOG_FLAGS 0x26
-#define RH_STARTUP_LOG_PATH "/data/canopus/resource-hook-startup.log"
+/* Keep diagnostics inside the device log directory available to log export. */
+#define RH_STARTUP_LOG_PATH "/data/offlinelog/resource-hook-startup.log"
 int rh_platform_open(const char *, int);
 /* POSIX contract on every target: -1 and task errno on a failed open.
  * Snapshot errno immediately, before any diagnostic I/O on the same task. */

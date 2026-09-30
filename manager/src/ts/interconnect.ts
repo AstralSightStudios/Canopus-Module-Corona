@@ -1,3 +1,4 @@
+import { THEME_DESTINATION_ROOT, safeThemeDestination } from "./resource-path";
 import { interconnect } from "./import";
 import * as file from "./file";
 import type { FileOperationError } from "./file";
@@ -18,8 +19,6 @@ const QUICKAPP_FILES_URI = "internal://files/";
 const MAPPINGS_URI = `${QUICKAPP_FILES_URI}mappings.tsv`;
 const TRANSFER_STATE_URI = `${QUICKAPP_FILES_URI}interconnect-transfer.json`;
 const INSTALLED_THEMES_URI = `${QUICKAPP_FILES_URI}interconnect-themes.json`;
-const NATIVE_SHARED_PATH = "/data/quickapp/files/ng.lst.corona/";
-const NATIVE_THEME_ROOT = `${NATIVE_SHARED_PATH}themes/`;
 const THEME_ROOT_URI = `${QUICKAPP_FILES_URI}themes/`;
 
 // basE91 alphabet (Bas Wijnen's 91-character variant). Keep identical on sender.
@@ -96,21 +95,6 @@ interface InterconnectModule {
   instance(): object;
 }
 
-function utf8Length(value: string): number {
-  let size = 0;
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (code <= 0x7f) size += 1;
-    else if (code <= 0x7ff) size += 2;
-    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length &&
-             value.charCodeAt(i + 1) >= 0xdc00 && value.charCodeAt(i + 1) <= 0xdfff) {
-      size += 4;
-      i++;
-    } else size += 3;
-  }
-  return size;
-}
-
 function protocolError(errorCode: string, message: string): ProtocolError {
   const error = new Error(message) as ProtocolError;
   error.errorCode = errorCode;
@@ -154,8 +138,8 @@ export function validateThemeRelativePath(relativePath: unknown, themeId: string
       /^[A-Za-z]:/.test(relativePath) || relativePath.indexOf("\\") >= 0) return false;
   const segments = relativePath.split("/");
   if (segments.some(segment => !segment || segment === "." || segment === "..")) return false;
-  const absolutePath = `${NATIVE_THEME_ROOT}${themeId}/${relativePath}`;
-  return utf8Length(absolutePath) < 256;
+  return validThemeId(themeId) &&
+    safeThemeDestination(`${THEME_DESTINATION_ROOT}${themeId}/${relativePath}`);
 }
 
 /** Decode directly into one bounded buffer; avoid a temporary JS number array. */
@@ -944,7 +928,7 @@ export class InterconnectThemeReceiver {
   private async isThemeActive(themeId: string): Promise<boolean> {
     const mappings = await file.readOptionalText(MAPPINGS_URI);
     if (!mappings) return false;
-    const destinationPrefix = `${NATIVE_THEME_ROOT}${themeId}/`;
+    const destinationPrefix = `${THEME_DESTINATION_ROOT}${themeId}/`;
     return mappings.split(/\r?\n/).some(line => {
       if (!line || line[0] === "#") return false;
       const separator = line.indexOf("\t");

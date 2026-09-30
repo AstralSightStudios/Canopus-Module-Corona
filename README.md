@@ -12,8 +12,9 @@
 
 启用后重启出现通用错误码（例如 `-6`）时，新构建会将模块的构造、注册、配置读取、
 驱动校验、hook 安装和定时器创建阶段写入设备的
-`/data/canopus/resource-hook-startup.log`。日志最多 2 KiB、无需堆分配，写入失败不改变
-启动结果；普通离线日志包不一定包含它，需要单独提取。详见
+`/data/offlinelog/resource-hook-startup.log`。日志最多 2 KiB、无需堆分配，写入失败不改变
+启动结果，也不覆盖固件日志。导出设备日志后检查压缩包中的同名文件；若导出器过滤了
+额外文件，可从设备 log 目录单独提取它。详见
 [日志格式、错误码与 .043 原生 open 修正](docs/STARTUP_DIAGNOSTICS.md)。
 
 平台共用逻辑位于 `src/platform.c`；`src/platform_band11.c` 与
@@ -21,14 +22,14 @@
 
 ## 已实现
 
-- 最多 64 条目录前缀或精确文件映射，最长匹配优先，从快应用私有文件根目录
-  `/data/quickapp/files/ng.lst.corona/mappings.tsv` 完整校验后提交。精确文件规则可将目标设为 `@system`，明确透传固件原资源并遮蔽更宽目录规则。路径最多 255 字节，
+- 最多 64 条目录前缀或精确文件映射，最长匹配优先，从快应用 `internal://files/mappings.tsv` 对应原生路径完整校验后提交。
+  TSV 源路径为绝对路径，普通目标为 `themes/...` 相对路径；模块按目标展开到 10 Pro 的 `/data/files/ng.lst.corona/` 或 11 的 `/data/quickapp/files/ng.lst.corona/`，不接受绝对目标路径。精确文件规则可将目标设为 `@system`，明确透传固件原资源并遮蔽更宽目录规则。路径最多 255 字节，
   配置最多 32 KiB。替代资源限于同根目录的 `themes/` 子树；拒绝路径穿越、重复规则和非法
   前缀，主题树不得含逃逸符号链接。Manager 对应 URI 根目录为 `internal://files/`。
 - 只 Hook 所选目标的 `/` LVGL POSIX driver、读模式 2；处理相对 driver 路径和
   `fd + 1` 句柄。替代文件打不开时退回原资源；成功打开但解码失败不自动回退。
 - 已知 callback 才允许安装/重绑定；短临界区发布状态。激活后每秒检查
-  `/data/quickapp/files/ng.lst.corona/reload.request`，信号变化后读取同目录 `mappings.tsv`；
+  快应用文件根目录下的 `reload.request`，信号变化后读取同目录 `mappings.tsv`；
   完整校验后通过双规则快照切换，错误或部分配置保留 last-known-good。双快照增加
   32 KiB 常驻 Umem；读取变更配置时最多额外申请 32 KiB scratch，内存不足时下轮重试。
   配置缺失或为空时以零规则启动透明 pass-through hook 和轮询器，不重定向资源；之后写入映射并更新信号即可加载主题。

@@ -90,13 +90,13 @@ int main(void) {
     assert(rh_resolve(&state, "/x", NULL) < 0);
 
     count = 99;
-    assert(!rh_parse_config("/a/\t" RH_THEME_ROOT "a/", sizeof("/a/\t" RH_THEME_ROOT "a/") - 1, rules, RH_RULES, &count));
+    assert(!rh_parse_config("/a/\tthemes/a/", sizeof("/a/\tthemes/a/") - 1, rules, RH_RULES, &count));
     assert(count == 1 && !rh_configure(&state, rules, count));
     count = 99;
     assert(rh_parse_config("#\0x", 3, rules, RH_RULES, &count) < 0 && count == 99);
     assert(rh_parse_config("/a/\t\n", 5, rules, RH_RULES, &count) < 0);
     assert(rh_parse_config("\t/d/\n", 5, rules, RH_RULES, &count) < 0);
-    assert(!rh_parse_config("/a/\t" RH_THEME_ROOT "a/\textra", sizeof("/a/\t" RH_THEME_ROOT "a/\textra") - 1, rules, RH_RULES, &count));
+    assert(!rh_parse_config("/a/\tthemes/a/\textra", sizeof("/a/\tthemes/a/\textra") - 1, rules, RH_RULES, &count));
     assert(rh_configure(&state, rules, count) < 0);
 
     memset(text, '#', sizeof(text));

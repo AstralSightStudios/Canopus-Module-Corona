@@ -50,7 +50,7 @@ class Rebind(unittest.TestCase):
         m.disk['/data/canopus/registry.bin'] = bytes(record)
         m.disk['/data/canopus/inbox/corona.cmi'] = receipt
         m.disk['/data/canopus/inbox/corona.ko'] = elf
-        m.disk[CONFIG_PATH] = f'/resource/\t{THEME_ROOT}current/\n'.encode()
+        m.disk[CONFIG_PATH] = '/resource/\tthemes/current/\n'.encode()
         m.disk[THEME_ROOT + 'current/a.bin'] = b'mapped file'
         self.descriptor = None
         def write():
@@ -188,7 +188,7 @@ class Rebind(unittest.TestCase):
     def test_existing_open_handle_is_not_replaced_by_activation(self):
         m = self.m
         m.disk['/data/canopus/original/a.bin'] = b'original file'
-        m.disk[CONFIG_PATH] = f'/data/canopus/original/\t{THEME_ROOT}current/\n'.encode()
+        m.disk[CONFIG_PATH] = '/data/canopus/original/\tthemes/current/\n'.encode()
         path = 0x3c710000
         m.uc.mem_write(path, b'data/canopus/original/a.bin\0')
         m.uc.reg_write(UC_ARM_REG_R1, path)
@@ -386,7 +386,7 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.status_words()[2:], (0,) * 8)
         self.assertEqual(self.timer_creates, 0)
         # No-op must not cache absence for the lifetime of the resident image.
-        m.disk[CONFIG_PATH] = f'/resource/\t{THEME_ROOT}current/\n'.encode()
+        m.disk[CONFIG_PATH] = '/resource/\tthemes/current/\n'.encode()
         self.assertEqual(self.restore(), (5, 0))
         self.assertNotEqual(m.word(0x200bd3c4), 0xc3a6195)
 

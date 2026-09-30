@@ -10,13 +10,16 @@ Install the newly built, signed module, enable it, then reboot once. Copy this
 file from the device filesystem **before reinstalling or retrying**:
 
 ```text
-/data/canopus/resource-hook-startup.log
+/data/offlinelog/resource-hook-startup.log
 ```
 
-The existing installer creates `/data/canopus`. The module creates only the log
-file, with owner-only permissions. There is no guarantee Xiaomi's offline-log
-archive includes this file; collect it separately using your device-file tooling.
-No Canopus source changes or Manager UI changes are required.
+The supplied device archives confirm `/data/offlinelog` is the firmware log
+directory. The module creates only a standalone log file there, with owner-only
+permissions; it never overwrites `tmp.log` or the numbered firmware logs. Export
+the device logs after the failure and look for `resource-hook-startup.log`. If
+an exporter filters auxiliary files, retrieve this file separately from the
+accessible device log directory. No Canopus source changes or Manager UI changes
+are required.
 
 The file begins with the exact target, module version and config path. Each row
 contains a stage, its return value, an immediately captured errno where relevant,
@@ -49,8 +52,9 @@ activate.end rc=0 errno=0 detail=0x...
 ## Interpretation
 
 - No new file: the constructor may not have run, or diagnostic file I/O may have
-  failed. Absence alone does **not** prove loader/signature failure. Confirm the
-  installed ELF/receipt hashes and `/data/canopus` accessibility.
+  failed (including an unavailable log directory), or the exporter filtered the
+  file. Absence alone does **not** prove loader/signature failure. Confirm the
+  installed ELF/receipt hashes and check the device log directory directly.
 - `register.open` failure or `register.write` other than 40: descriptor publication
   failed. Registration writes are atomic and are never retried after a short write.
 - `config.open`: negative results include errno captured **before** diagnostic
@@ -87,7 +91,8 @@ not receive this normalization.
 
 This fixes a statically confirmed contract mismatch; it does not yet prove that
 it was the only cause of the reported device activation failure. The supplied
-archive also shows quickapp files under `/data/files/ng.lst.corona/`, whereas the
-module still uses `/data/quickapp/files/ng.lst.corona/`. Those may or may not be
-aliases on the device. The trace header and `config.open` expose this discrepancy;
-no storage migration is performed by the diagnostic change.
+archive also shows quickapp files under `/data/files/ng.lst.corona/`. Firmware
+analysis confirms this is the Band 10 Pro app-files root; Band 11 uses
+`/data/quickapp/files/ng.lst.corona/`. The module now selects the native root by
+build target and expands relative TSV destinations such as `themes/current/`.
+No storage migration or absolute-destination TSV compatibility is provided.

@@ -10,7 +10,7 @@
 
 #define RH_MODULE_ID "corona"
 #define RH_VERSION "0.3.0"
-/* `internal://files/` resolves to this app-scoped native path on Band 11. */
+/* Resolve app-scoped control paths using the selected firmware target. */
 #define RH_CONTROL_CONFIG RH_CONFIG_PATH
 #define RH_CONTROL_SIGNAL RH_RELOAD_SIGNAL_PATH
 #define RH_RELOAD_PREFIX "resource-hook-reload-v1\t"
@@ -304,7 +304,7 @@ static int reload_signal_seen(const char *signal, uint32_t size) {
 /* Manager creates this app-scoped file before sending a revision. Use only
  * O_WRONLY (2): no guessed create/truncate flags or vararg permissions.
  * A fixed-size, checksummed record lets readers reject partial/torn writes. */
-#define RH_CONTROL_RESULT "/data/quickapp/files/ng.lst.corona/reload.result"
+#define RH_CONTROL_RESULT RH_RELOAD_RESULT_PATH
 #define RH_RESULT_BYTES 256u
 static char last_result[RH_RESULT_BYTES];
 static unsigned last_result_valid, result_written;

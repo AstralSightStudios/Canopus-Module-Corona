@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 
-static const char config[] = "/resource/\t" RH_THEME_ROOT "current/\n";
+static const char config[] = "/resource/\tthemes/current/\n";
 static const char *input = config, *control_config, *control_signal;
 static unsigned position, control_position, signal_position;
 static unsigned config_opens, control_opens, signal_opens, closes, allocations, frees, persistent_allocs, registrations;
@@ -26,7 +26,7 @@ static int open_errno = 5;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
            redraw_ready = 1, locked;
 static int driver;
-static const char *backend_expected = "data/quickapp/files/ng.lst.corona/themes/current/icon.bin";
+static const char *backend_expected = (RH_THEME_ROOT "current/icon.bin") + 1;
 struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
@@ -68,7 +68,7 @@ int rh_platform_open(const char *path, int mode) {
         if (fault && !strcmp(fault, "fd-zero")) registration_fd = 0;
         return registration_fd;
     }
-    if (!strcmp(path, "/data/quickapp/files/ng.lst.corona/reload.result")) {
+    if (!strcmp(path, RH_RELOAD_RESULT_PATH)) {
         assert(mode == 2); result_position=0; return 14;
     }
     assert(mode == 1);
@@ -273,6 +273,7 @@ static int test_startup_diagnostics(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     const char *fault = getenv("RH_TEST_REGISTRATION");
     unsigned before, i;
+    assert(!strcmp(RH_STARTUP_LOG_PATH, "/data/offlinelog/resource-hook-startup.log"));
     assert(strstr(startup_record, "RHSTART1 target="));
     assert(strstr(startup_record, "config=" RH_CONFIG_PATH "\n"));
     assert(strstr(startup_record, "ctor.begin rc=0"));
@@ -363,8 +364,8 @@ static int test_empty_startup_then_theme_reload(void) {
     fire_timers(1000u);
     assert(signal_opens == before + 1 && !control_opens);
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tlate-theme\n";
-    control_config = "/resource/\t" RH_THEME_ROOT "current/\n";
-    backend_expected = "data/quickapp/files/ng.lst.corona/themes/current/icon.bin";
+    control_config = "/resource/\tthemes/current/\n";
+    backend_expected = (RH_THEME_ROOT "current/icon.bin") + 1;
     before = image_drops;
     fire_timers(1000u);
     assert(image_drops == before + 1 && metadata_refreshes == 1 && redraws == 1);
@@ -417,7 +418,7 @@ static int test_experimental_font_integration(void) {
     fire_timers(1000u);
     assert(active_timers(1000u) == 1);
 
-    control_config = "/resource/font/MiSans-Regular-All.ttf\t" RH_THEME_ROOT
+    control_config = "/resource/font/MiSans-Regular-All.ttf\tthemes/"
         "font-g2/FusionPixel.ttf\n";
     control_signal = "resource-hook-reload-v1\tfont-g2\n";
     font_rc = 1;
@@ -483,7 +484,51 @@ static int test_experimental_font_integration(void) {
     return 0;
 }
 #endif
+static void test_relative_config(void) {
+    static const char portable[] =
+        "/resource/\tthemes/current/\r\n"
+        "/resource/icons/stock.bin\t@system\n";
+    static const char *invalid[] = {
+        "/resource/\t/data/quickapp/files/ng.lst.corona/themes/current/\n",
+        "/resource/\t/data/files/ng.lst.corona/themes/current/\n",
+        "/resource/\t/themes/current/\n",
+        "/resource/\tfiles/themes/current/\n",
+        "/resource/\tthemes-evil/current/\n",
+        "/resource/\tthemes/\n",
+        "/resource/\tthemes/../outside/\n",
+        "/resource/\tthemes/./current/\n",
+        "/resource/\tthemes//current/\n",
+        "/resource/\tthemes/a\\b/\n",
+        "/resource/\tthemes/a:b/\n",
+        "/resource/\tthemes/a\177/\n",
+        "/resource/\tthemes/current/\textra\n",
+        "/resource/\t@system\n"
+    };
+    struct rh_rule rules[2];
+    uint32_t count, i;
+    char text[RH_PATH + 32];
+    unsigned prefix, relative;
+    assert(!rh_parse_config(portable, sizeof(portable)-1u, rules, 2, &count));
+    assert(count == 2 && !rh_validate_rules(rules, count));
+    assert(!strcmp(rules[0].destination, RH_THEME_ROOT "current/"));
+    assert(!strcmp(rules[1].destination, RH_SYSTEM_DESTINATION));
+    for (i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++) {
+        int rc = rh_parse_config(invalid[i], (uint32_t)strlen(invalid[i]),
+                                 rules, 2, &count);
+        assert(rc < 0 || rh_validate_rules(rules, count) < 0);
+    }
+    prefix = (unsigned)snprintf(text, sizeof(text), "/resource/file.bin\tthemes/");
+    relative = RH_PATH - 1u - (unsigned)strlen(RH_APP_FILES_ROOT);
+    memset(text + prefix, 'x', relative - 7u);
+    text[prefix + relative - 7u] = 0;
+    assert(!rh_parse_config(text, (uint32_t)strlen(text), rules, 2, &count));
+    assert(!rh_validate_rules(rules, count));
+    assert(strlen(rules[0].destination) == RH_PATH - 1u);
+    strcat(text, "x");
+    assert(rh_parse_config(text, (uint32_t)strlen(text), rules, 2, &count) == -4);
+}
 int main(int argc, char **argv) {
+    test_relative_config();
     if (argc == 2 && !strcmp(argv[1], "--startup-diagnostics"))
         return test_startup_diagnostics();
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
@@ -497,10 +542,28 @@ int main(int argc, char **argv) {
     struct canopus_status_writer_v1 w;
     unsigned char status[48];
     unsigned before;
-    assert(!strcmp(RH_APP_FILES_ROOT, "/data/quickapp/files/ng.lst.corona/"));
-    assert(!strcmp(RH_CONFIG_PATH, "/data/quickapp/files/ng.lst.corona/mappings.tsv"));
-    assert(!strcmp(RH_RELOAD_SIGNAL_PATH, "/data/quickapp/files/ng.lst.corona/reload.request"));
-    assert(!strcmp(RH_THEME_ROOT, "/data/quickapp/files/ng.lst.corona/themes/"));
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#define EXPECTED_FILES_ROOT "/data/files/ng.lst.corona/"
+#define FOREIGN_THEME_ROOT "/data/quickapp/files/ng.lst.corona/themes/"
+#else
+#define EXPECTED_FILES_ROOT "/data/quickapp/files/ng.lst.corona/"
+#define FOREIGN_THEME_ROOT "/data/files/ng.lst.corona/themes/"
+#endif
+    assert(!strcmp(RH_APP_FILES_ROOT, EXPECTED_FILES_ROOT));
+    assert(!strcmp(RH_CONFIG_PATH, EXPECTED_FILES_ROOT "mappings.tsv"));
+    assert(!strcmp(RH_RELOAD_SIGNAL_PATH, EXPECTED_FILES_ROOT "reload.request"));
+    assert(!strcmp(RH_RELOAD_RESULT_PATH, EXPECTED_FILES_ROOT "reload.result"));
+    assert(!strcmp(RH_THEME_ROOT, EXPECTED_FILES_ROOT "themes/"));
+    {
+        const struct rh_rule native = {
+            "/resource/", EXPECTED_FILES_ROOT "themes/current/"
+        };
+        const struct rh_rule foreign = {
+            "/resource/", FOREIGN_THEME_ROOT "current/"
+        };
+        assert(rh_validate_rules(&native, 1) == 0);
+        assert(rh_validate_rules(&foreign, 1) == -2);
+    }
     assert(registrations == 1 && closes == 1);
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
     assert(!strcmp((const char *)d->module_id, "corona"));
@@ -654,10 +717,10 @@ int main(int argc, char **argv) {
 
     /* A package-qualified signal publishes the manager's complete new snapshot. */
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr1\n";
-    control_config = "/resource/\t" RH_THEME_ROOT "alternate/\n";
+    control_config = "/resource/\tthemes/alternate/\n";
     before = image_drops;
     fire_timers(1000u);
-    backend_expected = "data/quickapp/files/ng.lst.corona/themes/alternate/icon.bin";
+    backend_expected = (RH_THEME_ROOT "alternate/icon.bin") + 1;
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
     assert(image_drops == before + 2 && redraws == 8);
     before = control_opens;
@@ -674,37 +737,37 @@ int main(int argc, char **argv) {
     before = image_drops;
     fire_timers(1000u);
     assert(image_drops == before && slot(&driver, "resource/icon.bin", 2) == 7);
-    control_config = "/resource/\t" RH_THEME_ROOT "alternate2/\n";
+    control_config = "/resource/\tthemes/alternate2/\n";
     fire_timers(1000u);
-    backend_expected = "data/quickapp/files/ng.lst.corona/themes/alternate2/icon.bin";
+    backend_expected = (RH_THEME_ROOT "alternate2/icon.bin") + 1;
     assert(image_drops == before + 2 && slot(&driver, "resource/icon.bin", 2) == 7);
 
     /* Removed mappings are included in owner refresh, so the original path is
      * restored rather than leaving an image stuck on the previous theme. */
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr3\n";
-    control_config = "/other/\t" RH_THEME_ROOT "other/\n";
+    control_config = "/other/\tthemes/other/\n";
     fire_timers(1000u);
     backend_expected = "resource/icon.bin";
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
-    backend_expected = "data/quickapp/files/ng.lst.corona/themes/other/icon.bin";
+    backend_expected = (RH_THEME_ROOT "other/icon.bin") + 1;
     assert(slot(&driver, "other/icon.bin", 2) == 7);
 
     /* A second revision arriving during a pending refresh waits until the first
      * retirement/owner transaction completes, then is applied in order. */
     redraw_ready = 0;
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr4\n";
-    control_config = "/resource/\t" RH_THEME_ROOT "pending/\n";
+    control_config = "/resource/\tthemes/pending/\n";
     fire_timers(1000u);
     assert(active_timers(50u) == 1);
     before = control_opens;
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tr5\n";
-    control_config = "/resource/\t" RH_THEME_ROOT "final/\n";
+    control_config = "/resource/\tthemes/final/\n";
     fire_timers(1000u);
     assert(control_opens == before);
     redraw_ready = 1;
     fire_timers(50u);
     fire_timers(1000u);
-    backend_expected = "data/quickapp/files/ng.lst.corona/themes/final/icon.bin";
+    backend_expected = (RH_THEME_ROOT "final/icon.bin") + 1;
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
     fire_timers(1000u);
 

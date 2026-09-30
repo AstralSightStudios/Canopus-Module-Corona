@@ -1,3 +1,4 @@
+import { THEME_DESTINATION_ROOT, safeThemeDestination } from "./resource-path";
 import { parseResourcePackManifest } from "./resource-pack";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import {
@@ -17,8 +18,6 @@ export const ACTIVE_MAPPINGS_URI = "internal://files/mappings.tsv";
 export const ACTIVE_GENERATIONS_URI = "internal://files/resource-active-generations.json";
 
 const THEME_ROOT_URI = "internal://files/themes/";
-const NATIVE_ROOT = "/data/quickapp/files/ng.lst.corona/";
-const NATIVE_THEME_ROOT = `${NATIVE_ROOT}themes/`;
 const ACTIVE_DIRECTORY_PREFIX = ".active-";
 const MAX_MAPPING_RULES = 64;
 const MAX_CONFIG_BYTES = 32 * 1024;
@@ -175,7 +174,7 @@ export function planActiveMappings(
     if (!needsMaterialization(entries)) {
       const winner = entries[0];
       rules.push({ source: winner.mapping.source,
-        destination: `${NATIVE_THEME_ROOT}${winner.themeId}/${winner.mapping.destination}` });
+        destination: `${THEME_DESTINATION_ROOT}${winner.themeId}/${winner.mapping.destination}` });
       continue;
     }
 
@@ -189,8 +188,8 @@ export function planActiveMappings(
         throw new Error(`资源包 ${entry.themeId} 缺少文件清单，无法生成叠加资源`);
     }
 
-    const activeDestination = `${NATIVE_THEME_ROOT}${ACTIVE_DIRECTORY_PREFIX}${generation}/r${ruleIndex}/`;
-    if (!safeAbsolutePath(activeDestination)) throw new Error("生成的活动资源目录路径过长");
+    const activeDestination = `${THEME_DESTINATION_ROOT}${ACTIVE_DIRECTORY_PREFIX}${generation}/r${ruleIndex}/`;
+    if (!safeThemeDestination(activeDestination)) throw new Error("生成的活动资源目录路径过长");
     rules.push({ source: sourceRoot, destination: activeDestination });
 
     // Resolve each concrete path by normal pack order, then replace that decision
@@ -242,9 +241,9 @@ export function planActiveMappings(
       if (!winner) return;
       const suffix = sourcePath.slice(sourceRoot.length);
       if (!suffix) throw new Error(`资源映射未指向具体文件：${sourcePath}`);
-      const nativeDestination = `${activeDestination}${suffix}`;
-      if (!safeAbsolutePath(nativeDestination))
-        throw new Error(`活动资源路径超过模块限制：${nativeDestination}`);
+      const expandedDestination = `${activeDestination}${suffix}`;
+      if (!safeThemeDestination(expandedDestination))
+        throw new Error(`活动资源路径超过模块限制：${expandedDestination}`);
       copies.push({
         sourceUri: `${THEME_ROOT_URI}${winner.entry.themeId}/${winner.asset.relativePath}`,
         destinationUri: `internal://files/themes/${ACTIVE_DIRECTORY_PREFIX}${generation}/r${ruleIndex}/${suffix}`,
@@ -272,8 +271,8 @@ export function planActiveMappings(
       : mapping.destination;
     if (!relativeDestination || relativeDestination.endsWith("/"))
       throw new Error(`混搭微调资源目标不是文件：${sourcePath}`);
-    const destination = `${NATIVE_THEME_ROOT}${theme.themeId}/${relativeDestination}`;
-    if (!safeAbsolutePath(sourcePath) || !safeAbsolutePath(destination))
+    const destination = `${THEME_DESTINATION_ROOT}${theme.themeId}/${relativeDestination}`;
+    if (!safeAbsolutePath(sourcePath) || !safeThemeDestination(destination))
       throw new Error(`混搭微调资源路径超过模块限制：${sourcePath}`);
     overrideRules.push({ source: sourcePath, destination });
   }
@@ -294,7 +293,7 @@ export function planActiveMappings(
   const invalidRule = rules.some(rule => {
     if (!safeAbsolutePath(rule.source)) return true;
     if (rule.destination === SYSTEM_RESOURCE_CHOICE) return rule.source.endsWith("/");
-    return !safeAbsolutePath(rule.destination) ||
+    return !safeThemeDestination(rule.destination) ||
       rule.source.endsWith("/") !== rule.destination.endsWith("/");
   });
   if (invalidRule) throw new Error("合并后的资源映射路径无效");

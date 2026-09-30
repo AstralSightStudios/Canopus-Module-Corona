@@ -1,10 +1,11 @@
+import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination } from "./resource-path";
+
 const RESOURCE_PACK_FORMAT = "canopus-resource-pack";
 const RESOURCE_PACK_VERSION = 1;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_MAPPING_RULES = 64;
 const MAX_CONFIG_BYTES = 32 * 1024;
 const MAX_PATH_BYTES = 256;
-const THEME_ROOT = "/data/quickapp/files/ng.lst.corona/themes/";
 
 export interface ResourcePackMapping {
   source: string;
@@ -76,23 +77,6 @@ function validAbsolutePath(value: string): boolean {
   return true;
 }
 
-function validRelativeDestination(value: string): boolean {
-  if (!value || value[0] === "/" || utf8Length(value) >= MAX_PATH_BYTES) return false;
-  let segmentStart = 0;
-  for (let i = 0; i <= value.length; i++) {
-    if (i < value.length) {
-      const code = value.charCodeAt(i);
-      if (code < 32 || code === 127 || value[i] === "\\" || value[i] === ":") return false;
-    }
-    if (i === value.length || value[i] === "/") {
-      const segment = value.slice(segmentStart, i);
-      if ((!segment && i < value.length) || segment === "." || segment === "..") return false;
-      segmentStart = i + 1;
-    }
-  }
-  return true;
-}
-
 function parseMappings(value: unknown, themeId: string): ResourcePackMapping[] {
   if (!Array.isArray(value) || value.length > MAX_MAPPING_RULES)
     throw new Error(`mappings 必须是最多 ${MAX_MAPPING_RULES} 条的数组`);
@@ -103,10 +87,10 @@ function parseMappings(value: unknown, themeId: string): ResourcePackMapping[] {
     const source = requiredText(item.source, `mappings[${index}].source`, MAX_PATH_BYTES - 1);
     const destination = requiredText(item.destination,
       `mappings[${index}].destination`, MAX_PATH_BYTES - 1);
-    if (!validAbsolutePath(source) || !validRelativeDestination(destination))
+    if (!validAbsolutePath(source) || !safeRelativeResourcePath(destination))
       throw new Error(`mappings[${index}] source 必须为绝对路径，destination 必须为安全的包内相对路径`);
-    const resolvedDestination = `${THEME_ROOT}${themeId}/${destination}`;
-    if (!validAbsolutePath(resolvedDestination))
+    const resolvedDestination = `${THEME_DESTINATION_ROOT}${themeId}/${destination}`;
+    if (!safeThemeDestination(resolvedDestination))
       throw new Error(`mappings[${index}].destination 展开后超过设备路径限制`);
     if ((source[source.length - 1] === "/") !==
         (destination[destination.length - 1] === "/"))
@@ -123,7 +107,7 @@ function parseMappings(value: unknown, themeId: string): ResourcePackMapping[] {
 }
 
 function serializeMappings(mappings: ResourcePackMapping[], themeId: string): string {
-  const destinationRoot = `${THEME_ROOT}${themeId}/`;
+  const destinationRoot = `${THEME_DESTINATION_ROOT}${themeId}/`;
   return mappings.map(rule =>
     `${rule.source}\t${destinationRoot}${rule.destination}\n`).join("");
 }
