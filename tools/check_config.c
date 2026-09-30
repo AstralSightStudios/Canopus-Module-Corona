@@ -1,8 +1,8 @@
 #include "resource_hook.h"
 #include <stdio.h>
 
-static struct rh_state state;
-static struct rh_rule staging[RH_RULES];
+static struct rh_rule backing[RH_RULES], staging[RH_RULES];
+static struct rh_state state = {.rules = backing, .rules_capacity = RH_RULES};
 static char text[RH_CONFIG_BYTES];
 
 static int read_file(void *cookie, void *out, uint32_t size) {

@@ -47,7 +47,7 @@ dark.crpack  (ZIP)
 }
 ```
 
-`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 是规范的唯一映射来源，最多 64 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。两者目录/文件结尾斜杠类型须相同。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 TAB、CR、LF 或控制字符。允许 `mappings` 为空，但 Manager 应提示该主题不会产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 64、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
+`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 是规范的唯一映射来源，最多 256 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。两者目录/文件结尾斜杠类型须相同。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 TAB、CR、LF 或控制字符。允许 `mappings` 为空，但 Manager 应提示该主题不会产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 256、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
 
 ### 解包与发送校验
 
@@ -79,7 +79,9 @@ themes/dark/icons/confirm.bin
 
 CRPack v1 的 `themeId` 取自 `canora.json`，限定为 1–12 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`canora.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
 
-Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级合并到不可变活动代次，低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块仍要求最多 64 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数。发送端导入检查文件路径安全、文件数和总大小；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
+Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级合并到不可变活动代次，低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块要求最多 256 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数；规则上限增加不改变每包最多 128 个传输文件（含 `canora.json`）及 manifest 最多 64 KiB 的限制。发送端导入检查文件路径安全、文件数和总大小；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
+
+模块发布配置时使用紧凑索引快照，按实际 TSV 字节数及有效规则数分配；定向刷新按需保留旧快照引用，引用释放后回收，不为第二份最大容量规则表永久预留额外 32 KiB Umem。读取及解析仍需临时缓冲，32 KiB 是配置字节预算，不是每份快照的固定常驻开销；分配失败保留 last-known-good 并在后续轮询重试。
 
 ## 消息格式
 

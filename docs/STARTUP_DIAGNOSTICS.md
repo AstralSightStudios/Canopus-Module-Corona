@@ -60,7 +60,10 @@ activate.end rc=0 errno=0 detail=0x...
 - `config.open`: negative results include errno captured **before** diagnostic
   file opens. ENOENT (2) is an empty pass-through startup, not an activation error.
 - `prepare.end`: `-2004` already installed; `-2005` non-ENOENT config open;
-  `-2006` staging allocation; `-2007` config read/validation; `-2013` snapshot allocation.
+  `-2006` input scratch or compact snapshot allocation; `-2007` config
+  read/validation. The former fixed-bank `-2013` allocation path is no longer used.
+  `config.alloc` and `snapshot.alloc` detail identify the actual-sized snapshot
+  (zero for an empty map); a missing config needs no rule-storage allocation.
 - `driver.valid`: detail is the POSIX open-slot address; rc is the identity check.
   `slot.expected` and `slot.observed` show the expected and actual callback values.
   `hook.end`: `-2008` driver/snapshot validation; `-2009` unexpected slot;

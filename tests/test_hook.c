@@ -23,9 +23,10 @@ static int read_chunk(void *cookie, void *out, uint32_t size) {
 }
 int main(void) {
     static struct rh_state s;
-    static struct rh_rule rules[RH_RULES];
+    static struct rh_rule rules[RH_RULES], backing[RH_RULES], saved_backing[RH_RULES];
     char out[RH_PATH], before[RH_PATH];
     rh_open_fn slot=original;
+    s.rules=backing; s.rules_capacity=RH_RULES;
     strcpy(rules[0].source,"/resource/");strcpy(rules[0].destination,RH_THEME_ROOT "base/");
     strcpy(rules[1].source,"/resource/icons/");strcpy(rules[1].destination,RH_THEME_ROOT "icons/");
     strcpy(rules[2].source,"/resource/font/MiSans-Regular-All.ttf");
@@ -43,9 +44,10 @@ int main(void) {
     assert(rh_resolve(&s,"/resource/./x",out)<0);
     {
         struct rh_state system_state;
-        struct rh_rule system_rules[2];
+        struct rh_rule system_rules[2], system_backing[2];
         memset(&system_state,0,sizeof(system_state));
         memset(system_rules,0,sizeof(system_rules));
+        system_state.rules=system_backing; system_state.rules_capacity=2;
         strcpy(system_rules[0].source,"/resource/");
         strcpy(system_rules[0].destination,RH_THEME_ROOT "base/");
         strcpy(system_rules[1].source,"/resource/icons/a.bin");
@@ -65,9 +67,11 @@ int main(void) {
     }
     memset(out,'x',sizeof(out));out[0]='/';assert(rh_resolve(&s,out,before)<0);
     strcpy(before,s.rules[0].destination);
+    memcpy(saved_backing,backing,sizeof(backing));
     strcpy(rules[0].destination,RH_THEME_ROOT "new/");
     strcpy(rules[1].destination,"/bad/");
     assert(rh_configure(&s,rules,2)<0);
+    assert(!memcmp(saved_backing,backing,sizeof(backing)));
     assert(!strcmp(before,s.rules[0].destination));
     assert(s.count==3);
     assert(rh_install(&s,&s,&slot,wrapper)==0);
@@ -116,11 +120,14 @@ int main(void) {
         assert(rh_read_config(&s,read_chunk,&r,buffer,sizeof(buffer),rules)==0);
         assert(!strcmp(s.rules[0].destination,RH_THEME_ROOT "loaded/"));
         strcpy(before,s.rules[0].destination);
+        memcpy(saved_backing,backing,sizeof(backing));
         r.offset=0; r.error=1;
         assert(rh_read_config(&s,read_chunk,&r,buffer,sizeof(buffer),rules)<0);
+        assert(!memcmp(saved_backing,backing,sizeof(backing)));
         assert(!strcmp(before,s.rules[0].destination));
         r.offset=0; r.error=0;
         assert(rh_read_config(&s,read_chunk,&r,buffer,sizeof(text)-2,rules)<0);
+        assert(!memcmp(saved_backing,backing,sizeof(backing)));
         assert(!strcmp(before,s.rules[0].destination));
         r.offset=0;
         assert(rh_read_config(&s,read_chunk,&r,buffer,sizeof(text)-1,rules)==0);

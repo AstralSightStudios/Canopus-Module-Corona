@@ -19,7 +19,7 @@ export const ACTIVE_GENERATIONS_URI = "internal://files/resource-active-generati
 
 const THEME_ROOT_URI = "internal://files/themes/";
 const ACTIVE_DIRECTORY_PREFIX = ".active-";
-const MAX_MAPPING_RULES = 64;
+const MAX_MAPPING_RULES = 256;
 const MAX_CONFIG_BYTES = 32 * 1024;
 const MAX_PATH_BYTES = 256;
 

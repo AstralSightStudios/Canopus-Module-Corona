@@ -4,7 +4,9 @@ Compiles the selected target source into a temporary fixed-address ELF and runs
 it against that exact AP. Native generic cache retirement/release, screen-tree
 traversal, image setter and style refresh execute AP instructions. Cache
 lookup/unlink/free, decoder info, style lookup and GUI leaves are explicitly
-modeled. No key or packaging script is read.
+modeled. Compact-snapshot integration additionally executes the compiled module
+constructor, activation, POSIX hook, control-file watcher and status writer with
+modeled VFS/timers. It bypasses signed loading; no key or packaging script is read.
 
 RESOURCE_HOOK_TARGET selects .139 (default) or .155. CLANG / LD_LLD may select
 the ARM-capable toolchain. Requires capstone, Unicorn and pyelftools.
@@ -28,10 +30,17 @@ IMAGE_CLASS = fw(0x2ca14cb8)
 DATA_CLASS = fw(0x2ca168c4)
 HEADER_CLASS = fw(0x2ca16944)
 DATA, HEADER, STATE = 0x3c701000, 0x3c702000, 0x3c780000
+# Legacy raw rules remain 512 bytes, but state now owns a pointer/capacity.
+RULES, RULE_BYTES, RULE_CAPACITY = 0x3c7a0000, 512, 256
+VIEW_BYTES = 12
 STOP = 0x1c73ff00
 
 
-class Reload(unittest.TestCase):
+class Harness(unittest.TestCase):
+    sources = tuple(ROOT / 'src' / (name + '.c') for name in
+                    ('platform', 'platform_band11', 'resource_hook'))
+    instruction_budget = 2000000
+
     @classmethod
     def setUpClass(cls):
         firmware_path = Path(os.environ.get(
@@ -44,16 +53,17 @@ class Reload(unittest.TestCase):
         objects = []
         clang = os.environ.get('CLANG', shutil.which('clang'))
         linker = os.environ.get('LD_LLD', shutil.which('ld.lld'))
-        for name in ('platform', 'platform_band11', 'resource_hook'):
-            obj = Path(cls.tmp.name) / f'{name}-{port}.o'
+        for source in cls.sources:
+            obj = Path(cls.tmp.name) / f'{source.stem}-{port}.o'
             subprocess.run([clang, '--target=arm-none-eabi', '-mcpu=cortex-m33',
                 '-mthumb', '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin',
                 '-fno-stack-protector', '-fno-unwind-tables', '-Os', '-Wall',
                 '-Wextra', '-Werror', f'-DRH_TARGET_155={port}',
                 '-I' + str(ROOT / 'include'),
+                '-I' + str(CANOPUS / 'sdk/c'),
                 '-I' + str(CANOPUS / 'manager/target/band11'),
                 '-I' + str(CANOPUS / 'targets' / TARGET / 'generated'),
-                '-c', str(ROOT / 'src' / (name + '.c')), '-o', str(obj)], check=True)
+                '-c', str(source), '-o', str(obj)], check=True)
             objects.append(str(obj))
         elf = Path(cls.tmp.name) / f'adapter-{port}.elf'
         subprocess.run([linker, '-Ttext=0x1c700000', '-e', 'rh_platform_retire_images',
@@ -69,10 +79,17 @@ class Reload(unittest.TestCase):
         self.u.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M33)
         n = (len(self.firmware) + 4095) & ~4095
         for address, size in [(0xc0c0000, n), (0x2c0c0000, n), (0x20000000, 0x160000),
-                              (0x3c700000, 0x100000), (0x3c350000, 0x20000), (0x1c700000, 0x40000)]:
+                              (0x3c700000, 0x100000), (0x3c350000, 0x20000), (0x1c700000, 0x40000),
+                              (0x00260000, 0x140000)]:
             self.u.mem_map(address, size)
         self.u.mem_write(0xc0c0000, self.firmware)
         self.u.mem_write(0x2c0c0000, self.firmware)
+        # Startup-copied libc/veneers used by the real LVGL POSIX open body.
+        for destination, offset, size in ((0x2006be00, 0x1b3c, 0xb710),
+                                           (0x20079420, 0xd24c, 0x2f8c)):
+            data = self.firmware[offset:offset + size]
+            self.u.mem_write(destination, data)
+            self.u.mem_write(destination - 0x1fe00000, data)
         self.load()
         self.next_memory = 0x3c703000
         self.drops, self.freed, self.queries, self.sizes, self.invalidations = [], [], [], [], []
@@ -91,8 +108,8 @@ class Reload(unittest.TestCase):
                 0 if self.alloc_fail else 65536, 0, 0, 0))
             return self.reg(0)
         self.hook(0xc34f0a0, mallinfo)
-        self.hook(0xc3507e8, lambda: self.mem(self.reg(2)))
-        self.hook(0xc34cd2c, lambda: 0)
+        self.alloc_hook = self.hook(0xc3507e8, lambda: self.mem(self.reg(2)))
+        self.free_hook = self.hook(0xc34cd2c, lambda: 0)
         self.hook(0xc38002c, lambda: self.u.mem_write(self.reg(0), bytes(self.reg(1))) or self.reg(0))
         self.hook(0xc3a4ace, self.lookup)
         self.hook(0xc3a472c, self.unlink)
@@ -105,9 +122,12 @@ class Reload(unittest.TestCase):
             self.word(cache + 8, 16)
             self.word(cache + 24, 0x1c73fe01)
             self.word(cache + 48, 4)
-        self.u.mem_write(STATE, b'/resource/\0')
-        self.u.mem_write(STATE + 256, b'/data/quickapp/files/ng.lst.corona/themes/current/\0')
-        self.word(STATE + 64 * 512, 1)
+        self.u.mem_write(RULES, bytes(RULE_CAPACITY * RULE_BYTES))
+        self.u.mem_write(RULES, b'/resource/\0')
+        self.u.mem_write(RULES + 256, b'/data/quickapp/files/ng.lst.corona/themes/current/\0')
+        # ARM rh_state: rules, count, redirected, fallback, original, driver,
+        # installed, rules_capacity. Raw rule storage is NOT inline in state.
+        self.u.mem_write(STATE, struct.pack('<8I', RULES, 1, 0, 0, 0, 0, 0, RULE_CAPACITY))
         # Real native NULL-root walk: display list -> screens -> spec_attr children.
         self.display = self.mem(1024)
         self.word(0x200bd1e8 + 12, self.display)
@@ -175,7 +195,7 @@ class Reload(unittest.TestCase):
         self.u.reg_write(UC_ARM_REG_SP, 0x20150000)
         self.u.reg_write(UC_ARM_REG_LR, STOP | 1)
         pc = self.symbols[name] if isinstance(name, str) else name
-        self.u.emu_start(pc | 1, STOP, count=2000000)
+        self.u.emu_start(pc | 1, STOP, count=self.instruction_budget)
         self.assertEqual(self.u.reg_read(UC_ARM_REG_PC), STOP, 'instruction budget exhausted')
         return self.reg(0)
 
@@ -260,6 +280,37 @@ class Reload(unittest.TestCase):
         self.assertEqual(self.reg(1), 0)
         return self.styles.get(self.reg(0), 0)
 
+    def view(self, rules=0, count=0):
+        view = self.mem(VIEW_BYTES)
+        # ARM rh_mapping_view: legacy rules, count, compact snapshot (NULL for
+        # these manually built legacy-rule probes).
+        self.u.mem_write(view, struct.pack('<3I', rules, count, 0))
+        return view
+
+
+class Reload(Harness):
+    def test_raw_pointer_state_and_view_support_rule_256(self):
+        # Legacy raw views deliberately revalidate all rows; the compact
+        # production path avoids that quadratic work on each resolution.
+        self.instruction_budget = 20000000
+        for index in range(RULE_CAPACITY):
+            rule = RULES + index * RULE_BYTES
+            self.u.mem_write(rule, f'/resource/icon{index:03d}.bin\0'.encode())
+            self.u.mem_write(rule + 256,
+                f'/data/quickapp/files/ng.lst.corona/themes/current/icon{index:03d}.bin\0'.encode())
+        self.word(STATE + 4, RULE_CAPACITY)
+        view = self.view(RULES, RULE_CAPACITY)
+        affected = [self.cached(DATA, '/resource/icon255.bin')[1],
+                    self.cached(DATA, '/resource/icon000.bin')[1]]
+        self.cached(DATA, '/resource/icon256.bin')
+        self.assertEqual(self.call('rh_platform_retire_images', STATE), 0)
+        self.assertEqual(self.drops, affected)
+        image = self.obj('/resource/icon255.bin')
+        self.screens(image)
+        self.assertEqual(self.call('rh_platform_refresh_mapped_images', 0, view), 0)
+        self.assertEqual(self.word(image + 68), 77)
+        self.assertEqual(self.word(STATE + 28), RULE_CAPACITY)
+
     def test_retire_only_affected_file_keys_in_both_caches(self):
         retained = []
         affected = []
@@ -281,14 +332,10 @@ class Reload(unittest.TestCase):
         self.assertEqual(len(self.drops), 4)
 
     def test_empty_mapping_refreshes_old_sources_to_original(self):
-        rules = self.mem(512)
+        rules = self.mem(RULE_BYTES)
         self.u.mem_write(rules, b'/resource/\0')
         self.u.mem_write(rules + 256, b'/data/quickapp/files/ng.lst.corona/themes/current/\0')
-        previous, current = self.mem(8), self.mem(8)
-        self.word(previous, rules)
-        self.word(previous + 4, 1)
-        self.word(current, 0)
-        self.word(current + 4, 0)
+        previous, current = self.view(rules, 1), self.view()
 
         image = self.obj('/resource/app/settings/launcher.bin')
         self.screens(image)
@@ -495,6 +542,322 @@ class Reload(unittest.TestCase):
         self.assertEqual(self.drops, [])
         self.word(HEADER, HEADER_CLASS)
         self.assertEqual(self.call('rh_platform_retire_images', STATE), 0)
+
+
+class ModuleControl(Harness):
+    """Real compact module and exact AP; signed Supervisor loading is bypassed."""
+    sources = Harness.sources + (ROOT / 'src/config.c', ROOT / 'src/module.c',
+                                  CANOPUS / 'runtime/control/canopus_control.c')
+    instruction_budget = 20000000
+    app_root = '/data/quickapp/files/ng.lst.corona/'
+    config_path = app_root + 'mappings.tsv'
+    request_path = app_root + 'reload.request'
+    result_path = app_root + 'reload.result'
+    theme_root = app_root + 'themes/'
+
+    def setUp(self):
+        super().setUp()
+        self.disk = {self.result_path: bytes(256)}
+        self.files, self.allocations = {}, {}
+        self.next_fd = 3
+        self.descriptor = None
+        self.errno = self.mem(4)
+        self.timers = {}
+        self.next_timer = 0x3c7e0000
+        self.fail_allocation = False
+        self.u.hook_del(self.alloc_hook)
+        self.u.hook_del(self.free_hook)
+        self.hook(0xc3507e8, self.allocate)
+        self.hook(0xc34cd2c, self.free)
+        self.hook(0xc342c54, self.opened)
+        self.hook(0xc33d784, self.read_file)
+        self.hook(0xc33dc4e, self.write_file)
+        self.hook(0xc33818c, self.close_file)
+        self.hook(0xc349538, lambda: self.errno)
+        self.hook(0xc3a5e34, lambda: 0)  # native POSIX failure logging only
+        self.hook(0xc3abd20, self.create_timer)
+        self.hook(0xc3abe70, self.delete_timer)
+        self.hook(0xc3809a4, lambda: 1)  # invalidation event leaf only
+        self.word(0x200bd3b8, ord('/'))
+        self.word(0x200bd3bc, 4096)
+        self.word(0x200bd3c4, 0xc3a6195)
+        self.word(self.display, 192)
+        self.word(self.display + 4, 490)
+        self.word(self.display + 696, self.display + 800)
+        self.word(self.display + 56, 1 << 8)
+        self.word(self.display + 608, 1)
+        self.word(0x200bd200, self.display)
+        # Execute the real constructor/registration message, with /dev/canopus
+        # modeled locally rather than booting a signed Supervisor fixture.
+        self.call('ctor')
+        self.assertEqual(self.descriptor, self.symbols['canopus_module_descriptor'])
+
+    def string(self, address):
+        out = bytearray()
+        for index in range(1024):
+            byte = self.u.mem_read(address + index, 1)[0]
+            if not byte:
+                return out.decode()
+            out.append(byte)
+        self.fail('unterminated VFS path')
+
+    def allocate(self):
+        if self.fail_allocation:
+            return 0
+        size = self.reg(2)
+        address = self.mem(size)
+        self.assertLessEqual(self.next_memory, STATE, 'modeled heap overlaps fixtures')
+        self.allocations[address] = size
+        return address
+
+    def free(self):
+        address = self.reg(0)
+        self.assertIn(address, self.allocations)
+        self.assertNotIn(address, self.freed, 'double free')
+        self.freed.append(address)
+        # Make stale snapshot accesses observable, not accidentally valid rules.
+        self.u.mem_write(address, b'\xdd' * self.allocations[address])
+        return 0
+
+    def live_allocations(self):
+        return {address: size for address, size in self.allocations.items()
+                if address not in self.freed}
+
+    def assert_compact_snapshot(self, config):
+        # Check the production allocation itself, not just status.count: one
+        # 16-byte header, 8-byte indexes and pool-relative TSV destinations.
+        live = self.live_allocations()
+        self.assertEqual(len(live), 1)
+        address, allocated = next(iter(live.items()))
+        references, size, pool_bytes, count = struct.unpack('<4I', self.u.mem_read(address, 16))
+        expected = dict(line.split(b'\t') for line in config.splitlines())
+        self.assertEqual(references, 1)
+        self.assertEqual(count, len(expected))
+        self.assertEqual(pool_bytes, sum(len(source) + len(destination) + 2
+                                        for source, destination in expected.items()))
+        self.assertEqual(size, allocated)
+        self.assertEqual(size, 16 + count * 8 + pool_bytes)
+        pool = address + 16 + count * 8
+        actual = {}
+        for index in range(count):
+            source, destination, source_length, destination_length, flags, reserved = struct.unpack(
+                '<HHBBBB', self.u.mem_read(address + 16 + index * 8, 8))
+            self.assertEqual((flags, reserved), (0, 0))
+            self.assertLess(source + source_length, pool_bytes)
+            self.assertLess(destination + destination_length, pool_bytes)
+            key = bytes(self.u.mem_read(pool + source, source_length + 1))
+            value = bytes(self.u.mem_read(pool + destination, destination_length + 1))
+            self.assertEqual(key[-1:], b'\0')
+            self.assertEqual(value[-1:], b'\0')
+            actual[key[:-1]] = value[:-1]
+        self.assertEqual(actual, expected)
+
+    def opened(self):
+        path, mode = self.string(self.reg(0)), self.reg(1)
+        if path == '/dev/canopus':
+            data = None
+        elif mode & 4:
+            data = bytearray()
+        elif path in self.disk:
+            data = bytearray(self.disk[path])
+        else:
+            self.word(self.errno, 2)
+            return -1
+        fd = self.next_fd
+        self.next_fd += 1
+        self.files[fd] = [data, 0, path]
+        return fd
+
+    def read_file(self):
+        data, offset, _ = self.files[self.reg(0)]
+        block = data[offset:offset + min(self.reg(2), 173)]
+        self.u.mem_write(self.reg(1), bytes(block))
+        self.files[self.reg(0)][1] += len(block)
+        return len(block)
+
+    def write_file(self):
+        data, offset, path = self.files[self.reg(0)]
+        if path == '/dev/canopus':
+            self.assertEqual(self.reg(2), 40)
+            self.assertEqual(self.word(self.reg(1)), 0x31524d43)
+            self.descriptor = self.word(self.reg(1) + 4)
+            return 40
+        size = min(self.reg(2), 173)
+        data[offset:offset + size] = self.u.mem_read(self.reg(1), size)
+        self.files[self.reg(0)][1] += size
+        return size
+
+    def close_file(self):
+        data, _, path = self.files.pop(self.reg(0))
+        if data is not None:
+            self.disk[path] = bytes(data)
+        return 0
+
+    def create_timer(self):
+        callback, period, cookie = (self.reg(index) for index in range(3))
+        self.assertIn(period, (50, 1000))
+        self.assertEqual(cookie, 0)
+        timer = self.next_timer
+        self.next_timer += 32
+        self.timers[timer] = (period, callback)
+        return timer
+
+    def delete_timer(self):
+        self.assertIn(self.reg(0), self.timers)
+        del self.timers[self.reg(0)]
+        return 0
+
+    def tick(self, period=1000):
+        timers = [timer for timer, (ms, _) in self.timers.items() if ms == period]
+        self.assertTrue(timers, f'no live {period} ms timer')
+        timer = timers[-1]
+        self.call(self.timers[timer][1], timer)
+
+    def status(self):
+        writer, output = self.mem(24), self.mem(40)
+        self.u.mem_write(writer, struct.pack('<6I', output, 40, 0, 0, 1, 1))
+        self.assertEqual(self.call(self.word(self.descriptor + 140), writer), 0)
+        return struct.unpack('<10I', self.u.mem_read(output, 40))
+
+    def open_path(self, path):
+        # Keep the exact AP's POSIX slash addition and fd+1 encoding in the path.
+        handle = self.call(self.word(0x200bd3c4), 0x200bd3b8, self.text(path.lstrip('/')), 2)
+        self.assertGreater(handle, 0)
+        return self.files[handle - 1][2]
+
+    def revision(self, name, config):
+        signal = f'resource-hook-reload-v1\tng.lst.corona\t{name}\n'.encode()
+        self.disk[self.config_path] = config
+        self.disk[self.request_path] = signal
+        self.tick()
+        result = self.disk[self.result_path]
+        self.assertEqual(len(result), 256)
+        lines = result.rstrip(b'\0').splitlines(keepends=True)
+        self.assertEqual(lines[0], signal)
+        self.assertEqual(len(lines), 3)
+        checksum = 2166136261
+        for byte in lines[0] + lines[1]:
+            checksum = ((checksum ^ byte) * 16777619) & 0xffffffff
+        self.assertEqual(lines[2], f'{checksum}\n'.encode())
+        return lines[1].decode().rstrip('\n').split('\t')
+
+    def config(self, count=RULE_CAPACITY, pack='current'):
+        return ''.join(f'/resource/icon{index:03d}.bin\tthemes/{pack}/icon{index:03d}.bin\n'
+                       for index in range(count)).encode()
+
+    def test_256_rule_start_reload_identical_and_empty_snapshots(self):
+        self.disk[self.config_path] = self.config()
+        for index in (0, 255):
+            self.disk[self.theme_root + f'current/icon{index:03d}.bin'] = b'first theme'
+            self.disk[self.theme_root + f'next/icon{index:03d}.bin'] = b'next theme'
+            self.disk[f'/resource/icon{index:03d}.bin'] = b'original'
+        self.assertEqual(self.call('activate', 0), 0)
+        self.assertEqual(self.status()[2:4], (1, RULE_CAPACITY))
+        self.assert_compact_snapshot(self.config())
+        resident_hook = self.word(0x200bd3c4)
+        for index in (0, 255):
+            self.assertEqual(self.open_path(f'/resource/icon{index:03d}.bin'),
+                             self.theme_root + f'current/icon{index:03d}.bin')
+        # Production keeps a compact allocation, not two 256 x 512-byte banks.
+        self.assertLess(sum(self.live_allocations().values()), RULE_CAPACITY * RULE_BYTES)
+        before = self.live_allocations()
+        self.assertEqual(self.revision('same', self.config()), ['RHRS1', '5', '0', '0', '0'])
+        self.assertEqual(self.live_allocations(), before)
+        self.assertEqual(self.revision('next', self.config(pack='next')),
+                         ['RHRS1', '5', '0', '0', '0'])
+        self.assertEqual(self.status()[3], RULE_CAPACITY)
+        self.assert_compact_snapshot(self.config(pack='next'))
+        self.assertTrue(set(before).issubset(set(self.freed)), 'old snapshot not reclaimed')
+        self.assertEqual(self.word(0x200bd3c4), resident_hook)
+        for index in (0, 255):
+            self.assertEqual(self.open_path(f'/resource/icon{index:03d}.bin'),
+                             self.theme_root + f'next/icon{index:03d}.bin')
+        self.assertEqual(self.revision('empty', b''), ['RHRS1', '5', '0', '0', '0'])
+        self.assertEqual(self.status()[2:4], (1, 0))
+        self.assertEqual(self.open_path('/resource/icon255.bin'), '/resource/icon255.bin')
+        self.assertEqual(self.live_allocations(), {})
+        self.assertEqual(self.word(0x200bd3c4), resident_hook)
+
+    def test_synthetic_driver_reset_keeps_snapshot_and_replaces_only_watcher(self):
+        self.disk[self.config_path] = self.config()
+        self.disk[self.theme_root + 'current/icon255.bin'] = b'theme'
+        self.word(self.display + 56, (1 << 8) | (2 << 16))
+        self.assertEqual(self.call('activate', 0), 0)
+        resident_hook = self.word(0x200bd3c4)
+        resident_allocations = self.live_allocations()
+        old_watcher, = [timer for timer, (ms, _) in self.timers.items() if ms == 1000]
+        refresh_timer, = [timer for timer, (ms, _) in self.timers.items() if ms == 50]
+        self.disk[self.config_path] = b'invalid config'
+        self.word(0x200bd3c4, 0xc3a6195)  # synthetic lv_init slot reset only
+        self.assertEqual(self.call('activate', 0), 0)
+        self.assertEqual(self.word(0x200bd3c4), resident_hook)
+        self.assertEqual(self.live_allocations(), resident_allocations)
+        self.assertEqual([timer for timer, (ms, _) in self.timers.items() if ms == 50],
+                         [refresh_timer])
+        new_watcher = [timer for timer, (ms, _) in self.timers.items() if ms == 1000][-1]
+        self.assertNotEqual(new_watcher, old_watcher)
+        self.call(self.timers[old_watcher][1], old_watcher)
+        self.assertNotIn(old_watcher, self.timers)
+        self.assertIn(new_watcher, self.timers)
+        self.assertIn(refresh_timer, self.timers)
+        self.assertEqual(self.open_path('/resource/icon255.bin'),
+                         self.theme_root + 'current/icon255.bin')
+        self.word(self.display + 56, 1 << 8)
+        self.tick(50)
+        self.assertNotIn(refresh_timer, self.timers)
+        self.assertIn(new_watcher, self.timers)
+        self.assert_compact_snapshot(self.config())
+
+    def test_old_compact_snapshot_survives_until_50ms_owner_refresh(self):
+        self.disk[self.config_path] = self.config()
+        self.disk[self.theme_root + 'next/icon255.bin'] = b'next theme'
+        self.assertEqual(self.call('activate', 0), 0)
+        previous = self.live_allocations()
+        image = self.obj('/resource/icon255.bin')
+        self.screens(image)
+        source = self.word(image + 52)
+        self.word(self.display + 56, (1 << 8) | (2 << 16))
+        self.assertEqual(self.revision('pending', self.config(pack='next')),
+                         ['RHRS1', '5', '0', '1', '0'])
+        self.assertEqual(len(self.live_allocations()), 2)
+        self.assertTrue(set(previous).issubset(self.live_allocations()))
+        self.assertEqual(self.open_path('/resource/icon255.bin'),
+                         self.theme_root + 'next/icon255.bin')
+        self.tick(50)
+        self.assertTrue(set(previous).issubset(self.live_allocations()))
+        self.assertEqual(self.queries, [])  # busy render is never mutated
+        self.word(self.display + 56, 1 << 8)
+        self.tick(50)
+        self.assertTrue(set(previous).issubset(set(self.freed)))
+        self.assert_compact_snapshot(self.config(pack='next'))
+        self.assertEqual(self.queries, [source, source])
+        self.assertEqual(self.word(image + 52), source)
+        self.assertEqual(self.word(image + 68), 77)
+        self.assertEqual([period for period, _ in self.timers.values()], [1000])
+
+    def test_failed_257_rule_reload_preserves_256_rule_snapshot(self):
+        self.disk[self.config_path] = self.config()
+        self.disk[self.theme_root + 'current/icon255.bin'] = b'theme'
+        self.assertEqual(self.call('activate', 0), 0)
+        before = self.live_allocations()
+        result = self.revision('overflow', self.config(count=RULE_CAPACITY + 1))
+        self.assertEqual(result[0:2], ['RHRS1', '5'])
+        self.assertLess(int(result[2]), 0)
+        self.assertEqual(self.live_allocations(), before)
+        self.assertEqual(self.status()[3], RULE_CAPACITY)
+        self.assertEqual(self.open_path('/resource/icon255.bin'),
+                         self.theme_root + 'current/icon255.bin')
+
+    def test_missing_config_starts_empty_and_loads_256_rules_by_signal(self):
+        self.assertEqual(self.call('activate', 0), 0)
+        self.assertEqual(self.status()[2:4], (1, 0))
+        self.assertEqual([period for period, _ in self.timers.values()], [1000])
+        self.disk[self.theme_root + 'current/icon255.bin'] = b'theme'
+        self.assertEqual(self.revision('late', self.config()), ['RHRS1', '5', '0', '0', '0'])
+        self.assertEqual(self.status()[2:4], (1, RULE_CAPACITY))
+        self.assert_compact_snapshot(self.config())
+        self.assertEqual(self.open_path('/resource/icon255.bin'),
+                         self.theme_root + 'current/icon255.bin')
 
 
 if __name__ == '__main__':

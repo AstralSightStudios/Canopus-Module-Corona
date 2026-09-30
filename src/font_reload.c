@@ -648,7 +648,7 @@ static int revalidate(struct transaction *t,uint32_t mgr,uint32_t ctx) {
 int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
     struct transaction *t; uint32_t mgr,ctx,i,j; int r;
     if(changed) *changed=0;
-    if(!changed || !mapping || rh_validate_rules(mapping->rules,mapping->count)) return -1;
+    if(!changed || rh_validate_view(mapping)) return -1;
     if(state.running) return 1;
     if((r=roots(&mgr,&ctx))!=0) return r<0 ? -2201 : r;
     if(registry(mgr,ctx)) return -2202;

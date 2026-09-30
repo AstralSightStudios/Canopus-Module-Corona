@@ -371,7 +371,7 @@ async function main() {
   {
     const manyThemes = [];
     const overrides = {};
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < 256; i++) {
       const source = `/resource/${i}.bin`;
       const themeId = `p${i}`;
       manyThemes.push({ themeId, active: true, manifest: { mappings: [
@@ -379,18 +379,69 @@ async function main() {
       ] }, files: null });
       overrides[source] = '@system';
     }
+    const plain = activation.planActiveMappings(manyThemes, 'g-many');
+    assert.equal(plain.mappings.split('\n').filter(Boolean).length, 256,
+      '256 unique ordered mappings fit the module rule limit');
     const plan = activation.planActiveMappings(manyThemes, 'g-all-system', overrides);
-    assert.equal(plan.mappings.split('\n').filter(Boolean).length, 64,
+    assert.equal(plan.mappings.split('\n').filter(Boolean).length, 256,
       'System pass-through entries count against the module rule limit');
-    const source = '/resource/64.bin';
-    manyThemes.push({ themeId: 'p64', active: true, manifest: { mappings: [
-      { source, destination: '64.bin' }
+    const source = '/resource/256.bin';
+    manyThemes.push({ themeId: 'p256', active: true, manifest: { mappings: [
+      { source, destination: '256.bin' }
     ] }, files: null });
     overrides[source] = '@system';
-    assert.throws(() => activation.planActiveMappings(manyThemes, 'g-too-many', overrides), /64 条/);
+    assert.throws(() => activation.planActiveMappings(manyThemes, 'g-too-many'), /256 条/);
+    assert.throws(() => activation.planActiveMappings(manyThemes, 'g-too-many', overrides), /256 条/);
   }
 
-  console.log('Resource order persistence, priority overlays, per-file overrides and active generation cleanup passed.');
+  {
+    const file = makeFileApi();
+    const capacityMappings = Array.from({ length: 256 }, (_, index) => ({
+      source: `/resource/${index}.bin`, destination: 'shared.bin'
+    }));
+    const capacityManifest = { ...JSON.parse(manifest('capacity', capacityMappings[0])),
+      mappings: capacityMappings };
+    file.text.set('internal://files/themes/capacity/canora.json', JSON.stringify(capacityManifest));
+    const plan = await activation.regenerateActiveMappings(['capacity', systemId], 'g-capacity', file);
+    assert.equal(plan.mappings.split('\n').filter(Boolean).length, 256);
+    assert.equal(file.text.get(mappingsUri), plan.mappings);
+    file.text.set('internal://files/themes/extra/canora.json', manifest('extra', {
+      source: '/resource/extra.bin', destination: 'extra.bin'
+    }));
+    await assert.rejects(activation.regenerateActiveMappings(
+      ['capacity', 'extra', systemId], 'g-over-capacity', file), /256 条/);
+    assert.equal(file.text.get(mappingsUri), plan.mappings,
+      'merging 257 valid package rules must not publish a partial active config');
+  }
+
+  {
+    const file = makeFileApi();
+    const themeIds = ['budgeta', 'budgetb'];
+    const sourceBytes = 128 - Buffer.byteLength('\tthemes/budgeta/shared.bin\n');
+    const rules = Array.from({ length: 256 }, (_, index) => {
+      const prefix = `/resource/${String(index).padStart(3, '0')}/`;
+      const remaining = sourceBytes - Buffer.byteLength(prefix);
+      return { source: prefix + '中'.repeat(Math.floor(remaining / 3)) + 'x'.repeat(remaining % 3),
+        destination: 'shared.bin' };
+    });
+    themeIds.forEach((themeId, index) => file.text.set(
+      `internal://files/themes/${themeId}/canora.json`, JSON.stringify({
+        ...JSON.parse(manifest(themeId, rules[0])), mappings: rules.slice(index * 128, (index + 1) * 128)
+      })));
+    const plan = await activation.regenerateActiveMappings([...themeIds, systemId], 'g-budget', file);
+    assert.equal(Buffer.byteLength(plan.mappings), 32 * 1024);
+    assert.ok(plan.mappings.length < 32 * 1024, 'TSV limit uses bytes, not JS string length');
+    const firstUri = 'internal://files/themes/budgeta/canora.json';
+    const oversized = JSON.parse(file.text.get(firstUri));
+    oversized.mappings[0].source += 'x';
+    file.text.set(firstUri, JSON.stringify(oversized));
+    await assert.rejects(activation.regenerateActiveMappings(
+      [...themeIds, systemId], 'g-over-budget', file), /超过 32 KiB/);
+    assert.equal(file.text.get(mappingsUri), plan.mappings,
+      'valid per-pack TSV budgets must not bypass the merged active 32 KiB budget');
+  }
+
+  console.log('Resource order, 256-rule capacity, merged TSV byte budget, overlays and generation cleanup passed.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

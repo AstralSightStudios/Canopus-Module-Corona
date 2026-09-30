@@ -105,8 +105,7 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
 int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     uint32_t data = load32(RH_FW_IMAGE_CACHE_SLOT);
     uint32_t header = load32(RH_FW_HEADER_CACHE_SLOT);
-    if (!mapping || mapping->count > RH_RULES ||
-        (mapping->count && !mapping->rules)) return -1;
+    if (rh_validate_view(mapping)) return -1;
     if (!mapping->count) return 1;
     if (!cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
         !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
@@ -116,8 +115,7 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
 int rh_platform_retire_images(const struct rh_state *state) {
     struct rh_mapping_view view;
     if (!state) return -1;
-    view.rules = state->rules;
-    view.count = state->count;
+    view = rh_rules_view(state->rules, state->count);
     return rh_platform_retire_mapped_images(&view);
 }
 struct object_list { uint32_t objects[RH_RELOAD_LIMIT], count, overflow; };
@@ -167,10 +165,7 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
                                       const struct rh_mapping_view *current) {
     struct object_list *list;
     uint32_t i;
-    if (!current || current->count > RH_RULES ||
-        (current->count && !current->rules) ||
-        (previous && (previous->count > RH_RULES ||
-                      (previous->count && !previous->rules)))) return -1;
+    if (rh_validate_view(current) || (previous && rh_validate_view(previous))) return -1;
     if (!current->count && (!previous || !previous->count)) return 0;
     list = rh_platform_alloc(sizeof(*list));
     if (!list) return -1;
@@ -224,8 +219,7 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
 int rh_platform_refresh_images(const struct rh_state *state) {
     struct rh_mapping_view view;
     if (!state) return -1;
-    view.rules = state->rules;
-    view.count = state->count;
+    view = rh_rules_view(state->rules, state->count);
     return rh_platform_refresh_mapped_images(0, &view);
 }
 /* Both targets' lv_display_get_screen_active (0x0c3807ec) read +696,

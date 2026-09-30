@@ -25,6 +25,10 @@ for target in 139 155 1043; do
     else
         TARGET_DEFINE=
     fi
+    "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        $TARGET_DEFINE -I"$ROOT/include" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+        "$ROOT/tests/test_compact.c" -o "$ROOT/build/test_compact_${target}"
+    "$ROOT/build/test_compact_${target}"
     modes="default disabled"
     if [ "$target" != 1043 ]; then
         modes="default disabled experimental"
@@ -48,6 +52,7 @@ for target in 139 155 1043; do
             "$ROOT/build/test_module_${target}_${mode}" --empty-startup
         fi
         "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
+        "$ROOT/build/test_module_${target}_${mode}" --snapshots
         for fault in open-fail write-fail short-write fd-zero; do
             RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
         done

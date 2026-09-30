@@ -42,17 +42,36 @@ static int32_t font_result;
 static uint32_t font_last_changed;
 #endif
 static void *refresh_timer, *watch_timer;
-static struct rh_rule *rule_banks[2];
-static uint32_t rule_counts[2], rule_readers[2], active_rule_bank;
-static unsigned rule_writers[2];
-static struct rh_rule *refresh_previous_rules;
-static uint32_t refresh_previous_count;
+static struct rh_snapshot *active_snapshot, *refresh_previous_snapshot;
+static unsigned control_busy;
 static char last_reload_signal[RH_RELOAD_SIGNAL_MAX];
 static uint32_t last_reload_signal_size;
 static unsigned last_reload_signal_valid;
 static unsigned refresh_pending, cache_dropped, images_done, fonts_done, refreshing;
 static void publish_current_result(void);
 static char *result_number(char *, uint32_t);
+
+static void *snapshot_alloc(void *cookie, uint32_t size) {
+    (void)cookie;
+    return rh_platform_alloc(size);
+}
+static void snapshot_free(void *cookie, void *pointer) {
+    (void)cookie;
+    rh_platform_free(pointer);
+}
+static const struct rh_allocator snapshot_allocator = {0, snapshot_alloc, snapshot_free};
+/* Active ownership, refresh ownership and open/adapter pins all use the same
+ * reference count. The last release detaches under the IRQ lock and frees only
+ * after unlocking; a backend callback may keep an old generation alive. */
+static void snapshot_release(struct rh_snapshot *snapshot) {
+    uint32_t irq;
+    unsigned release = 0;
+    if (!snapshot) return;
+    irq = rh_platform_lock();
+    if (snapshot->references && --snapshot->references == 0u) release = 1;
+    rh_platform_unlock(irq);
+    if (release) rh_free_snapshot(&snapshot_allocator, snapshot);
+}
 
 /* Best-effort, bounded lifecycle diagnostics. No heap, graphics calls or I/O
  * under the IRQ lock; the lifecycle caller must already be serialized.
@@ -103,15 +122,12 @@ static void startup_record(const char *stage, int32_t rc, int error, uintptr_t d
  * rule, which ends the walk. The bound stops a pathological rule set that maps a
  * theme directory back onto itself from looping. */
 #if !RH_FONT_EXPERIMENT
-static void retarget_fonts(void) {
+static void retarget_fonts(const struct rh_mapping_view *current) {
     char name[RH_PATH], path[RH_PATH], mapped[RH_PATH];
-    struct rh_mapping_view current = {
-        rule_banks[active_rule_bank], rule_counts[active_rule_bank]
-    };
     uint32_t index = 0, guard = 0;
     while (guard++ < RH_RULES * 8u) {
         if (rh_platform_font_path_get(index, name, path)) return;
-        if (rh_resolve_view(&current, path, mapped) == 1 &&
+        if (rh_resolve_view(current, path, mapped) == 1 &&
             rh_platform_font_retarget(index, mapped) == 0) {
             if (fonts_retargeted != UINT32_MAX) fonts_retargeted++;
             continue;
@@ -126,15 +142,28 @@ static void retarget_fonts(void) {
  * until the selected target's verified retirement/owner stages and dirty-area
  * request complete; a failed adapter never counts as a completed retirement. */
 static void refresh_step(void *timer, unsigned ui_owner) {
-    struct rh_mapping_view current = {
-        rule_banks[active_rule_bank], rule_counts[active_rule_bank]
-    };
-    struct rh_mapping_view previous = {refresh_previous_rules, refresh_previous_count};
-    const struct rh_mapping_view *old = refresh_previous_rules ? &previous : 0;
-    (void)timer;
+    struct rh_mapping_view current, previous;
+    struct rh_snapshot *current_pin, *previous_pin, *previous_owner = 0;
+    const struct rh_mapping_view *old;
+    uint32_t irq;
     (void)ui_owner;
-    if (!refresh_pending || refreshing || !rh_platform_redraw_ready()) return;
+    irq = rh_platform_lock();
+    current_pin = active_snapshot;
+    previous_pin = refresh_previous_snapshot;
+    if (!refresh_pending || refreshing ||
+        (current_pin && current_pin->references == UINT32_MAX) ||
+        (previous_pin && previous_pin->references == UINT32_MAX)) {
+        rh_platform_unlock(irq);
+        return;
+    }
     refreshing = 1;
+    if (current_pin) current_pin->references++;
+    if (previous_pin) previous_pin->references++;
+    current = rh_snapshot_view(current_pin);
+    previous = rh_snapshot_view(previous_pin);
+    old = previous_pin ? &previous : 0;
+    rh_platform_unlock(irq);
+    if (!rh_platform_redraw_ready()) goto done;
     if (!cache_dropped) {
         int old_rc = old ? rh_platform_retire_mapped_images(old) : 1;
         int current_rc = old_rc >= 0 ? rh_platform_retire_mapped_images(&current) : -1;
@@ -165,22 +194,31 @@ static void refresh_step(void *timer, unsigned ui_owner) {
     /* Legacy path only affects future resolutions and cannot restore paths. */
     if (cache_dropped && !fonts_done) {
         fonts_done = 1;
-        retarget_fonts();
+        retarget_fonts(&current);
     }
 #endif
     if (cache_dropped && images_done && fonts_done && rh_platform_request_full_redraw() == 0) {
-        void *done = refresh_timer;
+        void *done;
+        irq = rh_platform_lock();
+        done = refresh_timer;
         if (redraws != UINT32_MAX) redraws++;
         refresh_pending = 0;
         refresh_timer = 0;
-        refresh_previous_rules = 0;
-        refresh_previous_count = 0;
+        previous_owner = refresh_previous_snapshot;
+        refresh_previous_snapshot = 0;
+        rh_platform_unlock(irq);
         /* A watch/manual retry may complete while an old UI timer handle is
          * stale after restart. Delete only the callback's own live timer; any
          * other still-live timer self-deletes when its wrapper next runs. */
         if (done && timer == done) rh_platform_timer_delete(done);
     }
+done:
+    snapshot_release(previous_owner);
+    snapshot_release(previous_pin);
+    snapshot_release(current_pin);
+    irq = rh_platform_lock();
     refreshing = 0;
+    rh_platform_unlock(irq);
 }
 static void refresh_timer_step(void *timer) {
     if (timer != refresh_timer) {
@@ -196,6 +234,7 @@ static int ensure_refresh_timer(void) {
     return refresh_pending && !refresh_timer ? -2011 : 0;
 }
 static int request_refresh(void) {
+    uint32_t irq = rh_platform_lock();
     if (!refresh_pending) {
         cache_dropped = 0;
         fonts_done = 0;
@@ -203,10 +242,10 @@ static int request_refresh(void) {
         font_result = 1;
 #endif
         images_done = 0;
-        refresh_previous_rules = 0;
-        refresh_previous_count = 0;
+        refresh_previous_snapshot = 0;
         refresh_pending = 1;
     }
+    rh_platform_unlock(irq);
     refresh_step(0, 0u);
     /* The redirect remains resident on allocation failure; do not report a
      * completed activation. A subsequent activate can retry scheduling. */
@@ -215,36 +254,24 @@ static int request_refresh(void) {
 
 static int rh_wrapper(void *d, const char *p, int m) {
     struct rh_mapping_view view;
-    uint32_t bank, irq;
+    struct rh_snapshot *snapshot;
+    uint32_t irq;
     int result;
     irq = rh_platform_lock();
-    bank = active_rule_bank;
-    if (bank > 1u || !rule_banks[bank] || rule_writers[bank] ||
-        rule_readers[bank] == UINT32_MAX) {
+    snapshot = active_snapshot;
+    if (snapshot && snapshot->references == UINT32_MAX) {
         rh_platform_unlock(irq);
         return S.original ? S.original(d, p, m) : 0;
     }
-    rule_readers[bank]++;
-    view.rules = rule_banks[bank];
-    view.count = rule_counts[bank];
+    if (snapshot) snapshot->references++;
+    view = rh_snapshot_view(snapshot);
     rh_platform_unlock(irq);
     result = rh_posix_open_view(&S, &view, d, p, m);
-    irq = rh_platform_lock();
-    if (rule_readers[bank]) rule_readers[bank]--;
-    rh_platform_unlock(irq);
+    snapshot_release(snapshot);
     return result;
 }
 static int config_read(void *cookie, void *out, uint32_t size) {
     return rh_platform_read(*(int *)cookie, out, size);
-}
-static int same_rules(const struct rh_mapping_view *view,
-                      const struct rh_rule *rules, uint32_t count) {
-    uint32_t i, j;
-    if (!view || view->count != count) return 0;
-    for (i = 0; i < count; i++) for (j = 0; j < RH_PATH; j++)
-        if (view->rules[i].source[j] != rules[i].source[j] ||
-            view->rules[i].destination[j] != rules[i].destination[j]) return 0;
-    return 1;
 }
 static int read_bounded_file(const char *path, char *out, uint32_t capacity,
                              uint32_t *used) {
@@ -362,108 +389,92 @@ static void publish_current_result(void) {
 }
 static void poll_control_file(void) {
     char signal[RH_RELOAD_SIGNAL_MAX];
-    uint32_t signal_size, count, active, inactive, old_count;
-    struct rh_mapping_view current;
-    char *text;
-    int fd, rc;
-    uint32_t irq;
-    if (refresh_pending || !S.installed || !rule_banks[0] || !rule_banks[1]) return;
+    uint32_t signal_size, irq;
+    struct rh_snapshot *captured = 0, *candidate = 0;
+    int fd, rc, identical;
+
+    /* Reserve the complete transaction before any reentrant firmware I/O.
+     * Active maps may be empty; NULL is the transparent zero-rule snapshot. */
+    irq = rh_platform_lock();
+    if (control_busy || refresh_pending || refreshing || !S.installed) {
+        rh_platform_unlock(irq);
+        return;
+    }
+    control_busy = 1;
+    captured = active_snapshot;
+    if (captured && captured->references == UINT32_MAX) {
+        control_busy = 0;
+        rh_platform_unlock(irq);
+        return;
+    }
+    if (captured) captured->references++;
+    rh_platform_unlock(irq);
+
     rc = read_bounded_file(RH_CONTROL_SIGNAL, signal, sizeof(signal), &signal_size);
     if (rc || !valid_reload_signal(signal, signal_size) ||
-        reload_signal_seen(signal, signal_size)) return;
-
-    irq = rh_platform_lock();
-    active = active_rule_bank;
-    inactive = active ^ 1u;
-    rc = active > 1u || !rule_banks[active] || !rule_banks[inactive] ||
-         rule_readers[inactive] != 0u || rule_writers[inactive] != 0u;
-    if (!rc) rule_writers[inactive] = 1u;
-    rh_platform_unlock(irq);
-    if (rc) return;
-
-    /* Reserve the inactive bank under the same IRQ lock used by readers before
-     * parsing into it. This prevents a later concurrent publication from
-     * turning the bank into a reader-visible snapshot mid-write. */
-    text = rh_platform_alloc(RH_CONFIG_BYTES);
-    if (!text) {
-        irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
-        publish_result(signal,signal_size,-2101,0,0);
-        return;
-    }
+        reload_signal_seen(signal, signal_size)) goto done;
     fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
     if (fd < 0) {
-        rh_platform_free(text);
-        irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
-        publish_result(signal,signal_size,-2102,0,0);
-        return;
+        publish_result(signal, signal_size, -2102, 0, 0);
+        goto done;
     }
-    rc = rh_read_staged_config(config_read, &fd, text, RH_CONFIG_BYTES,
-                               rule_banks[inactive], &count);
+    rc = rh_read_snapshot(config_read, &fd, &snapshot_allocator, &candidate);
     rh_platform_close(fd);
-    rh_platform_free(text);
     if (rc) {
-        irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
-        publish_result(signal,signal_size,-2103,0,0);
-        return;
+        publish_result(signal, signal_size, rc == -7 ? -2101 : -2103, 0, 0);
+        goto done;
     }
 
-    current.rules = rule_banks[active];
-    current.count = rule_counts[active];
-    if (same_rules(&current, rule_banks[inactive], count)) {
-        irq = rh_platform_lock(); rule_writers[inactive] = 0u; rh_platform_unlock(irq);
-        remember_reload_signal(signal, signal_size);
+    identical = rh_snapshot_equal(captured, candidate);
+    irq = rh_platform_lock();
+    /* A nested activation may have requested a refresh during parsing. Never
+     * replace its owner transaction, or publish against a changed generation. */
+    if (active_snapshot != captured || refresh_pending || refreshing) {
+        rh_platform_unlock(irq);
+        goto done;
+    }
+    if (!identical) {
+        /* Transfer the old active owner to refresh; candidate owns the new
+         * active map. Publish all stage flags atomically with the pointer. */
+        refresh_previous_snapshot = active_snapshot;
+        active_snapshot = candidate;
+        S.count = candidate ? candidate->count : 0u;
+        candidate = 0;
+        cache_dropped = images_done = 0;
+        fonts_done = RH_FONT_EXPERIMENT ? 0u : 1u;
 #if RH_FONT_EXPERIMENT
+        font_result = 1;
         font_last_changed = 0;
-        /* A new revision can explicitly retry a rejected font transaction even
-         * when its mapping text is unchanged. Successful identical configs are
-         * still no-ops; overwriting a font file in place is unsupported. */
+#endif
+        refresh_pending = 1;
+    }
+#if RH_FONT_EXPERIMENT
+    else {
+        font_last_changed = 0;
+        /* A new revision may retry a rejected font transaction, but reordered
+         * identical mappings never retire images or republish a generation. */
         if (font_result < 0) {
             fonts_done = 0;
             font_result = 1;
             cache_dropped = images_done = 1;
-            refresh_previous_rules = 0;
-            refresh_previous_count = 0;
+            refresh_previous_snapshot = 0;
             refresh_pending = 1;
-            refresh_step(0, 1u);
-            (void)ensure_refresh_timer();
         }
+    }
 #endif
-        publish_current_result();
-        return;
-    }
-
-    /* Hook readers pin the selected bank, and the short IRQ-protected index
-     * swap below publishes the complete parsed config at once. */
-    old_count = rule_counts[active];
-    irq = rh_platform_lock();
-    if (active_rule_bank != active || rule_readers[inactive] ||
-        !rule_writers[inactive]) {
-        rule_writers[inactive] = 0u;
-        rh_platform_unlock(irq);
-        return;
-    }
-    rule_counts[inactive] = count;
-    refresh_previous_rules = rule_banks[active];
-    refresh_previous_count = old_count;
-    active_rule_bank = inactive;
-    S.count = count;
-    rule_writers[inactive] = 0u;
     rh_platform_unlock(irq);
     remember_reload_signal(signal, signal_size);
-
-    /* Keep the old bank pinned through cache retirement and owner refresh. The
-     * watcher will not publish another snapshot while this request is pending. */
-    cache_dropped = 0;
-    images_done = 0;
-    fonts_done = RH_FONT_EXPERIMENT ? 0u : 1u;
-#if RH_FONT_EXPERIMENT
-    font_result = 1;
-    font_last_changed = 0;
-#endif
-    refresh_pending = 1;
-    refresh_step(0, 1u);
-    (void)ensure_refresh_timer();
+    if (refresh_pending) {
+        refresh_step(0, 1u);
+        (void)ensure_refresh_timer();
+    }
     publish_current_result();
+done:
+    snapshot_release(candidate);
+    snapshot_release(captured);
+    irq = rh_platform_lock();
+    control_busy = 0;
+    rh_platform_unlock(irq);
 }
 static void watch_step(void *timer) {
     if (timer != watch_timer) {
@@ -486,8 +497,8 @@ static int schedule_watch_timer(void) {
     return 0;
 }
 static int32_t prepare(const struct canopus_context_v1 *c) {
-    struct rh_rule *staging;
-    char *text;
+    struct rh_snapshot *candidate = 0, *previous;
+    uint32_t irq;
     int fd, rc = 0, error;
     (void)c;
     startup_record("prepare.begin", 0, 0, (uintptr_t)S.installed);
@@ -503,36 +514,25 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
             startup_record("prepare.end", -2005, error, 0);
             return -2005;
         }
-        /* Start with an empty snapshot; activation will keep the pass-through
-         * hook and watcher resident so a later theme can be loaded by signal. */
-        S.count = 0;
+        /* Missing configuration starts a resident pass-through without heap
+         * storage. A later revision can publish the first nonempty snapshot. */
     } else {
-        staging = rh_platform_alloc(sizeof(*staging) * RH_RULES + RH_CONFIG_BYTES);
-        startup_record("config.alloc", staging ? 0 : -2006, 0, (uintptr_t)staging);
-        if (!staging) rc = -2006;
-        else {
-            text = (char *)(staging + RH_RULES);
-            rc = rh_read_config(&S, config_read, &fd, text, RH_CONFIG_BYTES, staging);
-            startup_record("config.read", rc, 0, S.count);
-            rh_platform_free(staging);
-            if (rc) rc = -2007;
-        }
+        rc = rh_read_snapshot(config_read, &fd, &snapshot_allocator, &candidate);
+        startup_record("config.alloc", rc == -7 ? -2006 : 0, 0, (uintptr_t)candidate);
+        startup_record("config.read", rc, 0, candidate ? candidate->count : 0u);
         rh_platform_close(fd);
-    }
-    if (!rc && !rule_banks[1]) {
-        rule_banks[1] = rh_platform_alloc(sizeof(struct rh_rule) * RH_RULES);
-        if (!rule_banks[1]) rc = -2013;
-        startup_record("snapshot.alloc", rc, 0, (uintptr_t)rule_banks[1]);
+        if (rc) rc = rc == -7 ? -2006 : -2007;
     }
     if (!rc) {
-        rule_banks[0] = S.rules;
-        rule_counts[0] = S.count;
-        rule_counts[1] = 0;
-        rule_readers[0] = rule_readers[1] = 0;
-        rule_writers[0] = rule_writers[1] = 0;
-        active_rule_bank = 0;
+        irq = rh_platform_lock();
+        previous = active_snapshot;
+        active_snapshot = candidate;
+        S.count = candidate ? candidate->count : 0u;
         configured = 1;
-    } else if (!S.count) configured = 0;
+        rh_platform_unlock(irq);
+        startup_record("snapshot.alloc", 0, 0, (uintptr_t)candidate);
+        snapshot_release(previous);
+    }
     startup_record("prepare.end", rc, 0, S.count);
     return rc;
 }
@@ -559,7 +559,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
             return rc;
         }
     }
-    startup_record("hook.begin", 0, 0, active_rule_bank);
+    startup_record("hook.begin", 0, 0, (uintptr_t)active_snapshot);
     /* No allocation or firmware I/O is allowed while publishing the callback.
      * On the single-core target, prevent scheduling between state and slot. */
     irq = rh_platform_lock();
@@ -567,8 +567,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     valid = rh_platform_driver_valid();
     expected = (uintptr_t)rh_platform_original();
     if (slot) observed = (uintptr_t)*slot;
-    if (active_rule_bank > 1u || !configured || !rule_banks[active_rule_bank] ||
-        !valid) rc = -2008;
+    if (!configured || !valid) rc = -2008;
     else if (!slot || (observed != expected && *slot != rh_wrapper)) rc = -2009;
     else {
 #if RH_FONT_EXPERIMENT

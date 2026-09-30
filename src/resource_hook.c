@@ -1,4 +1,4 @@
-#include "resource_hook.h"
+#include "resource_hook_internal.h"
 #include <stddef.h>
 
 static uint32_t length(const char *s) {
@@ -12,8 +12,8 @@ static int prefix(const char *a, const char *b, uint32_t n) {
     for (i = 0; i < n; i++) if (!a[i] || a[i] != b[i]) return 0;
     return 1;
 }
-static int valid(const char *s) {
-    uint32_t i, start, n = length(s);
+static int valid_length(const char *s, uint32_t n) {
+    uint32_t i, start;
     if (!n || n >= RH_PATH || s[0] != '/') return 0;
     start = 1;
     for (i = 1; i <= n; i++) {
@@ -27,6 +27,9 @@ static int valid(const char *s) {
         }
     }
     return 1;
+}
+static int valid(const char *s) {
+    return valid_length(s, length(s));
 }
 static int system_destination(const char *destination) {
     static const char system[] = RH_SYSTEM_DESTINATION;
@@ -44,17 +47,61 @@ static int rule_ok(const struct rh_rule *r) {
     return (r->source[a-1u] == '/') == (r->destination[b-1u] == '/');
 }
 
+static int legacy_compare(const struct rh_rule *rules, uint16_t a, uint16_t b) {
+    return rh_key_compare(rules[a].source, length(rules[a].source),
+                          rules[b].source, length(rules[b].source));
+}
+static void index_sift(uint16_t *order, uint32_t start, uint32_t n,
+                        const struct rh_rule *rules) {
+    uint32_t child;
+    while (start < n / 2u) {
+        uint16_t tmp;
+        child = start * 2u + 1u;
+        if (child + 1u < n && legacy_compare(rules, order[child], order[child+1u]) < 0)
+            child++;
+        if (legacy_compare(rules, order[start], order[child]) >= 0) return;
+        tmp = order[start]; order[start] = order[child]; order[child] = tmp;
+        start = child;
+    }
+}
 int rh_validate_rules(const struct rh_rule *r, uint32_t n) {
-    uint32_t i, j;
+    uint16_t order[RH_RULES];
+    uint32_t i;
     if (n > RH_RULES || (n && !r)) return -1;
     for (i = 0; i < n; i++) {
         if (!rule_ok(&r[i])) return -2;
-        for (j = 0; j < i; j++) {
-            uint32_t a = length(r[i].source);
-            if (a == length(r[j].source) && prefix(r[i].source, r[j].source, a)) return -3;
-        }
+        order[i] = (uint16_t)i;
     }
+    for (i = n / 2u; i > 0; i--) index_sift(order, i-1u, n, r);
+    for (i = n; i > 1; i--) {
+        uint16_t tmp = order[0]; order[0] = order[i-1u]; order[i-1u] = tmp;
+        index_sift(order, 0, i-1u, r);
+    }
+    for (i = 1; i < n; i++)
+        if (!legacy_compare(r, order[i-1u], order[i])) return -3;
     return 0;
+}
+
+struct rh_mapping_view rh_rules_view(const struct rh_rule *rules, uint32_t count) {
+    struct rh_mapping_view view = {rules, count, NULL};
+    return view;
+}
+struct rh_mapping_view rh_snapshot_view(const struct rh_snapshot *snapshot) {
+    struct rh_mapping_view view = {NULL, snapshot ? snapshot->count : 0, snapshot};
+    return view;
+}
+static int snapshot_header_ok(const struct rh_snapshot *snapshot) {
+    return snapshot->count && snapshot->count <= RH_RULES &&
+           snapshot->pool_bytes <= RH_CONFIG_BYTES + 1u &&
+           snapshot->allocation_bytes == sizeof(*snapshot) +
+               snapshot->count * sizeof(snapshot->rules[0]) + snapshot->pool_bytes;
+}
+int rh_validate_view(const struct rh_mapping_view *view) {
+    if (!view) return -1;
+    if (view->snapshot)
+        return !view->rules && view->count == view->snapshot->count &&
+               snapshot_header_ok(view->snapshot) ? 0 : -1;
+    return rh_validate_rules(view->rules, view->count);
 }
 
 static void copy_rules(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
@@ -68,7 +115,8 @@ static void copy_rules(struct rh_state *s, const struct rh_rule *r, uint32_t n) 
 
 int rh_configure(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
     int rc;
-    if (!s || s->installed || n > RH_RULES || (n && !r)) return -1;
+    if (!s || s->installed || n > RH_RULES || n > s->rules_capacity ||
+        (n && (!r || !s->rules))) return -1;
     /* Validate the complete transaction before changing any existing rule. */
     rc = rh_validate_rules(r, n);
     if (rc) return rc;
@@ -76,12 +124,52 @@ int rh_configure(struct rh_state *s, const struct rh_rule *r, uint32_t n) {
     return 0;
 }
 
+static const struct rh_indexed_rule *find_key(const struct rh_snapshot *snapshot,
+                                              const char *path, uint32_t n) {
+    const char *pool = rh_snapshot_pool(snapshot);
+    uint32_t low = 0, high = snapshot->count;
+    while (low < high) {
+        uint32_t middle = low + (high-low) / 2u;
+        const struct rh_indexed_rule *rule = &snapshot->rules[middle];
+        int cmp = rh_key_compare(path, n, pool + rule->source_offset, rule->source_length);
+        if (!cmp) return rule;
+        if (cmp < 0) high = middle;
+        else low = middle + 1u;
+    }
+    return NULL;
+}
+static int resolve_indexed(const struct rh_snapshot *snapshot, const char *path,
+                            uint32_t n, char out[RH_PATH]) {
+    static const char root[] = RH_APP_FILES_ROOT;
+    const struct rh_indexed_rule *selected = find_key(snapshot, path, n);
+    const char *pool = rh_snapshot_pool(snapshot);
+    uint32_t i, dst, base = sizeof(root)-1u;
+    /* Only slash-terminated ancestors are eligible. The first hit is deepest. */
+    for (i = n; !selected && i > 0; i--) {
+        if (i < n && path[i-1u] == '/') selected = find_key(snapshot, path, i);
+    }
+    if (!selected || (selected->flags & RH_INDEX_SYSTEM)) return 0;
+    dst = base + selected->destination_length;
+    if (dst + n - selected->source_length >= RH_PATH) return -2;
+    for (i = 0; i < base; i++) out[i] = root[i];
+    for (i = 0; i < selected->destination_length; i++)
+        out[base+i] = pool[selected->destination_offset+i];
+    for (i = selected->source_length; i <= n; i++)
+        out[dst+i-selected->source_length] = path[i];
+    return 1;
+}
+
 /* Public paths are absolute. This function does no I/O, allocation or recursion. */
 int rh_resolve_view(const struct rh_mapping_view *view, const char *path,
                     char out[RH_PATH]) {
-    uint32_t i, selected = RH_RULES, best = 0, n, dst, j;
-    if (!view || !view->rules || !out || !valid(path) || view->count > RH_RULES) return -1;
-    n = length(path);
+    uint32_t i, selected = RH_RULES, best = 0, n = length(path), dst, j;
+    if (!view || !out || !valid_length(path, n) || view->count > RH_RULES) return -1;
+    if (view->snapshot) {
+        if (view->rules || view->count != view->snapshot->count ||
+            !snapshot_header_ok(view->snapshot)) return -1;
+        return resolve_indexed(view->snapshot, path, n, out);
+    }
+    if (view->count && !view->rules) return -1;
     for (i = 0; i < view->count; i++) {
         uint32_t size = length(view->rules[i].source);
         int directory;
@@ -103,8 +191,7 @@ int rh_resolve_view(const struct rh_mapping_view *view, const char *path,
 int rh_resolve(const struct rh_state *s, const char *path, char out[RH_PATH]) {
     struct rh_mapping_view view;
     if (!s) return -1;
-    view.rules = s->rules;
-    view.count = s->count;
+    view = rh_rules_view(s->rules, s->count);
     return rh_resolve_view(&view, path, out);
 }
 
@@ -159,8 +246,7 @@ int rh_posix_open_view(struct rh_state *s, const struct rh_mapping_view *view,
 int rh_posix_open(struct rh_state *s, void *driver, const char *path, int mode) {
     struct rh_mapping_view view;
     if (!s) return 0;
-    view.rules = s->rules;
-    view.count = s->count;
+    view = rh_rules_view(s->rules, s->count);
     return rh_posix_open_view(s, &view, driver, path, mode);
 }
 

@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static struct rh_state state, snapshot;
-static struct rh_rule rules[RH_RULES];
+static struct rh_rule rules[RH_RULES], backing[RH_RULES], saved_backing[RH_RULES];
+static struct rh_state state = {.rules = backing, .rules_capacity = RH_RULES}, snapshot;
 static char text[RH_CONFIG_BYTES + 1], buffer[RH_CONFIG_BYTES];
 struct input { const char *p; uint32_t left; int oversized; };
 static int read_input(void *cookie, void *out, uint32_t size) {
@@ -22,8 +22,10 @@ static void rule(const char *source, const char *destination) {
 static void rejected(const char *source, const char *destination) {
     rule(source, destination);
     snapshot = state;
+    memcpy(saved_backing, backing, sizeof(backing));
     assert(rh_configure(&state, rules, 1) < 0);
     assert(!memcmp(&state, &snapshot, sizeof(state)));
+    assert(!memcmp(backing, saved_backing, sizeof(backing)));
 }
 static int calls, fail;
 static int original(void *d, const char *p, int mode) {
@@ -38,6 +40,20 @@ int main(void) {
     struct input input;
     rh_open_fn slot = original, second = original;
     rule("/resource/", RH_THEME_ROOT "base/");
+    {
+        struct rh_state empty = {0}, small;
+        struct rh_rule small_backing[1], saved_small[1];
+        assert(rh_configure(&empty, rules, 1) == -1);
+        small = empty; small.rules = small_backing; small.rules_capacity = 1;
+        assert(!rh_configure(&small, rules, 1));
+        memcpy(saved_small, small_backing, sizeof(saved_small));
+        assert(rh_configure(&small, rules, 2) == -1 && small.count == 1);
+        assert(!memcmp(saved_small, small_backing, sizeof(saved_small)));
+        input = (struct input){"/a/\tthemes/a/\n/b/\tthemes/b/\n", 28, 0};
+        assert(rh_read_config(&small, read_input, &input, buffer, sizeof(buffer), rules) == -1);
+        assert(!memcmp(saved_small, small_backing, sizeof(saved_small)));
+        rule("/resource/", RH_THEME_ROOT "base/");
+    }
     assert(!rh_configure(&state, rules, 1));
     rejected("relative/", RH_THEME_ROOT "base/");
     rejected("/resource", RH_THEME_ROOT "base/");
@@ -72,8 +88,11 @@ int main(void) {
     assert(!strcmp(path, RH_THEME_ROOT "base/icons/b.bin"));
     rule("/resource/", RH_THEME_ROOT "base/");
     rules[1] = rules[0];
+    snapshot = state; memcpy(saved_backing, backing, sizeof(backing));
     assert(rh_configure(&state, rules, 2) == -3);
     assert(rh_configure(&state, rules, RH_RULES + 1) < 0);
+    assert(!memcmp(&state, &snapshot, sizeof(state)));
+    assert(!memcmp(backing, saved_backing, sizeof(backing)));
     for (i = 0; i < RH_RULES; i++) {
         snprintf(rules[i].source, RH_PATH, "/resource/%u/", i);
         strcpy(rules[i].destination, RH_THEME_ROOT "base/");
@@ -103,13 +122,15 @@ int main(void) {
     input = (struct input){text, RH_CONFIG_BYTES, 0};
     assert(!rh_read_config(&state, read_input, &input, buffer, sizeof(buffer), rules));
     assert(state.count == 0);
-    snapshot = state;
+    snapshot = state; memcpy(saved_backing, backing, sizeof(backing));
     input = (struct input){text, RH_CONFIG_BYTES + 1, 0};
     assert(rh_read_config(&state, read_input, &input, buffer, sizeof(buffer), rules) == -6);
     assert(!memcmp(&state, &snapshot, sizeof(state)));
+    assert(!memcmp(backing, saved_backing, sizeof(backing)));
     input = (struct input){text, 0, 1};
     assert(rh_read_config(&state, read_input, &input, buffer, sizeof(buffer), rules) == -5);
     assert(!memcmp(&state, &snapshot, sizeof(state)));
+    assert(!memcmp(backing, saved_backing, sizeof(backing)));
 
     rule("/resource/", RH_THEME_ROOT "base/");
     assert(!rh_configure(&state, rules, 1));
@@ -126,6 +147,6 @@ int main(void) {
     assert(rh_posix_open(&state, &state, NULL, 2) == 0 && !calls);
     assert(rh_open(&state, &state, NULL, 2) == 0 && !calls);
     assert(rh_posix_open(&state, &snapshot, "resource/a", 2) == 1 && calls == 1);
-    puts("path/control-byte limits, 64 rules, exact 32KiB, transaction and saturation tests passed");
+    puts("path/control-byte limits, 256 rules, exact 32KiB, transaction and saturation tests passed");
     return 0;
 }

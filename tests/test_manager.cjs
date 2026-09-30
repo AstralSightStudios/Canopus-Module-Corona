@@ -40,8 +40,8 @@ async function testPortableDestinations() {
     assert.equal(compiled.status, 0);
     const boundary = path.join(temporary, 'import.js');
     require.cache[boundary] = { id: boundary, filename: boundary, loaded: true, exports: {} };
-    const { parseResourcePackManifest: parse, serializeResourcePackMappings: serialize } =
-      require(path.join(temporary, 'resource-pack.js'));
+    const { parseResourcePackManifest: parse, serializeResourcePackMappings: serialize,
+      validateResourcePackFiles: validateFiles } = require(path.join(temporary, 'resource-pack.js'));
     const { planActiveMappings: plan } = require(path.join(temporary, 'resource-activation.js'));
     const { removeInstalledTheme: remove } = require(path.join(temporary, 'resource-storage.js'));
     const { validateThemeRelativePath: validFile } = require(path.join(temporary, 'interconnect.js'));
@@ -98,6 +98,71 @@ async function testPortableDestinations() {
         .trim().split('\t')[1]) + 35, 255);
       assert.throws(() => manifest('top', destination + 'x', '/resource/a'));
     }
+    for (const source of [`/${'x'.repeat(254)}`, `/${'中'.repeat(84)}xx`]) {
+      assert.equal(Buffer.byteLength(source), 255);
+      const pack = manifest('top', 'a.bin', source);
+      assert.equal(plan([{ themeId: 'top', manifest: pack, files: null }], 'portable').mappings,
+        serialize(pack));
+      assert.throws(() => manifest('top', 'a.bin', source + 'x'), /source.*255/);
+      assert.throws(() => plan([{ themeId: 'top', files: null, manifest: {
+        ...pack, mappings: [{ source: source + 'x', destination: 'a.bin' }]
+      } }], 'portable'), /路径无效/);
+    }
+
+    const packObject = mappings => ({
+      format: 'canopus-resource-pack', formatVersion: 1, themeId: 'top', name: 'top', mappings
+    });
+    const parseMappings = mappings => parse(JSON.stringify(packObject(mappings)));
+    const capacityMappings = Array.from({ length: 256 }, (_, index) => ({
+      source: `/resource/${index}.bin`, destination: 'shared.bin'
+    }));
+    const capacityPack = parseMappings(capacityMappings);
+    assert.equal(capacityPack.mappings.length, 256);
+    assert.equal(serialize(capacityPack).split('\n').filter(Boolean).length, 256);
+    assert.doesNotThrow(() => validateFiles(capacityPack, ['canora.json', 'shared.bin']),
+      '256 source aliases may share one transmitted resource file');
+    assert.equal(plan([{ themeId: 'top', manifest: capacityPack, files: null }], 'portable').mappings,
+      serialize(capacityPack));
+    assert.throws(() => parseMappings([...capacityMappings, {
+      source: '/resource/256.bin', destination: 'shared.bin'
+    }]), /最多 256 条/);
+
+    // Rule capacity and TSV byte budget are independent, including multibyte sources.
+    for (const multibyte of [false, true]) {
+      const sourceBytes = 128 - Buffer.byteLength('\tthemes/top/shared.bin\n');
+      const budgetMappings = capacityMappings.map((mapping, index) => {
+        const prefix = `/resource/${String(index).padStart(3, '0')}/`;
+        const remaining = sourceBytes - Buffer.byteLength(prefix);
+        return { ...mapping, source: prefix + (multibyte
+          ? '中'.repeat(Math.floor(remaining / 3)) + 'x'.repeat(remaining % 3)
+          : 'x'.repeat(remaining)) };
+      });
+      const budgetPack = parseMappings(budgetMappings);
+      const tsv = serialize(budgetPack);
+      assert.equal(Buffer.byteLength(tsv), 32 * 1024);
+      if (multibyte) assert.ok(tsv.length < 32 * 1024);
+      assert.equal(plan([{ themeId: 'top', manifest: budgetPack, files: null }], 'portable').mappings,
+        tsv, 'exactly 32 KiB remains valid with 256 rules');
+      const oversized = budgetMappings.map((mapping, index) =>
+        index === 0 ? { ...mapping, source: mapping.source + 'x' } : mapping);
+      assert.equal(Buffer.byteLength(serialize({ ...budgetPack, mappings: oversized })), 32 * 1024 + 1);
+      assert.throws(() => parseMappings(oversized), /超过 32 KiB/);
+      assert.throws(() => plan([{ themeId: 'top', files: null, manifest: {
+        ...budgetPack, mappings: oversized
+      } }], 'portable'), /超过 32 KiB/);
+    }
+
+    // The larger rule cap must not relax the manifest or metadata byte limits.
+    const manifestBase = JSON.stringify({ ...packObject([]), padding: '' });
+    const paddingBytes = 64 * 1024 - Buffer.byteLength(manifestBase);
+    const fullManifest = JSON.stringify({ ...packObject([]),
+      padding: '中'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3) });
+    assert.equal(Buffer.byteLength(fullManifest), 64 * 1024);
+    assert.doesNotThrow(() => parse(fullManifest));
+    assert.throws(() => parse(fullManifest + ' '), /超过 64 KiB/);
+    assert.doesNotThrow(() => parse(JSON.stringify({ ...packObject([]), version: 'v'.repeat(64) })));
+    assert.throws(() => parse(JSON.stringify({ ...packObject([]), version: 'v'.repeat(65) })), /version/);
+
     const generation = 'g'.repeat(32);
     const maxOverlaySuffix = 255 - 35 - Buffer.byteLength(`themes/.active-${generation}/r0/`);
     const overlayThemes = suffix => themes.map(theme => ({ ...theme,
@@ -126,7 +191,7 @@ async function testPortableDestinations() {
     texts.set(uri, '/resource/a\t/data/quickapp/files/ng.lst.corona/themes/top/a\n');
     await remove('top', api); // Absolute TSV destinations have no legacy interpretation.
     assert.equal(removed.length, 2);
-    console.log('Portable relative TSV, overlays, overrides, deletion, traversal and byte-limit tests passed.');
+    console.log('Resource-pack 256-rule capacity, TSV/manifest byte budgets, portable paths, overlays and deletion tests passed.');
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

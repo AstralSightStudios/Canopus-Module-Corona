@@ -3,7 +3,7 @@ import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination 
 const RESOURCE_PACK_FORMAT = "canopus-resource-pack";
 const RESOURCE_PACK_VERSION = 1;
 const MAX_MANIFEST_BYTES = 64 * 1024;
-const MAX_MAPPING_RULES = 64;
+const MAX_MAPPING_RULES = 256;
 const MAX_CONFIG_BYTES = 32 * 1024;
 const MAX_PATH_BYTES = 256;
 

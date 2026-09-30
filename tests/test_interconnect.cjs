@@ -359,6 +359,18 @@ async function main() {
   assert.equal(resumedStates.at(-1).phase, 'success');
   assert.equal(resumedStates.at(-1).percent, 100);
 
+  // Mapping capacity does not change the independent 128-file transfer limit.
+  reply = messages(await deliver('T' + JSON.stringify({
+    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 129, totalBytes: 2
+  })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  assert.equal(JSON.parse(native.text.get('internal://files/interconnect-transfer.json')).themeId, 'dark');
+  reply = messages(await deliver('T' + JSON.stringify({
+    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 128, totalBytes: 2
+  })));
+  assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+  assert.equal(JSON.parse(native.text.get('internal://files/interconnect-transfer.json')).fileCount, 128);
+
   reply = messages(await deliver('T' + JSON.stringify({
     operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 1, totalBytes: 2
   })));
@@ -369,8 +381,65 @@ async function main() {
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
 
+  async function transferCapacityPack(ruleCount) {
+    // Many source aliases can reference one resource without raising the file limit.
+    const bytes = Buffer.from(JSON.stringify({ ...canoraObject, themeId: 'legacy',
+      mappings: Array.from({ length: ruleCount }, (_, index) => ({
+        source: `/resource/${index}.bin`, destination: 'shared.bin'
+      })) }));
+    const files = [
+      { relativePath: 'canora.json', bytes },
+      { relativePath: 'shared.bin', bytes: Buffer.from([7]) }
+    ];
+    let packets = messages(await deliver('T' + JSON.stringify({
+      operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: files.length,
+      totalBytes: bytes.length + 1
+    })));
+    assert(packets.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+    for (const [fileIndex, entry] of files.entries()) {
+      packets = messages(await deliver('T' + JSON.stringify({
+        operation: 'file', themeId: 'legacy', fileIndex,
+        relativePath: entry.relativePath, sizeBytes: entry.bytes.length
+      })));
+      assert(packets.some(packet => packet.operation === 'ack' && packet.itemType === 'file'));
+    }
+    packets = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
+    assert(packets.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+    for (const [fileIndex, entry] of files.entries()) {
+      const chunkSizeBytes = Math.min(4096, entry.bytes.length);
+      const chunkCount = Math.ceil(entry.bytes.length / chunkSizeBytes);
+      packets = messages(await deliver('P' + JSON.stringify({ themeId: 'legacy', fileIndex,
+        sizeBytes: entry.bytes.length, chunkSizeBytes, chunkCount })));
+      assert(packets.some(packet => packet.status === 'ready'));
+      const fileHex = fileIndex.toString(16).padStart(4, '0');
+      for (let index = 0; index < chunkCount; index++) {
+        const chunkHex = index.toString(16).padStart(4, '0');
+        const chunk = entry.bytes.slice(index * chunkSizeBytes, (index + 1) * chunkSizeBytes);
+        const acknowledgements = await deliver(`F${fileHex}${chunkHex}${encodeBase91(chunk)}`);
+        assert(acknowledgements.includes(`A${fileHex}${chunkHex}`));
+      }
+      assert((await deliver(`C${fileHex}`)).includes(`C${fileHex}`));
+    }
+    return messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'legacy' })));
+  }
+
+  reply = await transferCapacityPack(256);
+  assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  const capacityTsv = native.text.get('internal://files/themes/legacy/mappings.tsv');
+  assert.equal(capacityTsv.split('\n').filter(Boolean).length, 256);
+  assert.ok(Buffer.byteLength(capacityTsv) <= 32 * 1024);
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark', 'legacy']);
+  assert.equal(JSON.parse(native.text.get('internal://files/resource-files.json')).themes.legacy.length, 2);
+
+  reply = await transferCapacityPack(257);
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  assert.match(resumedStates.at(-1).message, /256 条/);
+  assert.equal(native.text.has('internal://files/themes/legacy/mappings.tsv'), false,
+    '257 rules must not publish a derived TSV or register the rejected package');
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
+
   receiver.stop();
-  console.log('Interconnect canora manifest, path validation, active-theme guard, Base91, chunk ACK, resume and finish tests passed.');
+  console.log('Interconnect 256-rule manifests, unchanged file limit, path validation, Base91, resume and finish tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true });

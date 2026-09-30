@@ -10,6 +10,13 @@ static const char config[] = "/resource/\tthemes/current/\n";
 static const char *input = config, *control_config, *control_signal;
 static unsigned position, control_position, signal_position;
 static unsigned config_opens, control_opens, signal_opens, closes, allocations, frees, persistent_allocs, registrations;
+struct temp_allocation { void *pointer; uint32_t size; int live; };
+static struct temp_allocation temp_allocations[4096];
+static uint32_t live_bytes, peak_bytes;
+static unsigned alloc_attempts, fail_alloc_at;
+static int reenter_read, nested_reload, activate_during_read;
+static void fire_timers(uint32_t);
+extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
 static int watcher_scheduled;
 static char result_record[256];
 static unsigned result_position, result_writes;
@@ -46,6 +53,18 @@ void rh_font_reload_disable(void) { assert(!locked); font_disabled++; }
 static int backend(void *d, const char *p, int mode) {
     assert(d == &driver && mode == 2);
     assert(!strcmp(p, backend_expected));
+    if (nested_reload) {
+        unsigned i, live = 0;
+        struct temp_allocation *old = NULL;
+        nested_reload = 0;
+        for (i = 0; i < allocations; i++) if (temp_allocations[i].live) {
+            old = &temp_allocations[i]; live++;
+        }
+        assert(live == 1 && old);
+        fire_timers(1000u);
+        /* Refresh has completed, but this backend still pins its old map. */
+        assert(old->live && persistent_allocs == 2);
+    }
     return 7;
 }
 static int other(void *d, const char *p, int mode) { (void)d; (void)p; (void)mode; return 0; }
@@ -100,6 +119,16 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     unsigned remaining;
     assert(!locked);
     if (fail_read) return -1;
+    if (fd == 13 && reenter_read) {
+        unsigned opened = control_opens;
+        reenter_read = 0;
+        fire_timers(1000u);
+        assert(control_opens == opened); /* The outer control writer owns I/O. */
+    }
+    if (fd == 13 && activate_during_read) {
+        activate_during_read = 0;
+        assert(canopus_module_descriptor.activate(NULL) == 0);
+    }
     if (fd == 11) { data = input; cursor = &position; }
     else if (fd == 12) { data = control_signal; cursor = &signal_position; }
     else { assert(fd == 13); data = control_config; cursor = &control_position; }
@@ -150,15 +179,32 @@ void rh_platform_close(int fd) {
     assert(fd == registration_fd || fd == 11 || fd == 12 || fd == 13); closes++;
 }
 void *rh_platform_alloc(uint32_t size) {
-    assert(!locked && (size == sizeof(struct rh_rule) * RH_RULES + RH_CONFIG_BYTES ||
-                       size == sizeof(struct rh_rule) * RH_RULES));
-    if (fail_alloc) return NULL;
-    allocations++;
-    if (size == sizeof(struct rh_rule) * RH_RULES && !persistent_allocs)
-        persistent_allocs++;
-    return malloc(size);
+    void *pointer;
+    assert(!locked && size && size <= RH_CONFIG_BYTES + 1u +
+           sizeof(struct rh_snapshot) + RH_RULES * sizeof(struct rh_indexed_rule));
+    if (++alloc_attempts == fail_alloc_at || fail_alloc) return NULL;
+    assert(allocations < sizeof(temp_allocations) / sizeof(temp_allocations[0]));
+    pointer = malloc(size);
+    assert(pointer);
+    temp_allocations[allocations++] = (struct temp_allocation){pointer, size, 1};
+    persistent_allocs++;
+    live_bytes += size;
+    if (live_bytes > peak_bytes) peak_bytes = live_bytes;
+    return pointer;
 }
-void rh_platform_free(void *p) { assert(!locked && p); frees++; free(p); }
+void rh_platform_free(void *p) {
+    unsigned i;
+    assert(!locked && p);
+    for (i = 0; i < allocations; i++) if (temp_allocations[i].pointer == p && temp_allocations[i].live) {
+        temp_allocations[i].live = 0;
+        live_bytes -= temp_allocations[i].size;
+        persistent_allocs--;
+        frees++;
+        free(p);
+        return;
+    }
+    assert(!"foreign or double free");
+}
 void *rh_platform_driver(void) { assert(locked); return &driver; }
 rh_open_fn *rh_platform_slot(void) { assert(locked); return &slot; }
 rh_open_fn rh_platform_original(void) { assert(locked); return backend; }
@@ -166,8 +212,8 @@ int rh_platform_driver_valid(void) { assert(locked); return driver_valid; }
 uint32_t rh_platform_lock(void) { assert(!locked); locked = 1; return 42; }
 void rh_platform_unlock(uint32_t irq) { assert(locked && irq == 42); locked = 0; }
 int rh_platform_retire_mapped_images(const struct rh_mapping_view *view) {
-    assert(view && view->rules && view->count <= 1);
-    assert(!rh_validate_rules(view->rules, view->count));
+    assert(view && view->count <= RH_RULES);
+    assert(!rh_validate_view(view));
     if (!view->count || unsupported) return 1;
     assert(!locked);  /* image invalidation must run outside the interrupt lock */
     if (!image_cache_ready) return -1;
@@ -179,7 +225,7 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
     char mapped[RH_PATH];
     int old_match = previous ? rh_resolve_view(previous, "/resource/icon.bin", mapped) : 0;
     int new_match;
-    assert(!locked && current && current->rules && current->count <= 1);
+    assert(!locked && current && current->count <= RH_RULES && !rh_validate_view(current));
     new_match = rh_resolve_view(current, "/resource/icon.bin", mapped);
     assert(old_match >= 0 && new_match >= 0); /* Font-only exact rules need no image owner. */
     if (unsupported) return 1;
@@ -216,11 +262,12 @@ static void fire_timers(uint32_t interval) {
         struct mock_timer *timer = &mock_timers[i];
         if (timer->active && timer->interval == interval) {
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+            unsigned previous_ui_timer = in_ui_timer;
             in_ui_timer = 1;
 #endif
             timer->callback(timer);
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
-            in_ui_timer = 0;
+            in_ui_timer = previous_ui_timer;
 #endif
         }
     }
@@ -268,7 +315,6 @@ int rh_platform_request_full_redraw(void) {
 static uint32_t u32(const unsigned char *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
-extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
 static int test_startup_diagnostics(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     const char *fault = getenv("RH_TEST_REGISTRATION");
@@ -527,8 +573,117 @@ static void test_relative_config(void) {
     strcat(text, "x");
     assert(rh_parse_config(text, (uint32_t)strlen(text), rules, 2, &count) == -4);
 }
+static char capacity_config[RH_CONFIG_BYTES + 1u];
+static void capacity_rules(unsigned count, int reverse, const char *generation) {
+    unsigned i, used = 0;
+    for (i = 0; i < count; i++) {
+        unsigned index = reverse ? count - i - 1u : i;
+        int written = snprintf(capacity_config + used, sizeof(capacity_config) - used,
+            "/resource/%u.bin\tthemes/%s/%u.bin\n", index, generation, index);
+        assert(written > 0 && (unsigned)written < sizeof(capacity_config) - used);
+        used += (unsigned)written;
+    }
+    control_config = capacity_config;
+}
+static int test_compact_snapshots(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    struct canopus_status_writer_v1 w;
+    unsigned char status[48];
+    unsigned before, resident;
+    uint32_t bytes;
+    assert(d->activate(NULL) == 0);
+    fire_timers(50u);
+    assert(persistent_allocs == 1 && live_bytes < 256u);
+
+    capacity_rules(RH_RULES, 0, "p");
+    control_signal = "resource-hook-reload-v1\tcapacity-256\n";
+    fire_timers(1000u);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 12) == RH_RULES);
+    assert(persistent_allocs == 1 && live_bytes < 16384u);
+    backend_expected = (RH_THEME_ROOT "p/255.bin") + 1;
+    assert(slot(&driver, "resource/255.bin", 2) == 7);
+    bytes = live_bytes;
+    before = image_drops;
+
+    capacity_rules(RH_RULES + 1u, 0, "p");
+    control_signal = "resource-hook-reload-v1\tcapacity-retry\n";
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2103\t"));
+    assert(live_bytes == bytes && persistent_allocs == 1 && image_drops == before);
+    assert(slot(&driver, "resource/255.bin", 2) == 7);
+    /* Reordering the same set is a no-op, even after fixing a failed revision. */
+    capacity_rules(RH_RULES, 1, "p");
+    fire_timers(1000u);
+    assert(live_bytes == bytes && image_drops == before);
+
+    capacity_rules(RH_RULES, 0, "q");
+    control_signal = "resource-hook-reload-v1\tcapacity-oom\n";
+    fail_alloc_at = alloc_attempts + 1u;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2101\t"));
+    assert(live_bytes == bytes && persistent_allocs == 1);
+    fail_alloc_at = alloc_attempts + 2u;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2101\t"));
+    assert(live_bytes == bytes && persistent_allocs == 1 && image_drops == before);
+    fail_alloc_at = 0;
+    fire_timers(1000u);
+    backend_expected = (RH_THEME_ROOT "q/255.bin") + 1;
+    assert(slot(&driver, "resource/255.bin", 2) == 7);
+    assert(persistent_allocs == 1 && image_drops == before + 2u);
+
+    control_config = "/resource/\tthemes/nested/\n";
+    control_signal = "resource-hook-reload-v1\tnested-read\n";
+    reenter_read = 1;
+    fire_timers(1000u);
+    assert(!reenter_read && persistent_allocs == 1);
+    backend_expected = (RH_THEME_ROOT "nested/icon.bin") + 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    bytes = live_bytes;
+
+    /* A nested lifecycle request owns the old refresh. Parsing must discard
+     * its candidate and retry the same revision after that refresh completes. */
+    redraw_ready = 0;
+    activate_during_read = 1;
+    control_config = "/resource/\tthemes/canceled/\n";
+    control_signal = "resource-hook-reload-v1\tnested-activation\n";
+    fire_timers(1000u);
+    assert(!activate_during_read && persistent_allocs == 1 && live_bytes == bytes);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    redraw_ready = 1;
+    fire_timers(50u);
+    fire_timers(1000u);
+    backend_expected = (RH_THEME_ROOT "canceled/icon.bin") + 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+
+    /* Publication inside the old backend callback completes its UI refresh,
+     * but cannot reclaim the old snapshot until that callback returns. */
+    resident = persistent_allocs;
+    before = frees;
+    control_config = "/resource/\tthemes/after-open/\n";
+    control_signal = "resource-hook-reload-v1\tbackend-pin\n";
+    nested_reload = 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(!nested_reload && persistent_allocs == resident && frees > before);
+    backend_expected = (RH_THEME_ROOT "after-open/icon.bin") + 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+
+    control_config = "# empty\n";
+    control_signal = "resource-hook-reload-v1\treclaim-empty\n";
+    fire_timers(1000u);
+    backend_expected = "resource/icon.bin";
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(!persistent_allocs && !live_bytes && allocations == frees);
+    assert(peak_bytes < 96u * 1024u && !locked);
+    printf("256 rules, OOM/reentrancy, backend pins and reclamation passed (peak %u bytes)\n",
+           peak_bytes);
+    return 0;
+}
 int main(int argc, char **argv) {
     test_relative_config();
+    if (argc == 2 && !strcmp(argv[1], "--snapshots"))
+        return test_compact_snapshots();
     if (argc == 2 && !strcmp(argv[1], "--startup-diagnostics"))
         return test_startup_diagnostics();
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
@@ -598,7 +753,7 @@ int main(int argc, char **argv) {
     driver_valid = 0;
     assert(d->prepare(NULL) == 0);  /* Missing mappings prepare an empty snapshot. */
     assert(slot == backend && allocations == frees + persistent_allocs &&
-           persistent_allocs == 1 && !image_drops && !metadata_refreshes && !redraws &&
+           persistent_allocs == 0 && !image_drops && !metadata_refreshes && !redraws &&
            !retargets && !timers_created && !active_timers(50u) && !active_timers(1000u));
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w) && u32(status + 8) == 0 && u32(status + 12) == 0);
@@ -784,7 +939,7 @@ int main(int argc, char **argv) {
     assert(d->activate(NULL) == 0);  /* a zero-rule resident snapshot can rebind */
     fire_timers(1000u);  /* discard the superseded watcher handle */
 
-    assert(allocations == frees + persistent_allocs && persistent_allocs == 1 &&
+    assert(allocations == frees && persistent_allocs == 0 && !live_bytes &&
            active_timers(1000u) == 1 && !locked);
     puts("module registration, activation, config polling, atomic snapshots and targeted refresh passed");
     return 0;

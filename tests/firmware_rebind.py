@@ -22,8 +22,9 @@ from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
 
 PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
     ROOT / 'build/payload-0.3.0' / TARGET))
-CONFIG_PATH = '/data/quickapp/files/ng.lst.corona/mappings.tsv'
-THEME_ROOT = '/data/quickapp/files/ng.lst.corona/themes/'
+APP_ROOT = '/data/quickapp/files/ng.lst.corona/'
+CONFIG_PATH = APP_ROOT + 'mappings.tsv'
+THEME_ROOT = APP_ROOT + 'themes/'
 
 
 class Rebind(unittest.TestCase):
@@ -52,6 +53,24 @@ class Rebind(unittest.TestCase):
         m.disk['/data/canopus/inbox/corona.ko'] = elf
         m.disk[CONFIG_PATH] = '/resource/\tthemes/current/\n'.encode()
         m.disk[THEME_ROOT + 'current/a.bin'] = b'mapped file'
+        # The bootstrap VFS deliberately accepts only Supervisor-owned paths.
+        # Extend it locally for the module's app-scoped files, retaining the
+        # same descriptor, partial-read/write and close/commit model.
+        def opened():
+            path = m.string(m.reg(0))
+            if not path.startswith(APP_ROOT):
+                return m.open()
+            if m.reg(1) & 4:
+                data = bytearray()
+            elif path in m.disk:
+                data = bytearray(m.disk[path])
+            else:
+                return -1
+            fd = m.next_fd
+            m.next_fd += 1
+            m.files[fd] = [data, 0, path]
+            return fd
+        hook(m, 0xc342c54, opened)
         self.descriptor = None
         def write():
             ptr, count = m.reg(1), m.reg(2)
@@ -64,9 +83,15 @@ class Rebind(unittest.TestCase):
         m.word(0x200bd3b8, ord('/'))
         m.word(0x200bd3bc, 4096)
         m.word(0x200bd3c4, 0xc3a6195)
-        # Scheduling is modeled here; the callback executes the real module code.
-        self.timer_callback, self.timer_creates, self.timer_deletes = 0, 0, 0
+        # Scheduling is modeled; distinct handles let stale watcher callbacks
+        # self-delete after a rebind without deleting the new 1000 ms watcher.
+        # The independent 50 ms refresh callback executes real module code too.
+        self.timers = {}
+        self.timer_creates = {50: 0, 1000: 0}
+        self.timer_deletes = {50: 0, 1000: 0}
+        self.next_timer = 0x3c7b0000
         self.fail_timer = False
+        self.fail_timer_period = None
         self.bind(0xc3abd20, self.create_timer)
         self.bind(0xc3abe70, self.delete_timer)
 
@@ -74,25 +99,34 @@ class Rebind(unittest.TestCase):
         hook(self.m, addr, callback)
 
     def create_timer(self):
-        self.assertEqual(self.m.reg(1), 50)
-        self.assertEqual(self.m.reg(2), 0)
-        self.assertEqual(self.timer_callback, 0)
-        if self.fail_timer:
+        callback, period, cookie = (self.m.reg(i) for i in range(3))
+        self.assertIn(period, (50, 1000))
+        self.assertEqual(cookie, 0)
+        self.assertNotEqual(callback, 0)
+        if self.fail_timer or period == self.fail_timer_period:
             return 0
-        self.timer_callback = self.m.reg(0)
-        self.timer_creates += 1
-        return 0x3c7b0000
+        timer = self.next_timer
+        self.next_timer += 32
+        self.timers[timer] = (period, callback)
+        self.timer_creates[period] += 1
+        return timer
 
     def delete_timer(self):
-        self.assertEqual(self.m.reg(0), 0x3c7b0000)
-        self.assertNotEqual(self.timer_callback, 0)
-        self.timer_callback = 0
-        self.timer_deletes += 1
+        timer = self.m.reg(0)
+        self.assertIn(timer, self.timers, 'deleting an unknown or already deleted timer')
+        period, _ = self.timers.pop(timer)
+        self.timer_deletes[period] += 1
         return 0
 
-    def tick(self):
-        self.assertNotEqual(self.timer_callback, 0)
-        self.m.call(self.timer_callback, 0x3c7b0000)
+    def timers_for(self, period):
+        return tuple(timer for timer, (ms, _) in self.timers.items() if ms == period)
+
+    def tick(self, period=50, *, timer=None):
+        handles = self.timers_for(period)
+        self.assertTrue(handles, f'no live {period} ms timer')
+        timer = handles[-1] if timer is None else timer
+        self.assertIn(timer, handles)
+        self.m.call(self.timers[timer][1], timer)
 
     def graphics(self):
         m, disp = self.m, 0x3c790000
@@ -150,12 +184,20 @@ class Rebind(unittest.TestCase):
         hook = m.word(0x200bd3c4)
         self.assertTrue(0x1c000000 <= hook < 0x1d000000, hex(hook))
         resident = {p: n for p, n in m.allocations.items() if p not in m.frees}
+        old_watcher, = self.timers_for(1000)
+        refresh_timer, = self.timers_for(50)
         # A changed on-disk file must not mutate the locked live mappings.
         m.disk[CONFIG_PATH] = b'bad config'
         m.word(0x200bd3c4, 0xc3a6195)  # model the store performed by lv_init
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(m.word(0x200bd3c4), hook)
         self.assertEqual({p: n for p, n in m.allocations.items() if p not in m.frees}, resident)
+        self.assertEqual(self.timers_for(50), (refresh_timer,))
+        new_watcher = self.timers_for(1000)[-1]
+        self.assertNotEqual(new_watcher, old_watcher)
+        self.tick(1000, timer=old_watcher)
+        self.assertEqual(self.timers_for(1000), (new_watcher,))
+        self.assertEqual(self.timer_deletes[1000], 1)
         path = 0x3c710000
         m.uc.mem_write(path, b'resource/a.bin\0')
         m.uc.reg_write(UC_ARM_REG_R1, path)
@@ -244,7 +286,8 @@ class Rebind(unittest.TestCase):
         # Clipped with the accessors, so the axes are swapped in raw-field terms.
         self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + 60, 16)),
                          (0, 0, 489, 191))
-        self.assertEqual(self.timer_callback, 0)
+        self.assertEqual(self.timers_for(50), ())
+        self.assertEqual(len(self.timers_for(1000)), 1)
 
     def test_activate_refuses_an_unexpected_cache_class(self):
         """The retirement traversal is only valid for the recovered LRU/RB
@@ -267,7 +310,7 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.status_words()[7], 1)
         self.assertEqual(m.word(disp + 604), 1)
         self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + 60, 16)), (0, 0, 191, 489))
-        self.assertEqual(self.timer_creates, 0)
+        self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
 
     def test_missing_screen_not_confused_with_nonzero_dpi(self):
         disp = self.graphics()
@@ -279,15 +322,16 @@ class Rebind(unittest.TestCase):
         self.m.word(disp + 696, disp + 0x800)
         self.tick()
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
-        self.assertEqual(self.timer_callback, 0)
-        self.assertEqual(self.timer_deletes, 1)
+        self.assertEqual(self.timers_for(50), ())
+        self.assertEqual(self.timer_deletes, {50: 1, 1000: 0})
+        self.assertEqual(len(self.timers_for(1000)), 1)
 
     def test_busy_render_and_disabled_invalidation_retry_once(self):
         m, disp = self.m, self.graphics()
         m.word(disp + 56, (1 << 8) | (2 << 16))
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.timer_creates, 1)
+        self.assertEqual(self.timer_creates, {50: 1, 1000: 2})
         self.tick()
         self.assertEqual(self.status_words()[6:8], (0, 0))
         m.word(disp + 56, 1 << 8)
@@ -297,7 +341,7 @@ class Rebind(unittest.TestCase):
         m.word(disp + 608, 1)
         self.tick()
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
-        self.assertEqual(self.timer_callback, 0)
+        self.assertEqual(self.timers_for(50), ())
 
     def test_rejected_dirty_area_is_not_counted_or_repeatedly_dropped(self):
         self.graphics()
@@ -309,7 +353,8 @@ class Rebind(unittest.TestCase):
         self.bind(0xc3809a4, lambda: 1)
         self.tick()
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
-        self.assertEqual(self.timer_callback, 0)
+        self.assertEqual(self.timers_for(50), ())
+        self.assertEqual(len(self.timers_for(1000)), 1)
 
     def test_timer_allocation_failure_is_reported_with_hook_resident(self):
         self.fail_timer = True
@@ -317,6 +362,19 @@ class Rebind(unittest.TestCase):
         self.assertEqual(state, 6)
         self.assertNotEqual(error, 0)
         self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
+
+    def test_watch_timer_failure_does_not_undo_completed_refresh(self):
+        self.graphics()
+        self.fail_timer_period = 1000
+        state, error = self.restore()
+        self.assertEqual(state, 6)
+        self.assertNotEqual(error, 0)
+        self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
+        self.assertEqual(self.timer_creates, {50: 0, 1000: 0})
+        self.fail_timer_period = None
+        self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
 
     def test_held_cache_entry_retired_then_freed_on_last_release(self):
         m = self.m
@@ -374,21 +432,31 @@ class Rebind(unittest.TestCase):
         self.assertEqual(freed, [data, data])  # payload callback, allocation free
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
-    def test_missing_config_keeps_original_driver(self):
+    def test_missing_config_keeps_empty_hook_and_watcher_resident(self):
         m = self.m
         del m.disk[CONFIG_PATH]
-        # The fixture models VFS open; model its errno storage as well.
+        # Missing configuration is an empty snapshot, not an activation failure.
         errno_cell = 0x3c732000
         m.word(errno_cell, 2)
         self.bind(0xc349538, lambda: errno_cell)
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(m.word(0x200bd3c4), 0xc3a6195)
-        self.assertEqual(self.status_words()[2:], (0,) * 8)
-        self.assertEqual(self.timer_creates, 0)
-        # No-op must not cache absence for the lifetime of the resident image.
+        resident_hook = m.word(0x200bd3c4)
+        self.assertNotEqual(resident_hook, 0xc3a6195)
+        self.assertEqual(self.status_words()[2:], (1, 0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
+        # Creating config alone does not mutate the locked snapshot on rebind.
+        # A control-file revision makes the already resident hook adopt it.
         m.disk[CONFIG_PATH] = '/resource/\tthemes/current/\n'.encode()
         self.assertEqual(self.restore(), (5, 0))
-        self.assertNotEqual(m.word(0x200bd3c4), 0xc3a6195)
+        self.assertEqual(m.word(0x200bd3c4), resident_hook)
+        self.assertEqual(self.status_words()[3], 0)
+        m.disk[APP_ROOT + 'reload.request'] = b'resource-hook-reload-v1\tng.lst.corona\tmissing-1\n'
+        m.disk[APP_ROOT + 'reload.result'] = bytes(256)
+        self.graphics()
+        self.tick(1000)
+        self.assertEqual(m.word(0x200bd3c4), resident_hook)
+        self.assertEqual(self.status_words()[3], 1)
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_config_open_io_failure_is_not_noop(self):
         del self.m.disk[CONFIG_PATH]
@@ -399,7 +467,7 @@ class Rebind(unittest.TestCase):
         self.assertEqual(state, 6)
         self.assertNotEqual(error, 0)
         self.assertEqual(self.m.word(0x200bd3c4), 0xc3a6195)
-        self.assertEqual(self.timer_creates, 0)
+        self.assertEqual(self.timer_creates, {50: 0, 1000: 0})
 
     def test_unknown_slot_is_not_overwritten(self):
         self.assertEqual(self.restore(), (5, 0))

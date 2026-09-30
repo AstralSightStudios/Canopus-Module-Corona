@@ -249,7 +249,7 @@ static void setup(void) {
     old_live=live_allocations(); alloc_calls=0;
 }
 static int reload_path(const char *path,uint32_t *changed) {
-    struct rh_rule rule; struct rh_mapping_view view={&rule,path?1u:0u};
+    struct rh_rule rule={0}; struct rh_mapping_view view=rh_rules_view(&rule,path?1u:0u);
     memset(&rule,0,sizeof(rule)); strcpy(rule.source,stock);
     if(path) strcpy(rule.destination,path);
     else view.rules=NULL;
