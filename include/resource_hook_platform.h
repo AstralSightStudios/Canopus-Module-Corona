@@ -36,6 +36,13 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *);
 int rh_platform_refresh_images(const struct rh_state *);
 int rh_platform_refresh_mapped_images(const struct rh_mapping_view *,
                                       const struct rh_mapping_view *);
+/* Regenerate the native dynamic calendar only when its inputs/output are
+ * affected. Refresh is UI-owner-only, synchronous, outside the IRQ lock.
+ * 0 = native request completed/no initialized owner, -1 = retry readiness.
+ * Native snapshot/file failures are not a verified rendered-success signal. */
+int rh_platform_calendar_affected(const struct rh_mapping_view *,
+                                  const struct rh_mapping_view *);
+int rh_platform_refresh_calendar(void);
 int rh_platform_redraw_ready(void);
 /* 0 only when a full-display dirty area was retained; otherwise retry later. */
 int rh_platform_request_full_redraw(void);

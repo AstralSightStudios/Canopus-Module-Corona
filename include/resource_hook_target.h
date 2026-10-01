@@ -10,6 +10,18 @@
  * targets/xiaomi-band-10-pro-3.101.043/ui-reload-audit.md. */
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 /* Exact Xiaomi Band 10 Pro 3.101.043 identities. */
+#define RH_CALENDAR_BACKGROUND "/resource/app/perpetual_calendar/calendar_background_icon.bin"
+#define RH_CALENDAR_OUTPUT "/resource/app/perpetual_calendar/launcher.bin"
+#define RH_CALENDAR_APP_ID "com.xiaomi.miwear.perpetual_calendar"
+#define RH_FW_CALENDAR_LOOKUP         0x0ca69935u
+#define RH_FW_CALENDAR_LOOKUP_OTHER   0x0ca6996du
+#define RH_FW_CALENDAR_SIGNAL         0x0c4efde9u
+#define RH_FW_CALENDAR_NOTIFY         0x0ca6a005u
+#define RH_FW_CALENDAR_VTABLE_SLOT    0x200eb658u
+#define RH_FW_CALENDAR_VTABLE         0x2cdbb054u
+#define RH_FW_CALENDAR_LOOKUP_NAME    0x0ca69e81u
+#define RH_FW_CALENDAR_LOOKUP_NAME_OTHER 0x0ca69e55u
+#define RH_FW_CALENDAR_DISPATCH       0x0ca69aa1u
 #define RH_FW_IMAGE_OBJECT_CLASS      0x2cce61ecu
 #define RH_FW_CACHE_DROP              0x0c1667ddu
 #define RH_FW_IMAGE_CACHE_CLASS       0x2cce56f4u
@@ -79,6 +91,13 @@
 #endif
 
 #if !(defined(RH_TARGET_1043) && RH_TARGET_1043)
+/* Native launcher calendar generation/publication have the same entries in
+ * both exact APs; snapshot leaves/literals are individually target-specific. */
+#define RH_CALENDAR_BACKGROUND "/resource/app/perpetual_calendar/launcher_icon.bin"
+#define RH_CALENDAR_OUTPUT "/data/app/perpetual_calendar/calendar_icon.bin"
+#define RH_FW_CALENDAR_GENERATE       0x0c5487a5u
+#define RH_FW_CALENDAR_PUBLISH        0x0c5486d1u
+#define RH_FW_CALENDAR_LAUNCHER_SLOT  0x200c6010u
 /* Get-info, tree walk and style APIs are byte-identical at these Thumb
  * addresses in both exact APs. The setter entry is also shared but its .139
  * control flow is independently audited. The reload probe executes both APs. */

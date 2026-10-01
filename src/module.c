@@ -47,7 +47,7 @@ static unsigned control_busy;
 static char last_reload_signal[RH_RELOAD_SIGNAL_MAX];
 static uint32_t last_reload_signal_size;
 static unsigned last_reload_signal_valid;
-static unsigned refresh_pending, cache_dropped, images_done, fonts_done, refreshing;
+static unsigned refresh_pending, cache_dropped, images_done, fonts_done, calendar_done, refreshing;
 static void publish_current_result(void);
 static char *result_number(char *, uint32_t);
 
@@ -146,7 +146,6 @@ static void refresh_step(void *timer, unsigned ui_owner) {
     struct rh_snapshot *current_pin, *previous_pin, *previous_owner = 0;
     const struct rh_mapping_view *old;
     uint32_t irq;
-    (void)ui_owner;
     irq = rh_platform_lock();
     current_pin = active_snapshot;
     previous_pin = refresh_previous_snapshot;
@@ -174,10 +173,8 @@ static void refresh_step(void *timer, unsigned ui_owner) {
             }
         }
     }
-    if (cache_dropped && !images_done && rh_platform_refresh_mapped_images(old, &current) >= 0)
-        images_done = 1;
 #if RH_FONT_EXPERIMENT
-    if (cache_dropped && images_done && !fonts_done && ui_owner) {
+    if (cache_dropped && !fonts_done && ui_owner) {
         uint32_t changed = 0;
         int rc = rh_font_reload(&current, &changed);
         font_result = rc;
@@ -197,7 +194,18 @@ static void refresh_step(void *timer, unsigned ui_owner) {
         retarget_fonts(&current);
     }
 #endif
-    if (cache_dropped && images_done && fonts_done && rh_platform_request_full_redraw() == 0) {
+    /* Calendar snapshots consume the new background/fonts and must be generated
+     * before refreshing their launcher owner. Never invoke native snapshot work
+     * from activate(); only serialized UI timer callbacks may run this stage. */
+    if (cache_dropped && fonts_done && !calendar_done) {
+        if (!rh_platform_calendar_affected(old, &current)) calendar_done = 1;
+        else if (ui_owner && rh_platform_refresh_calendar() == 0) calendar_done = 1;
+    }
+    if (cache_dropped && fonts_done && calendar_done && !images_done &&
+        rh_platform_refresh_mapped_images(old, &current) >= 0)
+        images_done = 1;
+    if (cache_dropped && images_done && fonts_done && calendar_done &&
+        rh_platform_request_full_redraw() == 0) {
         void *done;
         irq = rh_platform_lock();
         done = refresh_timer;
@@ -241,7 +249,7 @@ static int request_refresh(void) {
 #if RH_FONT_EXPERIMENT
         font_result = 1;
 #endif
-        images_done = 0;
+        images_done = calendar_done = 0;
         refresh_previous_snapshot = 0;
         refresh_pending = 1;
     }
@@ -391,7 +399,8 @@ static void poll_control_file(void) {
     char signal[RH_RELOAD_SIGNAL_MAX];
     uint32_t signal_size, irq;
     struct rh_snapshot *captured = 0, *candidate = 0;
-    int fd, rc, identical;
+    struct rh_mapping_view captured_view;
+    int fd, rc, identical, calendar_affected;
 
     /* Reserve the complete transaction before any reentrant firmware I/O.
      * Active maps may be empty; NULL is the transparent zero-rule snapshot. */
@@ -426,6 +435,8 @@ static void poll_control_file(void) {
     }
 
     identical = rh_snapshot_equal(captured, candidate);
+    captured_view = rh_snapshot_view(captured);
+    calendar_affected = identical && rh_platform_calendar_affected(0, &captured_view);
     irq = rh_platform_lock();
     /* A nested activation may have requested a refresh during parsing. Never
      * replace its owner transaction, or publish against a changed generation. */
@@ -440,28 +451,37 @@ static void poll_control_file(void) {
         active_snapshot = candidate;
         S.count = candidate ? candidate->count : 0u;
         candidate = 0;
-        cache_dropped = images_done = 0;
+        cache_dropped = images_done = calendar_done = 0;
         fonts_done = RH_FONT_EXPERIMENT ? 0u : 1u;
 #if RH_FONT_EXPERIMENT
         font_result = 1;
         font_last_changed = 0;
 #endif
         refresh_pending = 1;
-    }
-#if RH_FONT_EXPERIMENT
-    else {
-        font_last_changed = 0;
-        /* A new revision may retry a rejected font transaction, but reordered
-         * identical mappings never retire images or republish a generation. */
-        if (font_result < 0) {
-            fonts_done = 0;
-            font_result = 1;
-            cache_dropped = images_done = 1;
+    } else {
+        /* An explicit revision can replace calendar assets at unchanged paths.
+         * Regenerate once without retiring unrelated images or republishing the
+         * immutable map. The adapter evicts its own exact background keys. */
+        if (calendar_affected) {
+            cache_dropped = fonts_done = 1;
+            images_done = calendar_done = 0;
             refresh_previous_snapshot = 0;
             refresh_pending = 1;
         }
-    }
+#if RH_FONT_EXPERIMENT
+        font_last_changed = 0;
+        /* A rejected font transaction may also be retried at this revision. */
+        if (font_result < 0) {
+            fonts_done = 0;
+            font_result = 1;
+            cache_dropped = 1;
+            images_done = calendar_affected ? 0u : 1u;
+            calendar_done = calendar_affected ? 0u : 1u;
+            refresh_previous_snapshot = 0;
+            refresh_pending = 1;
+        }
 #endif
+    }
     rh_platform_unlock(irq);
     remember_reload_signal(signal, signal_size);
     if (refresh_pending) {

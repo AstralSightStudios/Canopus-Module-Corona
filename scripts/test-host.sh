@@ -53,6 +53,7 @@ for target in 139 155 1043; do
         fi
         "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
         "$ROOT/build/test_module_${target}_${mode}" --snapshots
+        "$ROOT/build/test_module_${target}_${mode}" --calendar
         for fault in open-fail write-fail short-write fd-zero; do
             RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
         done

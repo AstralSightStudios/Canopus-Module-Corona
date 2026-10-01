@@ -52,6 +52,7 @@
   classes 为 `0x2ca168c4/0x2ca16944`；`.155` 分别为 `0x2ca14ca8`、
   `0x2ca168b4/0x2ca16934`。新用到的四个 owner API 已在两个精确 AP 中逐字节核对；
   `.139` 的 image setter 及 cache/drop 入口仍按自己的固件布局验证。
+- **原生日历动态图标重生成（11 `.139/.155`、10 Pro `.043`）：** 映射影响日历背景、最终/备用图标或指定字体时，在 UI timer 中调用系统生成/发布链路。11 重写 `/data/app/perpetual_calendar/calendar_icon.bin` 后更新启动器；10 Pro 通知真实注册日历应用，重生成内存快照并发布。移除映射也会恢复系统背景；相同映射的新 reload revision 可以重新生成，owner/重绘重试不会重复生成。未初始化或身份不符的原生 owner 跳过，不伪造应用、不手动释放快照。原生调用完成不代表文件写入或实际显示成功；用户已报告三个精确目标的日历重载实机正常，但不扩展为 GPU、存储/分配失败或重启恢复验收。签名产物哈希和范围见 [日历重载证据与限制](docs/CALENDAR_RELOAD.md)。
 - UI 请求一次性且可合并：忙碌、缓存未就绪、快照分配失败等情况由临时 LVGL timer
   重试；成功请求整屏脏区后自删。已经完成的退休/元数据阶段不因脏区被拒绝而反复执行。
   定时器分配失败返回 -2011，重定向仍驻留。
@@ -110,7 +111,7 @@ RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.139
 - 非渲染标志只是 UI 失效/变更门禁，**不是 GPU idle**。延迟 VG_LITE 分支确实会
   把 decoder 保留到原生 pending 队列清理；模块不手动释放 decoder payload、
   不假定每帧都即时关闭，也不主动调用全局 cache drop 或强制同步刷新。
-- 不全局停止动画，不把 stop/update/start 称为无损 resume。动画派生类、回调帧、
+- 不全局停止动画，不把 stop/update/start 称为无损 resume。除已核查的原生日历生成/发布链路外，动画派生类、回调帧、
   canvas/snapshot、打包资源和离开 LVGL 屏幕树的 owner，仍需各自的安全重载协议。
 - **不 Hook watchface loader，不重建页面作为替代方案，不承诺任意 RAM/ROM 资源可替换。**
 - 不自动重启 miwear，不保证 Hook 早于首次资源读取；Manager 可接收 CRPack v1 解包后的主题文件树，资源管理页可排序资源包并以“系统样式”划定活动范围，主页重载时生成并应用活动映射；Manager 不展示映射规则，也不包含 ZIP 发送端。

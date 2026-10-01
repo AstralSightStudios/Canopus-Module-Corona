@@ -76,8 +76,18 @@ static int cache_valid(uint32_t cache, uint32_t clz) {
     }
     return 1;
 }
+static int same_path(uint32_t source, const char *path) {
+    uint32_t i;
+    const char *value = (const char *)(uintptr_t)source;
+    if (!source) return 0;
+    for (i = 0; i < RH_PATH; i++) {
+        if (value[i] != path[i]) return 0;
+        if (!path[i]) return 1;
+    }
+    return 0;
+}
 static int retire_cache(uint32_t cache, uint32_t source_offset,
-                        const struct rh_mapping_view *mapping) {
+                        const struct rh_mapping_view *mapping, const char *exact) {
     uint32_t node = load32(cache + 52u), n = 0;
     while (node) {
         uint32_t next, data, source;
@@ -88,7 +98,8 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
         /* Header {src,type,...}; decoded {buffer,src,type,...}. Never read a
          * descriptor/symbol as a pathname, or retire an unrelated cache key. */
         if (*(const unsigned char *)(uintptr_t)(data + source_offset + 4u) == 1u &&
-            affected(mapping, 0, source)) {
+            ((mapping && affected(mapping, 0, source)) ||
+             (exact && same_path(source, exact)))) {
             uint32_t cursor, guard = 0;
             ((void (*)(uint32_t, uint32_t))(uintptr_t)RH_FW_CACHE_DROP)(cache, data);
             /* No dereference of the retired node/data/source after drop. Check
@@ -109,14 +120,74 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     if (!mapping->count) return 1;
     if (!cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
         !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
-    if (retire_cache(header, 0u, mapping)) return -1;
-    return retire_cache(data, 4u, mapping);
+    if (retire_cache(header, 0u, mapping, 0)) return -1;
+    return retire_cache(data, 4u, mapping, 0);
 }
 int rh_platform_retire_images(const struct rh_state *state) {
     struct rh_mapping_view view;
     if (!state) return -1;
     view = rh_rules_view(state->rules, state->count);
     return rh_platform_retire_mapped_images(&view);
+}
+/* Calendar source keys are not discovered by walking the launcher image: on
+ * .043 that image holds a RAM snapshot; on .139/.155 it holds the generated
+ * /data file. Retire only the exact compositing background, even for an explicit
+ * revision with identical mappings (assets may change at unchanged paths). */
+int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
+                                  const struct rh_mapping_view *current) {
+    if (rh_validate_view(current) || (previous && rh_validate_view(previous))) return 0;
+    return affected(previous, current, (uint32_t)(uintptr_t)RH_CALENDAR_BACKGROUND) ||
+           affected(previous, current, (uint32_t)(uintptr_t)RH_CALENDAR_OUTPUT) ||
+           affected(previous, current, (uint32_t)(uintptr_t)"/resource/app/launcher/calendar.bin") ||
+           affected(previous, current, (uint32_t)(uintptr_t)"/resource/font/MiSans-Regular-All.ttf");
+}
+int rh_platform_refresh_calendar(void) {
+    uint32_t data, header;
+    if (!rh_platform_redraw_ready()) return -1;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    uint32_t app, appid, table = load32(RH_FW_CALENDAR_VTABLE_SLOT);
+    if (table != RH_FW_CALENDAR_VTABLE ||
+        load32(table + 12u) != RH_FW_CALENDAR_LOOKUP_NAME ||
+        load32(table + 16u) != RH_FW_CALENDAR_LOOKUP_NAME_OTHER ||
+        load32(table + 44u) != RH_FW_CALENDAR_DISPATCH) return 0;
+    app = ((uint32_t (*)(uint16_t))(uintptr_t)RH_FW_CALENDAR_LOOKUP)(69u);
+    if (!app) app = ((uint32_t (*)(uint16_t))(uintptr_t)RH_FW_CALENDAR_LOOKUP_OTHER)(69u);
+    /* Only the real registered app may be passed into the signal/event chain.
+     * Missing/unrecognized owners are left to their normal native lifecycle. */
+    if ((app & 3u) || !((app >= 0x20000000u && app <= 0x20160000u - 60u) ||
+                       (app >= 0x3c000000u && app <= 0x3d000000u - 60u)) ||
+        *(volatile uint16_t *)(uintptr_t)(app + 16u) != 69u ||
+        load32(app + 56u) != RH_FW_CALENDAR_SIGNAL) return 0;
+    appid = load32(app + 8u);
+    /* Name registries copy appids into RAM; ROM aliases are also admissible.
+     * Bound the complete expected string before dereferencing a damaged slot. */
+    if (!((appid >= 0x20000000u && appid <= 0x20160000u - sizeof(RH_CALENDAR_APP_ID)) ||
+          (appid >= 0x3c000000u && appid <= 0x3d000000u - sizeof(RH_CALENDAR_APP_ID)) ||
+          (appid >= 0x2c0c0000u && appid <= 0x2cde8190u - sizeof(RH_CALENDAR_APP_ID)) ||
+          (appid >= 0x0c0c0000u && appid <= 0x0cde8190u - sizeof(RH_CALENDAR_APP_ID))) ||
+        !same_path(appid, RH_CALENDAR_APP_ID)) return 0;
+#else
+    /* No launcher application-list service yet: its normal initialization will
+     * generate the icon later through the installed resource hook. */
+    if (!load32(RH_FW_CALENDAR_LAUNCHER_SLOT)) return 0;
+#endif
+    data = load32(RH_FW_IMAGE_CACHE_SLOT);
+    header = load32(RH_FW_HEADER_CACHE_SLOT);
+    if (!cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
+        !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
+    if (retire_cache(header, 0u, 0, RH_CALENDAR_BACKGROUND) ||
+        retire_cache(data, 4u, 0, RH_CALENDAR_BACKGROUND)) return -1;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    /* Native notify resolves the real app, signals 6 and synchronously dispatches
+     * launcher event 0x2b. It owns/reuses the snapshot; never free/reset it here. */
+    ((void (*)(const char *))(uintptr_t)RH_FW_CALENDAR_NOTIFY)(RH_CALENDAR_APP_ID);
+#else
+    /* Native generation saves /data/.../calendar_icon.bin and retires that key.
+     * Native publication finds app 69 and updates an existing launcher widget. */
+    ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_GENERATE)();
+    ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_PUBLISH)();
+#endif
+    return 0;
 }
 struct object_list { uint32_t objects[RH_RELOAD_LIMIT], count, overflow; };
 /* Bound native walk recursion as well as the snapshot size. Parent +4 is

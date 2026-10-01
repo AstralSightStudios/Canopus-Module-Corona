@@ -544,6 +544,81 @@ class Reload(Harness):
         self.assertEqual(self.call('rh_platform_retire_images', STATE), 0)
 
 
+class CalendarAdapter(Harness):
+    """Compiled adapter and real per-key cache retirement; native icon leaves modeled.
+
+    firmware_calendar.py separately executes the native generation/publication.
+    These probes isolate adapter gates and exact-key retirement from native GUI.
+    """
+    background = '/resource/app/perpetual_calendar/launcher_icon.bin'
+    output = '/data/app/perpetual_calendar/calendar_icon.bin'
+
+    def setUp(self):
+        super().setUp()
+        self.word(0x200bd200, self.display)
+        self.word(self.display + 696, self.mem())
+        self.word(self.display + 608, 1)
+        self.word(0x200c6010, self.mem())
+        self.calendar_calls = []
+        self.hook(0xc5487a4, lambda: self.calendar_calls.append('generate') or 0)
+        self.hook(0xc5486d0, lambda: self.calendar_calls.append('publish') or 0)
+
+    def calendar_view(self, source):
+        rules = self.mem(RULE_BYTES)
+        self.u.mem_write(rules, source.encode() + b'\0')
+        self.u.mem_write(rules + 256,
+            b'/data/quickapp/files/ng.lst.corona/themes/calendar.bin\0')
+        return self.view(rules, 1)
+
+    def test_inputs_output_and_removed_rules_are_affected(self):
+        empty = self.view()
+        for source in (self.background, self.output,
+                       '/resource/app/launcher/calendar.bin',
+                       '/resource/font/MiSans-Regular-All.ttf'):
+            current = self.calendar_view(source)
+            self.assertEqual(self.call('rh_platform_calendar_affected', 0, current), 1)
+            self.assertEqual(self.call('rh_platform_calendar_affected', current, empty), 1)
+        unrelated = self.calendar_view('/resource/app/settings/launcher.bin')
+        self.assertEqual(self.call('rh_platform_calendar_affected', 0, unrelated), 0)
+        self.assertEqual(self.call('rh_platform_calendar_affected', 0, empty), 0)
+
+    def test_exact_background_retirement_and_generation_order(self):
+        expected, retained = [], []
+        for cache in (HEADER, DATA):
+            retained.append(self.cached(cache, '/resource/app/settings/launcher.bin')[0])
+            expected.append(self.cached(cache, self.background, refs=0)[1])
+            retained.append(self.cached(cache, self.output)[0])
+            retained.append(self.cached(cache, self.background, kind=0)[0])
+        self.assertEqual(self.call('rh_platform_refresh_calendar'), 0)
+        self.assertEqual(self.drops, expected)
+        self.assertEqual(self.calendar_calls, ['generate', 'publish'])
+        self.assertEqual(self.cache_nodes[HEADER] + self.cache_nodes[DATA], retained)
+
+    def test_busy_display_does_not_enter_native_calendar(self):
+        self.byte(self.display + 58, 2)
+        self.assertEqual(self.call('rh_platform_refresh_calendar'), 0xffffffff)
+        self.assertEqual(self.calendar_calls, [])
+        self.assertEqual(self.drops, [])
+
+    def test_uninitialized_launcher_skips_native_calendar(self):
+        self.word(0x200c6010, 0)
+        self.assertEqual(self.call('rh_platform_refresh_calendar'), 0)
+        self.assertEqual(self.calendar_calls, [])
+        self.assertEqual(self.drops, [])
+
+    def test_wrong_cache_class_retries_without_native_work(self):
+        self.word(HEADER, DATA_CLASS)
+        self.assertEqual(self.call('rh_platform_refresh_calendar'), 0xffffffff)
+        self.assertEqual(self.calendar_calls, [])
+        self.assertEqual(self.drops, [])
+
+    def test_failed_background_unlink_does_not_generate(self):
+        self.cached(HEADER, self.background)
+        self.unlink_noop = True
+        self.assertEqual(self.call('rh_platform_refresh_calendar'), 0xffffffff)
+        self.assertEqual(self.calendar_calls, [])
+
+
 class ModuleControl(Harness):
     """Real compact module and exact AP; signed Supervisor loading is bypassed."""
     sources = Harness.sources + (ROOT / 'src/config.c', ROOT / 'src/module.c',

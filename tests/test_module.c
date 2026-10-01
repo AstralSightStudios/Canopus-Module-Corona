@@ -36,8 +36,30 @@ static int driver;
 static const char *backend_expected = (RH_THEME_ROOT "current/icon.bin") + 1;
 struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
+static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
+static int calendar_mode, calendar_rc;
+#define CALENDAR_RESOURCE "/resource/calendar/background.bin"
+int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
+                                  const struct rh_mapping_view *current) {
+    char mapped[RH_PATH];
+    int old_match, new_match;
+    assert(!locked && current && !rh_validate_view(current));
+    if (!calendar_mode) return 0; /* Keep legacy scenarios calendar-neutral. */
+    assert(!previous || !rh_validate_view(previous));
+    old_match = previous ? rh_resolve_view(previous, CALENDAR_RESOURCE, mapped) : 0;
+    new_match = rh_resolve_view(current, CALENDAR_RESOURCE, mapped);
+    assert(old_match >= 0 && new_match >= 0);
+    calendar_queries++;
+    if (old_match && !new_match) calendar_old_only++;
+    return old_match || new_match;
+}
+int rh_platform_refresh_calendar(void) {
+    assert(calendar_mode && in_ui_timer && !locked && redraw_ready);
+    calendar_calls++;
+    return calendar_rc;
+}
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
-static unsigned in_ui_timer, font_calls, font_disabled, font_changes;
+static unsigned font_calls, font_disabled, font_changes;
 static int font_rc;
 static char last_font_path[RH_PATH];
 int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
@@ -227,6 +249,11 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
     int new_match;
     assert(!locked && current && current->count <= RH_RULES && !rh_validate_view(current));
     new_match = rh_resolve_view(current, "/resource/icon.bin", mapped);
+    if (calendar_mode) {
+        int old_calendar = previous ? rh_resolve_view(previous, CALENDAR_RESOURCE, mapped) : 0;
+        int new_calendar = rh_resolve_view(current, CALENDAR_RESOURCE, mapped);
+        if (old_calendar || new_calendar) assert(calendar_calls && !calendar_rc);
+    }
     assert(old_match >= 0 && new_match >= 0); /* Font-only exact rules need no image owner. */
     if (unsupported) return 1;
     if (reject_metadata) return -1;
@@ -261,14 +288,10 @@ static void fire_timers(uint32_t interval) {
     for (i = 0; i < sizeof(mock_timers) / sizeof(mock_timers[0]); i++) {
         struct mock_timer *timer = &mock_timers[i];
         if (timer->active && timer->interval == interval) {
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
             unsigned previous_ui_timer = in_ui_timer;
             in_ui_timer = 1;
-#endif
             timer->callback(timer);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
             in_ui_timer = previous_ui_timer;
-#endif
         }
     }
 }
@@ -390,6 +413,87 @@ static int test_startup_diagnostics(void) {
     puts("startup logging, registration faults, errno capture and bounded failures passed");
     return 0;
 }
+static int test_calendar_integration(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned drops, owners, calls, draws;
+    calendar_mode = 1;
+    input = "/resource/calendar/background.bin\tthemes/calendar/background.bin\n";
+    calendar_rc = -1;
+    assert(d->activate(NULL) == 0);
+    assert(!calendar_calls && !metadata_refreshes && !redraws);
+    assert(active_timers(50u) == 1);
+
+    /* Neither non-UI activation nor a busy redraw may request native work. */
+    redraw_ready = 0;
+    fire_timers(50u);
+    assert(!calendar_calls && !metadata_refreshes && !redraws);
+    redraw_ready = 1;
+    fire_timers(50u);
+    assert(calendar_calls == 1 && !metadata_refreshes && !redraws);
+    drops = image_drops;
+    fire_timers(50u);
+    assert(calendar_calls == 2 && image_drops == drops && !metadata_refreshes);
+
+    /* A completed calendar stage survives both owner and redraw retries. */
+    calendar_rc = 0;
+    reject_metadata = 1;
+    fire_timers(50u);
+    assert(calendar_calls == 3 && !metadata_refreshes && !redraws);
+    fire_timers(50u);
+    assert(calendar_calls == 3 && image_drops == drops && !metadata_refreshes);
+    reject_metadata = 0;
+    reject_redraw = 1;
+    fire_timers(50u);
+    assert(calendar_calls == 3 && metadata_refreshes == 1 && !redraws);
+    fire_timers(50u);
+    assert(calendar_calls == 3 && metadata_refreshes == 1 && !redraws);
+    reject_redraw = 0;
+    fire_timers(50u);
+    assert(calendar_calls == 3 && metadata_refreshes == 1 && redraws == 1);
+    assert(!active_timers(50u));
+
+    /* Reactivation creates a fresh calendar stage, still deferred to UI. */
+    calls = calendar_calls;
+    assert(d->activate(NULL) == 0 && calendar_calls == calls);
+    fire_timers(50u);
+    assert(calendar_calls == calls + 1);
+    fire_timers(1000u); /* Delete the superseded watcher. */
+
+    control_config = input;
+    control_signal = "resource-hook-reload-v1\tcalendar-revision-1\n";
+    drops = image_drops; owners = metadata_refreshes; calls = calendar_calls;
+    draws = redraws;
+    fire_timers(1000u);
+    assert(calendar_calls == calls + 1 && image_drops == drops);
+    assert(metadata_refreshes == owners + 1 && redraws == draws + 1);
+    control_signal = "resource-hook-reload-v1\tcalendar-revision-2\n";
+    fire_timers(1000u);
+    assert(calendar_calls == calls + 2 && image_drops == drops);
+    assert(metadata_refreshes == owners + 2 && redraws == draws + 2);
+    fire_timers(1000u);
+    assert(calendar_calls == calls + 2); /* Repeated signal is not a revision. */
+
+    /* Removing the mapping must consult the old view to restore stock art. */
+    control_config = "# stock calendar\n";
+    control_signal = "resource-hook-reload-v1\tcalendar-remove\n";
+    calls = calendar_calls;
+    fire_timers(1000u);
+    assert(calendar_calls == calls + 1 && calendar_old_only);
+
+    /* An unrelated theme, including a new revision, has no calendar work. */
+    control_config = "/resource/icon.bin\tthemes/unrelated/icon.bin\n";
+    control_signal = "resource-hook-reload-v1\tcalendar-unrelated-1\n";
+    calls = calendar_calls;
+    fire_timers(1000u);
+    assert(calendar_calls == calls);
+    control_signal = "resource-hook-reload-v1\tcalendar-unrelated-2\n";
+    fire_timers(1000u);
+    assert(calendar_calls == calls && calendar_queries && !locked);
+    assert(allocations == frees + persistent_allocs);
+    puts("calendar UI ownership, retries, revisions, removal and unrelated themes passed");
+    return 0;
+}
+
 static int test_empty_startup_then_theme_reload(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
@@ -682,6 +786,8 @@ static int test_compact_snapshots(void) {
 }
 int main(int argc, char **argv) {
     test_relative_config();
+    if (argc > 1 && !strcmp(argv[1], "--calendar"))
+        return test_calendar_integration();
     if (argc == 2 && !strcmp(argv[1], "--snapshots"))
         return test_compact_snapshots();
     if (argc == 2 && !strcmp(argv[1], "--startup-diagnostics"))
