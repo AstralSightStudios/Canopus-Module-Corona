@@ -1,4 +1,8 @@
-import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination } from "./resource-path";
+import {
+  THEME_DESTINATION_ROOT, QUICKAPP_ICON_SOURCE_PREFIX, isBinFileDestination,
+  isQuickAppIconSource, safeResourceSource, safeRelativeResourcePath, safeThemeDestination,
+  validQuickAppPackage
+} from "./resource-path";
 
 const RESOURCE_PACK_FORMAT = "canopus-resource-pack";
 const RESOURCE_PACK_VERSION = 1;
@@ -60,35 +64,30 @@ function optionalText(value: unknown, label: string, maxBytes: number): string |
   return value;
 }
 
-function validAbsolutePath(value: string): boolean {
-  if (!value || value[0] !== "/" || utf8Length(value) >= MAX_PATH_BYTES) return false;
-  let segmentStart = 1;
-  for (let i = 1; i <= value.length; i++) {
-    if (i < value.length) {
-      const code = value.charCodeAt(i);
-      if (code < 32 || code === 127 || value[i] === "\\" || value[i] === ":") return false;
-    }
-    if (i === value.length || value[i] === "/") {
-      const segment = value.slice(segmentStart, i);
-      if ((!segment && i < value.length) || segment === "." || segment === "..") return false;
-      segmentStart = i + 1;
-    }
-  }
-  return true;
-}
-
-function parseMappings(value: unknown, themeId: string): ResourcePackMapping[] {
+function parseMappings(value: unknown, quickappIcons: unknown, themeId: string): ResourcePackMapping[] {
   if (!Array.isArray(value) || value.length > MAX_MAPPING_RULES)
     throw new Error(`mappings 必须是最多 ${MAX_MAPPING_RULES} 条的数组`);
+  if (quickappIcons !== undefined && !Array.isArray(quickappIcons))
+    throw new Error("quickappIcons 必须是数组");
+  const icons: unknown[] = quickappIcons === undefined ? [] : quickappIcons as unknown[];
+  if (value.length + icons.length > MAX_MAPPING_RULES)
+    throw new Error(`mappings 与 quickappIcons 合计最多 ${MAX_MAPPING_RULES} 条`);
+  const normalizedIcons = icons.map((item, index) => {
+    if (!isRecord(item) || !validQuickAppPackage(item.package))
+      throw new Error(`quickappIcons[${index}].package 无效或超过 127 字节`);
+    return { source: `${QUICKAPP_ICON_SOURCE_PREFIX}${item.package}`, destination: item.destination };
+  });
 
   const seenSources = new Set<string>();
-  const mappings = value.map((item, index) => {
+  const mappings = [...value, ...normalizedIcons].map((item, index) => {
     if (!isRecord(item)) throw new Error(`mappings[${index}] 格式无效`);
     const source = requiredText(item.source, `mappings[${index}].source`, MAX_PATH_BYTES - 1);
     const destination = requiredText(item.destination,
       `mappings[${index}].destination`, MAX_PATH_BYTES - 1);
-    if (!validAbsolutePath(source) || !safeRelativeResourcePath(destination))
-      throw new Error(`mappings[${index}] source 必须为绝对路径，destination 必须为安全的包内相对路径`);
+    if (!safeResourceSource(source) || !safeRelativeResourcePath(destination))
+      throw new Error(`mappings[${index}] source 必须为绝对路径或有效的 QuickApp 图标键，destination 必须为安全的包内相对路径`);
+    if (isQuickAppIconSource(source) && !isBinFileDestination(destination))
+      throw new Error(`mappings[${index}] QuickApp 图标目标必须为 BIN 文件`);
     const resolvedDestination = `${THEME_DESTINATION_ROOT}${themeId}/${destination}`;
     if (!safeThemeDestination(resolvedDestination))
       throw new Error(`mappings[${index}].destination 展开后超过设备路径限制`);
@@ -139,7 +138,10 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     targets = value.targets.map((target, index) =>
       requiredText(target, `targets[${index}]`, 128));
   }
-  const mappings = parseMappings(value.mappings, value.themeId);
+  const mappings = parseMappings(value.mappings, value.quickappIcons, value.themeId);
+
+  // Consume quickappIcons into canonical mappings only. Re-parsing serialized
+  // normalized manifests must neither duplicate rules nor discard pack metadata.
 
   return {
     format: RESOURCE_PACK_FORMAT,

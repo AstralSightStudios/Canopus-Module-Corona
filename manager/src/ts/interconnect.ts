@@ -1,4 +1,4 @@
-import { THEME_DESTINATION_ROOT, safeThemeDestination } from "./resource-path";
+import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination } from "./resource-path";
 import { interconnect } from "./import";
 import * as file from "./file";
 import type { FileOperationError } from "./file";
@@ -138,8 +138,7 @@ function validThemeId(value: unknown): value is string {
 
 /** Validate without rewriting: the returned path is the exact transmitted spelling. */
 export function validateThemeRelativePath(relativePath: unknown, themeId: string): relativePath is string {
-  if (typeof relativePath !== "string" || !relativePath || relativePath[0] === "/" ||
-      /^[A-Za-z]:/.test(relativePath) || relativePath.indexOf("\\") >= 0) return false;
+  if (typeof relativePath !== "string" || !safeRelativeResourcePath(relativePath)) return false;
   const segments = relativePath.split("/");
   if (segments.some(segment => !segment || segment === "." || segment === "..")) return false;
   return validThemeId(themeId) &&

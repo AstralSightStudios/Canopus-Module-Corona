@@ -33,6 +33,7 @@ import {
   isResourceCatalogCurrent,
   loadResourceOverrides,
   resolveResourceChoice,
+  validSourcePath,
   SYSTEM_RESOURCE_CHOICE
 } from "../../ts/resource-overrides"
 
@@ -106,7 +107,7 @@ export default {
   },
 
   openPath(sourcePath) {
-    if (typeof sourcePath !== "string" || sourcePath[0] !== "/") return
+    if (!validSourcePath(sourcePath)) return
     router.push({ uri: "pages/mix-match-select", params: { sourcePath } })
   },
 

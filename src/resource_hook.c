@@ -36,10 +36,36 @@ static int system_destination(const char *destination) {
     return length(destination) == sizeof(system)-1u &&
            prefix(destination, system, sizeof(system)-1u);
 }
+const char *rh_quickapp_package(const char *source) {
+    static const char marker[] = RH_QUICKAPP_ICON_PREFIX;
+    uint32_t n = length(source), i, segment = 0, dots = 0;
+    const char *package;
+    if (n <= sizeof(marker)-1u || n >= RH_PATH ||
+        !prefix(source, marker, sizeof(marker)-1u)) return NULL;
+    package = source + sizeof(marker)-1u;
+    n -= sizeof(marker)-1u;
+    if (n > RH_QUICKAPP_PACKAGE_MAX) return NULL;
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)package[i];
+        if (c == '.') {
+            if (!segment) return NULL;
+            segment = 0; dots++;
+        } else {
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '_' || (c == '-' && segment)))
+                return NULL;
+            segment++;
+        }
+    }
+    return segment && dots ? package : NULL;
+}
 static int rule_ok(const struct rh_rule *r) {
     static const char root[] = RH_THEME_ROOT;
     uint32_t a = length(r->source), b = length(r->destination);
-    if (!valid(r->source)) return 0;
+    const char *package = rh_quickapp_package(r->source);
+    if (!package && !valid(r->source)) return 0;
+    if (package && !system_destination(r->destination) &&
+        (b < 4u || rh_key_compare(r->destination+b-4u, 4u, ".bin", 4u))) return 0;
     /* System means leave the exact file on its original firmware path. */
     if (system_destination(r->destination)) return r->source[a-1u] != '/';
     if (!valid(r->destination) || !prefix(r->destination, root, sizeof(root)-1u)) return 0;

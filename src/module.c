@@ -1,6 +1,7 @@
 #include "canopus_abi.h"
 #include "canopus_module_registration.h"
 #include "resource_hook_platform.h"
+#include "resource_hook_quickapp.h"
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
 #include "resource_hook_font_reload.h"
 #define RH_FONT_EXPERIMENT 1
@@ -43,6 +44,10 @@ static uint32_t font_last_changed;
 #endif
 static void *refresh_timer, *watch_timer;
 static struct rh_snapshot *active_snapshot, *refresh_previous_snapshot;
+/* Semantic declarations survive absent packages and app upgrades. Only the
+ * materialized file snapshot is visible to the open hook. */
+static struct rh_snapshot *quickapp_declarations;
+static unsigned quickapp_poll_failed;
 static unsigned control_busy;
 static char last_reload_signal[RH_RELOAD_SIGNAL_MAX];
 static uint32_t last_reload_signal_size;
@@ -395,12 +400,17 @@ static void publish_current_result(void) {
     publish_result(last_reload_signal,last_reload_signal_size,0,refresh_pending,0);
 #endif
 }
+static int resolve_quickapp(void *cookie, const char *package, char path[RH_PATH]) {
+    (void)cookie;
+    return rh_platform_quickapp_icon_path(package, path);
+}
 static void poll_control_file(void) {
     char signal[RH_RELOAD_SIGNAL_MAX];
-    uint32_t signal_size, irq;
-    struct rh_snapshot *captured = 0, *candidate = 0;
+    uint32_t signal_size = 0, irq;
+    struct rh_snapshot *captured = 0, *candidate = 0, *declarations = 0;
+    struct rh_snapshot *new_declarations = 0, *old_declarations = 0;
     struct rh_mapping_view captured_view;
-    int fd, rc, identical, calendar_affected;
+    int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
 
     /* Reserve the complete transaction before any reentrant firmware I/O.
      * Active maps may be empty; NULL is the transparent zero-rule snapshot. */
@@ -411,38 +421,78 @@ static void poll_control_file(void) {
     }
     control_busy = 1;
     captured = active_snapshot;
-    if (captured && captured->references == UINT32_MAX) {
+    declarations = quickapp_declarations;
+    if ((declarations && declarations->references == UINT32_MAX) ||
+        (captured && captured->references == UINT32_MAX)) {
         control_busy = 0;
         rh_platform_unlock(irq);
         return;
     }
     if (captured) captured->references++;
+    if (declarations) declarations->references++;
     rh_platform_unlock(irq);
 
     rc = read_bounded_file(RH_CONTROL_SIGNAL, signal, sizeof(signal), &signal_size);
-    if (rc || !valid_reload_signal(signal, signal_size) ||
-        reload_signal_seen(signal, signal_size)) goto done;
-    fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
-    if (fd < 0) {
-        publish_result(signal, signal_size, -2102, 0, 0);
-        goto done;
+    revision = !rc && valid_reload_signal(signal, signal_size) &&
+               !reload_signal_seen(signal, signal_size);
+    if (revision) {
+        fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
+        if (fd < 0) {
+            publish_result(signal, signal_size, -2102, 0, 0);
+            goto done;
+        }
+        rc = rh_read_snapshot(config_read, &fd, &snapshot_allocator, &candidate);
+        rh_platform_close(fd);
+        if (!rc && rh_snapshot_has_quickapps(candidate)) {
+            new_declarations = candidate;
+            candidate = 0;
+            rc = rh_materialize_snapshot(new_declarations, resolve_quickapp, 0,
+                                         &snapshot_allocator, &candidate);
+        }
+    } else {
+        /* Installation/reinstallation can change a file key without a manager
+         * revision. This timer is the serialized UI owner; never query in open. */
+        if (!declarations) goto done;
+        rc = rh_materialize_snapshot(declarations, resolve_quickapp, 0,
+                                     &snapshot_allocator, &candidate);
     }
-    rc = rh_read_snapshot(config_read, &fd, &snapshot_allocator, &candidate);
-    rh_platform_close(fd);
     if (rc) {
-        publish_result(signal, signal_size, rc == -7 ? -2101 : -2103, 0, 0);
+        int error = rc == -7 ? -2101 : (rc == -9 ? -2105 :
+                    (rc == -8 ? -2104 : -2103));
+        if (revision) publish_result(signal, signal_size, error, 0, 0);
+        else if (last_reload_signal_valid) {
+            quickapp_poll_failed = 1;
+            publish_result(last_reload_signal, last_reload_signal_size, error, 0, 0);
+        }
         goto done;
     }
 
     identical = rh_snapshot_equal(captured, candidate);
+    if (identical && !revision) {
+        /* A transient lookup/OOM failure may have replaced the last receipt.
+         * Restore completion once, even when recovery needs no map change. */
+        if (quickapp_poll_failed) {
+            quickapp_poll_failed = 0;
+            publish_current_result();
+        }
+        goto done;
+    }
     captured_view = rh_snapshot_view(captured);
-    calendar_affected = identical && rh_platform_calendar_affected(0, &captured_view);
+    calendar_affected = revision && identical &&
+                        rh_platform_calendar_affected(0, &captured_view);
+    quickapp_affected = revision && identical && new_declarations != 0;
     irq = rh_platform_lock();
     /* A nested activation may have requested a refresh during parsing. Never
      * replace its owner transaction, or publish against a changed generation. */
-    if (active_snapshot != captured || refresh_pending || refreshing) {
+    if (active_snapshot != captured || quickapp_declarations != declarations ||
+        refresh_pending || refreshing) {
         rh_platform_unlock(irq);
         goto done;
+    }
+    if (revision) {
+        old_declarations = quickapp_declarations;
+        quickapp_declarations = new_declarations;
+        new_declarations = 0;
     }
     if (!identical) {
         /* Transfer the old active owner to refresh; candidate owns the new
@@ -481,9 +531,18 @@ static void poll_control_file(void) {
             refresh_pending = 1;
         }
 #endif
+        /* An explicit same-map revision may replace icon bytes in place. Do not
+         * silently acknowledge it without file-cache retirement/owner refresh. */
+        if (quickapp_affected) {
+            cache_dropped = images_done = 0;
+            calendar_done = calendar_affected ? 0u : 1u;
+            refresh_previous_snapshot = 0;
+            refresh_pending = 1;
+        }
     }
     rh_platform_unlock(irq);
-    remember_reload_signal(signal, signal_size);
+    if (revision) remember_reload_signal(signal, signal_size);
+    quickapp_poll_failed = 0;
     if (refresh_pending) {
         refresh_step(0, 1u);
         (void)ensure_refresh_timer();
@@ -491,6 +550,9 @@ static void poll_control_file(void) {
     publish_current_result();
 done:
     snapshot_release(candidate);
+    snapshot_release(new_declarations);
+    snapshot_release(old_declarations);
+    snapshot_release(declarations);
     snapshot_release(captured);
     irq = rh_platform_lock();
     control_busy = 0;
@@ -517,7 +579,7 @@ static int schedule_watch_timer(void) {
     return 0;
 }
 static int32_t prepare(const struct canopus_context_v1 *c) {
-    struct rh_snapshot *candidate = 0, *previous;
+    struct rh_snapshot *candidate = 0, *previous, *declarations = 0, *old_declarations;
     uint32_t irq;
     int fd, rc = 0, error;
     (void)c;
@@ -541,18 +603,36 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         startup_record("config.alloc", rc == -7 ? -2006 : 0, 0, (uintptr_t)candidate);
         startup_record("config.read", rc, 0, candidate ? candidate->count : 0u);
         rh_platform_close(fd);
+        if (!rc && rh_snapshot_has_quickapps(candidate)) {
+            declarations = candidate;
+            candidate = 0;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+            /* The ROM launcher owner path is not audited on this target. */
+            rc = -9;
+#else
+            rc = rh_materialize_snapshot(declarations, 0, 0,
+                                         &snapshot_allocator, &candidate);
+#endif
+        }
         if (rc) rc = rc == -7 ? -2006 : -2007;
     }
     if (!rc) {
         irq = rh_platform_lock();
         previous = active_snapshot;
+        old_declarations = quickapp_declarations;
+        quickapp_declarations = declarations;
+        declarations = 0;
         active_snapshot = candidate;
         S.count = candidate ? candidate->count : 0u;
         configured = 1;
         rh_platform_unlock(irq);
         startup_record("snapshot.alloc", 0, 0, (uintptr_t)candidate);
         snapshot_release(previous);
+        snapshot_release(old_declarations);
+    } else {
+        snapshot_release(candidate);
     }
+    snapshot_release(declarations);
     startup_record("prepare.end", rc, 0, S.count);
     return rc;
 }

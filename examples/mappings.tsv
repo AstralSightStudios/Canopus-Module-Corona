@@ -2,4 +2,8 @@
 # Directory paths end in '/'; source and destination file paths must both be exact.
 # Destinations are relative to internal://files/, never native absolute paths.
 # Copy matching resource files into themes/current/ before enabling the module.
+# Optional Band 11 .139/.155 package icon declarations (new module required):
+# @quickapp-icon/ng.lst.corona	themes/current/icons/corona.bin
+# @quickapp-icon/ng.lst.corona	@system
+# Package keys resolve on the UI owner; never map an app's entire directory.
 /resource/	themes/current/

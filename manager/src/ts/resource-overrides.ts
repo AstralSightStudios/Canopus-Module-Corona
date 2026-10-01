@@ -1,4 +1,5 @@
 import { parseResourcePackManifest } from "./resource-pack";
+import { safeResourceSource } from "./resource-path";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import type { ActiveMappingsPlan } from "./resource-activation";
 import {
@@ -164,12 +165,8 @@ function utf8Length(value: string): number {
   return bytes;
 }
 
-function validSourcePath(value: unknown): value is string {
-  if (typeof value !== "string" || !value || value[0] !== "/" ||
-      value.endsWith("/") || utf8Length(value) >= 256) return false;
-  const segments = value.slice(1).split("/");
-  return segments.every(segment => segment !== "" && segment !== "." && segment !== ".." &&
-    !/[\\:\u0000-\u001f\u007f]/.test(segment));
+export function validSourcePath(value: unknown): value is string {
+  return typeof value === "string" && !value.endsWith("/") && safeResourceSource(value);
 }
 
 function validChoice(value: unknown): value is string {

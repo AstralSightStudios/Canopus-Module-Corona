@@ -1,4 +1,5 @@
 #include "resource_hook_platform.h"
+#include "resource_hook_quickapp.h"
 #include "canopus_abi.h"
 #include "canopus_module_registration.h"
 #include <assert.h>
@@ -38,6 +39,41 @@ struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 static int calendar_mode, calendar_rc;
+static int quickapp_mode, quickapp_result, reenter_lookup;
+static unsigned quickapp_lookups, quickapp_owner_calls, quickapp_restores;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#define QUICKAPP_ROOT "/data/app/"
+#else
+#define QUICKAPP_ROOT "/data/quickapp/app/"
+#endif
+#define QUICKAPP_PACKAGE "org.example-app"
+#define QUICKAPP_KEY RH_QUICKAPP_ICON_PREFIX QUICKAPP_PACKAGE
+#define QUICKAPP_ICON QUICKAPP_ROOT QUICKAPP_PACKAGE "/install/res/icon.bin"
+#define QUICKAPP_ICON2 QUICKAPP_ROOT QUICKAPP_PACKAGE "/reinstall/res/icon.bin"
+static const char *quickapp_path = QUICKAPP_ICON;
+int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
+    assert(!locked && package && out);
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    /* The unaudited target must never claim a launcher lookup. */
+    (void)package;
+    return -2;
+#else
+    if (!quickapp_mode) return 0; /* Legacy modes have no installed apps. */
+    assert(in_ui_timer && !strcmp(package, QUICKAPP_PACKAGE));
+    quickapp_lookups++;
+    if (reenter_lookup) {
+        unsigned before = quickapp_lookups;
+        reenter_lookup = 0;
+        fire_timers(1000u);
+        assert(quickapp_lookups == before); /* The outer writer owns lookup. */
+    }
+    if (quickapp_result == 1) {
+        assert(strlen(quickapp_path) < RH_PATH);
+        strcpy(out, quickapp_path);
+    }
+    return quickapp_result;
+#endif
+}
 #define CALENDAR_RESOURCE "/resource/calendar/background.bin"
 int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
                                   const struct rh_mapping_view *current) {
@@ -82,10 +118,17 @@ static int backend(void *d, const char *p, int mode) {
         for (i = 0; i < allocations; i++) if (temp_allocations[i].live) {
             old = &temp_allocations[i]; live++;
         }
-        assert(live == 1 && old);
+        if (quickapp_mode) {
+            old = NULL;
+            for (i = 0; i < allocations; i++) if (temp_allocations[i].live) {
+                struct rh_snapshot *s = temp_allocations[i].pointer;
+                if (!rh_snapshot_has_quickapps(s)) old = &temp_allocations[i];
+            }
+            assert(old && live == 2);
+        } else assert(live == 1 && old);
         fire_timers(1000u);
         /* Refresh has completed, but this backend still pins its old map. */
-        assert(old->live && persistent_allocs == 2);
+        assert(old->live && persistent_allocs == (quickapp_mode ? 3u : 2u));
     }
     return 7;
 }
@@ -255,6 +298,19 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
         if (old_calendar || new_calendar) assert(calendar_calls && !calendar_rc);
     }
     assert(old_match >= 0 && new_match >= 0); /* Font-only exact rules need no image owner. */
+    if (quickapp_mode) {
+        int old_icon = previous ? rh_resolve_view(previous, QUICKAPP_ICON, mapped) : 0;
+        int new_icon = rh_resolve_view(current, QUICKAPP_ICON, mapped);
+        int old_icon2 = previous ? rh_resolve_view(previous, QUICKAPP_ICON2, mapped) : 0;
+        int new_icon2 = rh_resolve_view(current, QUICKAPP_ICON2, mapped);
+        assert(old_icon >= 0 && new_icon >= 0 &&
+               old_icon2 >= 0 && new_icon2 >= 0);
+        if (old_icon || new_icon || old_icon2 || new_icon2) {
+            assert(in_ui_timer);
+            quickapp_owner_calls++;
+        }
+        if ((old_icon && !new_icon) || (old_icon2 && !new_icon2)) quickapp_restores++;
+    }
     if (unsupported) return 1;
     if (reject_metadata) return -1;
     metadata_refreshes++;
@@ -784,8 +840,192 @@ static int test_compact_snapshots(void) {
            peak_bytes);
     return 0;
 }
+static void quickapp_count(uint32_t count) {
+    struct canopus_status_writer_v1 w;
+    unsigned char status[48];
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!canopus_module_descriptor.query(&w));
+    assert(u32(status + 12) == count);
+}
+static void quickapp_open(const char *path, const char *expected) {
+    unsigned before = quickapp_lookups;
+    int nested = nested_reload;
+    backend_expected = expected;
+    assert(slot(&driver, path, 2) == 7);
+    if (!nested) assert(quickapp_lookups == before); /* No launcher work inside open. */
+}
+static int test_quickapp_integration(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    static const char declarations[] =
+        "/resource/icon.bin\tthemes/base/icon.bin\n"
+        QUICKAPP_KEY "\tthemes/quick/icon.bin\n";
+    unsigned drops, owners, lookups, before;
+    quickapp_mode = 1;
+    quickapp_result = 0; reenter_lookup = 0; quickapp_path = QUICKAPP_ICON;
+    input = declarations;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    (void)drops; (void)owners; (void)lookups; (void)before;
+    assert(d->prepare(NULL) == -2007 && slot == backend);
+    assert(!quickapp_lookups && !persistent_allocs && allocations == frees);
+    input = "/resource/icon.bin\tthemes/base/icon.bin\n";
+    assert(!d->activate(NULL));
+    fire_timers(50u);
+    quickapp_count(1);
+    control_config = declarations;
+    control_signal = "resource-hook-reload-v1\tquickapp-unsupported\n";
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2105\t"));
+    quickapp_count(1);
+    quickapp_open("resource/icon.bin", (RH_THEME_ROOT "base/icon.bin") + 1);
+    assert(!quickapp_lookups && !quickapp_owner_calls && !quickapp_restores);
+    assert(allocations == frees + persistent_allocs && !locked);
+    puts("QuickApp .043 preparation/reload rejection preserves ordinary maps");
+    return 0;
+#else
+    /* Preparation stores declarations separately and projects normal rules,
+     * without consulting launcher state on the non-UI startup path. */
+    assert(!d->prepare(NULL) && slot == backend && !quickapp_lookups);
+    quickapp_count(1);
+    assert(!d->activate(NULL) && !quickapp_lookups);
+    fire_timers(50u);
+    assert(!quickapp_lookups && active_timers(1000u) == 1);
+    quickapp_open("resource/icon.bin", (RH_THEME_ROOT "base/icon.bin") + 1);
+    quickapp_open(QUICKAPP_KEY, QUICKAPP_KEY);
+    quickapp_open((QUICKAPP_ICON) + 1, (QUICKAPP_ICON) + 1);
+
+    drops = image_drops; before = control_opens;
+    fire_timers(1000u); /* No reload signal: keep the unresolved declaration. */
+    assert(quickapp_lookups == 1 && control_opens == before && image_drops == drops);
+    quickapp_count(1);
+    quickapp_result = 1;
+    fire_timers(1000u); /* Installation activates the retained declaration. */
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    assert(image_drops > drops && quickapp_owner_calls);
+    owners = quickapp_owner_calls; drops = image_drops; lookups = quickapp_lookups;
+    reenter_lookup = 1;
+    fire_timers(1000u);
+    assert(!reenter_lookup && quickapp_lookups == lookups + 1);
+    assert(image_drops == drops && quickapp_owner_calls == owners);
+
+    quickapp_path = QUICKAPP_ICON2;
+    fire_timers(1000u); /* A reinstall changes the exact native BIN key. */
+    quickapp_open((QUICKAPP_ICON) + 1, (QUICKAPP_ICON) + 1);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    assert(quickapp_restores && quickapp_owner_calls > owners);
+    drops = image_drops; owners = quickapp_owner_calls;
+    quickapp_result = -1;
+    fire_timers(1000u);
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    quickapp_result = 1; quickapp_path = "/resource/not-a-launcher-icon.bin";
+    fire_timers(1000u);
+    assert(image_drops == drops && quickapp_owner_calls == owners);
+    quickapp_path = QUICKAPP_ICON2;
+    for (before = 1; before <= 2; before++) {
+        fail_alloc_at = alloc_attempts + before;
+        fire_timers(1000u);
+        quickapp_count(2);
+        quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+        assert(image_drops == drops && quickapp_owner_calls == owners);
+    }
+    fail_alloc_at = 0;
+
+    control_config = declarations;
+    control_signal = "resource-hook-reload-v1\tquickapp-lookup-error\n";
+    quickapp_result = -1;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2104\t") && image_drops == drops);
+    quickapp_result = -2;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2105\t") && image_drops == drops);
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    quickapp_result = 1;
+    control_signal = "resource-hook-reload-v1\tquickapp-same-map\n";
+    for (before = 1; before <= 4; before++) {
+        fail_alloc_at = alloc_attempts + before;
+        fire_timers(1000u);
+        assert(strstr(result_record, "\t-2101\t"));
+        assert(image_drops == drops && quickapp_owner_calls == owners);
+        quickapp_count(2);
+    }
+    fail_alloc_at = 0;
+    reenter_read = 1;
+    fire_timers(1000u);
+    assert(!reenter_read && image_drops > drops && quickapp_owner_calls > owners);
+    drops = image_drops; before = control_opens; lookups = quickapp_lookups;
+    fire_timers(1000u);
+    assert(control_opens == before && quickapp_lookups == lookups + 1 && image_drops == drops);
+
+    /* A failed periodic query/OOM must not leave the accepted receipt stuck
+     * in an error after recovery to the same unchanged mapping. */
+    quickapp_result = -1;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2104\t") && image_drops == drops);
+    quickapp_result = 1;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t0\t0\t") && !strstr(result_record, "\t-2104\t"));
+    assert(image_drops == drops && control_opens == before);
+    fail_alloc_at = alloc_attempts + 1u;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2101\t") && image_drops == drops);
+    fail_alloc_at = 0;
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t0\t0\t") && !strstr(result_record, "\t-2101\t"));
+    assert(image_drops == drops && control_opens == before);
+
+    /* Expanding an icon onto an explicitly declared native file is atomic. */
+    control_config = "/resource/icon.bin\tthemes/base/icon.bin\n"
+        QUICKAPP_KEY "\tthemes/quick/icon.bin\n"
+        QUICKAPP_ICON2 "\tthemes/conflict.bin\n";
+    control_signal = "resource-hook-reload-v1\tquickapp-conflict\n";
+    fire_timers(1000u);
+    assert(strstr(result_record, "\t-2103\t") && image_drops == drops);
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    control_config = declarations;
+    fire_timers(1000u); /* Correcting the same failed revision is retried. */
+    assert(image_drops > drops);
+    control_signal = NULL;
+
+    owners = quickapp_restores;
+    quickapp_result = 0;
+    fire_timers(1000u); /* Uninstall restores stock while retaining intent. */
+    quickapp_count(1);
+    quickapp_open((QUICKAPP_ICON2) + 1, (QUICKAPP_ICON2) + 1);
+    assert(quickapp_restores > owners);
+    quickapp_result = 1;
+    fire_timers(1000u);
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+
+    /* Publication while the backend owns the old bank cannot free that bank. */
+    control_config = "/resource/icon.bin\tthemes/base/icon.bin\n"
+        QUICKAPP_KEY "\tthemes/next/icon.bin\n";
+    control_signal = "resource-hook-reload-v1\tquickapp-backend-pin\n";
+    nested_reload = 1;
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    assert(!nested_reload && persistent_allocs == 2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "next/icon.bin") + 1);
+
+    control_config = "# remove declarations too\n";
+    control_signal = "resource-hook-reload-v1\tquickapp-remove\n";
+    fire_timers(1000u);
+    quickapp_count(0);
+    quickapp_open((QUICKAPP_ICON2) + 1, (QUICKAPP_ICON2) + 1);
+    lookups = quickapp_lookups;
+    fire_timers(1000u);
+    assert(quickapp_lookups == lookups && !persistent_allocs && !live_bytes);
+    assert(allocations == frees && !locked && active_timers(1000u) == 1);
+    puts("QuickApp UI polling, install/reinstall/uninstall, revisions, LKG, OOM and pins passed");
+    return 0;
+#endif
+}
 int main(int argc, char **argv) {
     test_relative_config();
+    if (argc == 2 && !strcmp(argv[1], "--quickapp"))
+        return test_quickapp_integration();
     if (argc > 1 && !strcmp(argv[1], "--calendar"))
         return test_calendar_integration();
     if (argc == 2 && !strcmp(argv[1], "--snapshots"))

@@ -14,6 +14,8 @@
 #define RH_RELOAD_RESULT_PATH RH_APP_FILES_ROOT "reload.result"
 #define RH_THEME_ROOT RH_APP_FILES_ROOT "themes/"
 #define RH_SYSTEM_DESTINATION "@system"
+#define RH_QUICKAPP_ICON_PREFIX "@quickapp-icon/"
+#define RH_QUICKAPP_PACKAGE_MAX 127u
 /* Directory rules map source prefixes into the app-private themes tree and
  * append the unmatched suffix; file rules map one exact source path. The
  * reserved RH_SYSTEM_DESTINATION exact-file rule explicitly keeps the firmware
@@ -21,6 +23,9 @@
 struct rh_rule { char source[RH_PATH], destination[RH_PATH]; };
 #define RH_INDEX_DIRECTORY 1u
 #define RH_INDEX_SYSTEM 2u
+#define RH_INDEX_QUICKAPP 4u
+/* NULL unless source is a valid package-qualified icon declaration. */
+const char *rh_quickapp_package(const char *source);
 struct rh_indexed_rule {
     uint16_t source_offset, destination_offset;
     uint8_t source_length, destination_length, flags, reserved;
@@ -65,6 +70,8 @@ int rh_install(struct rh_state *,void *,rh_open_fn *,rh_open_fn);
 int rh_resolve(const struct rh_state *, const char *, char out[RH_PATH]);
 int rh_resolve_view(const struct rh_mapping_view *, const char *, char out[RH_PATH]);
 /* TSV destinations are themes/... relative to app files (or @system).
+ * Sources may also be validated @quickapp-icon/package declarations; they must
+ * be materialized on the UI owner before use as native file mappings.
  * Parsed rules store target-specific absolute native destinations. */
 int rh_parse_config(const char *, uint32_t, struct rh_rule *, uint32_t, uint32_t *);
 /* Caller owns staging and text buffers; neither may overlap live state.
@@ -85,4 +92,12 @@ int rh_read_snapshot(rh_read_fn, void *, const struct rh_allocator *,
                       struct rh_snapshot **);
 void rh_free_snapshot(const struct rh_allocator *, struct rh_snapshot *);
 int rh_snapshot_equal(const struct rh_snapshot *, const struct rh_snapshot *);
+int rh_snapshot_has_quickapps(const struct rh_snapshot *);
+/* UI-owner resolver: 1 = copied native BIN path, 0 = absent/uninitialized,
+ * negative = failure. NULL projects only ordinary rules (startup, no UI calls).
+ * Declarations remain caller-owned. Expanded key conflicts reject atomically.
+ * -8 = lookup failure, -9 = unsupported target/source. */
+typedef int (*rh_quickapp_resolver)(void *, const char *, char out[RH_PATH]);
+int rh_materialize_snapshot(const struct rh_snapshot *, rh_quickapp_resolver,
+                            void *, const struct rh_allocator *, struct rh_snapshot **);
 #endif

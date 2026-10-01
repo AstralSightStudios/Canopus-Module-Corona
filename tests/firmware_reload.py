@@ -622,6 +622,7 @@ class CalendarAdapter(Harness):
 class ModuleControl(Harness):
     """Real compact module and exact AP; signed Supervisor loading is bypassed."""
     sources = Harness.sources + (ROOT / 'src/config.c', ROOT / 'src/module.c',
+                                  ROOT / 'src/quickapp_icon.c',
                                   CANOPUS / 'runtime/control/canopus_control.c')
     instruction_budget = 20000000
     app_root = '/data/quickapp/files/ng.lst.corona/'

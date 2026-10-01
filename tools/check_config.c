@@ -29,6 +29,14 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("Valid configuration: %u rule(s)\n", (unsigned)state.count);
+    {
+        uint32_t i;
+        for (i = 0; i < state.count; i++) if (rh_quickapp_package(state.rules[i].source)) {
+            puts("QuickApp icon declarations require UI-owner package lookup on the device; "
+                 "offline path previews do not materialize them.");
+            break;
+        }
+    }
     if (argc == 3) {
         rc = rh_resolve(&state, argv[2], mapped);
         if (rc < 0) {

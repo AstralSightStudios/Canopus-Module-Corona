@@ -1,4 +1,5 @@
 import type { ResourcePackMapping } from "./resource-pack";
+import { safeRelativeResourcePath } from "./resource-path";
 
 export const SYSTEM_STYLE_ID = "@system";
 export const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json";
@@ -59,10 +60,8 @@ function validThemeId(value: unknown): value is string {
 }
 
 function validRelativePath(value: unknown): value is string {
-  if (typeof value !== "string" || !value || value[0] === "/" || value.length > 255) return false;
-  const segments = value.split("/");
-  return segments.every(segment => segment !== "" && segment !== "." && segment !== ".." &&
-    !/[\\:\u0000-\u001f\u007f]/.test(segment));
+  return typeof value === "string" && value.length <= 255 && !value.endsWith("/") &&
+    safeRelativeResourcePath(value);
 }
 
 /** Reads a package's on-disk files without depending on the optional persisted inventory. */

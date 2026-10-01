@@ -29,6 +29,10 @@ for target in 139 155 1043; do
         $TARGET_DEFINE -I"$ROOT/include" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
         "$ROOT/tests/test_compact.c" -o "$ROOT/build/test_compact_${target}"
     "$ROOT/build/test_compact_${target}"
+    "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        $TARGET_DEFINE -I"$ROOT/include" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+        "$ROOT/tests/test_quickapp.c" -o "$ROOT/build/test_quickapp_${target}"
+    "$ROOT/build/test_quickapp_${target}"
     modes="default disabled"
     if [ "$target" != 1043 ]; then
         modes="default disabled experimental"
@@ -54,6 +58,7 @@ for target in 139 155 1043; do
         "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
         "$ROOT/build/test_module_${target}_${mode}" --snapshots
         "$ROOT/build/test_module_${target}_${mode}" --calendar
+        "$ROOT/build/test_module_${target}_${mode}" --quickapp
         for fault in open-fail write-fail short-write fd-zero; do
             RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
         done
@@ -65,10 +70,12 @@ for target in 139 155 1043; do
     done
 done
 CC="$CC" python3 "$ROOT/tests/test_platform_io.py"
+CC="$CC" python3 "$ROOT/tests/test_quickapp_icon_native.py"
 CC="$CC" python3 "$ROOT/tests/test_font_reload_targets.py"
 "$CC" -std=c11 -Wall -Wextra -Werror -I"$ROOT/include" \
     "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" "$ROOT/tools/check_config.c" \
     -o "$ROOT/build/check-config"
 python3 "$ROOT/tests/test_config_cli.py"
 python3 "$ROOT/tests/test_target_receipts.py"
+python3 "$ROOT/tests/test_quickapp_allowlist.py"
 python3 "$ROOT/tests/firmware_support_test.py"

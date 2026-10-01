@@ -39,6 +39,7 @@ import {
   loadResourceOverrides,
   resolveResourceChoice,
   saveResourceOverride,
+  validSourcePath,
   SYSTEM_RESOURCE_CHOICE
 } from "../../ts/resource-overrides"
 
@@ -73,8 +74,7 @@ export default {
   async loadChoices() {
     const version = ++this.loadVersion
     if (!this.loaded) this.statusText = "正在读取可选资源…"
-    if (typeof this.sourcePath !== "string" || this.sourcePath[0] !== "/" ||
-        this.sourcePath.endsWith("/")) {
+    if (!validSourcePath(this.sourcePath)) {
       this.statusText = "替换资源路径无效"
       return
     }

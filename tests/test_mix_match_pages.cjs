@@ -40,6 +40,8 @@ function page(name, dependencies = {}) {
     withResourceOperation: operation => operation(),
     isResourceCatalogCurrent: () => true,
     loadResourceOverrides: async () => ({}),
+    validSourcePath: value => typeof value === 'string' && !value.endsWith('/') &&
+      (value.startsWith('/') || value === '@quickapp-icon/ng.lst.corona'),
     resolveResourceChoice(registration, overrides) {
       const choice = overrides[registration.sourcePath] || DEFAULT_RESOURCE_CHOICE;
       return choice === DEFAULT_RESOURCE_CHOICE || choice === SYSTEM_RESOURCE_CHOICE ||
@@ -192,6 +194,24 @@ async function testSelection() {
   invalid.sourcePath = '/resource/';
   await invalid.loadChoices();
   assert.equal(invalid.statusText, '替换资源路径无效');
+
+  const iconSource = '@quickapp-icon/ng.lst.corona';
+  const iconRegistration = { sourcePath: iconSource, themes: snapshot.paths[0].themes };
+  const iconCatalog = { ...snapshot, paths: [iconRegistration],
+    byPath: new Map([[iconSource, iconRegistration]]) };
+  const pushes = [];
+  const iconList = page('mix-match', { getResourceCatalog: async () => iconCatalog,
+    router: { push: value => pushes.push(value) } });
+  await iconList.loadCatalog();
+  iconList.openPath(iconSource);
+  iconList.openPath('@unknown/package');
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].params.sourcePath, iconSource);
+  const iconSelect = page('mix-match-select', { getResourceCatalog: async () => iconCatalog });
+  iconSelect.sourcePath = iconSource;
+  await iconSelect.loadChoices();
+  assert.equal(iconSelect.loaded, true, 'virtual keys reach the exact catalog registration');
+  assert.equal(iconSelect.rows.length, 4);
 }
 
 async function testReload() {

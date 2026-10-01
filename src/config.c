@@ -42,13 +42,15 @@ static int next_row(const char *text, uint32_t size, uint32_t *position,
         *source_length = a;
         *destination_length = is_system ? 0 : b;
         *flags = (uint8_t)((text[split-1u] == '/' ? RH_INDEX_DIRECTORY : 0u) |
-                          (is_system ? RH_INDEX_SYSTEM : 0u));
+                          (is_system ? RH_INDEX_SYSTEM : 0u) |
+                          (rh_quickapp_package(row->source) ? RH_INDEX_QUICKAPP : 0u));
         return 1;
     }
     return 0;
 }
 
-/* Format: absolute source TAB themes/... (or @system) LF; no escaping. */
+/* Format: absolute path or @quickapp-icon/package TAB themes/... or @system.
+ * Package declarations are resolved separately on the UI owner, never in open. */
 int rh_parse_config(const char *text, uint32_t size, struct rh_rule *staging,
                     uint32_t capacity, uint32_t *count) {
     struct rh_rule row;
@@ -237,8 +239,8 @@ int rh_snapshot_equal(const struct rh_snapshot *a, const struct rh_snapshot *b) 
     ap = rh_snapshot_pool(a); bp = rh_snapshot_pool(b);
     for (i = 0; i < a->count; i++) {
         const struct rh_indexed_rule *ar = &a->rules[i], *br = &b->rules[i];
-        if ((ar->flags & (RH_INDEX_DIRECTORY | RH_INDEX_SYSTEM)) !=
-            (br->flags & (RH_INDEX_DIRECTORY | RH_INDEX_SYSTEM)) ||
+        if ((ar->flags & (RH_INDEX_DIRECTORY | RH_INDEX_SYSTEM | RH_INDEX_QUICKAPP)) !=
+            (br->flags & (RH_INDEX_DIRECTORY | RH_INDEX_SYSTEM | RH_INDEX_QUICKAPP)) ||
             rh_key_compare(ap+ar->source_offset, ar->source_length,
                            bp+br->source_offset, br->source_length)) return 0;
         if (!(ar->flags & RH_INDEX_SYSTEM) &&
@@ -246,4 +248,82 @@ int rh_snapshot_equal(const struct rh_snapshot *a, const struct rh_snapshot *b) 
                            bp+br->destination_offset, br->destination_length)) return 0;
     }
     return 1;
+}
+
+int rh_snapshot_has_quickapps(const struct rh_snapshot *snapshot) {
+    uint32_t i;
+    if (snapshot) for (i = 0; i < snapshot->count; i++)
+        if (snapshot->rules[i].flags & RH_INDEX_QUICKAPP) return 1;
+    return 0;
+}
+
+int rh_materialize_snapshot(const struct rh_snapshot *declarations,
+                            rh_quickapp_resolver resolve, void *cookie,
+                            const struct rh_allocator *allocator,
+                            struct rh_snapshot **out) {
+    static const char app_root[] =
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+        "/data/app/";
+#else
+        "/data/quickapp/app/";
+#endif
+    const char *pool;
+    char *text;
+    uint32_t i, used = 0, capacity;
+    int rc = 0;
+    struct rh_mapping_view view = rh_snapshot_view(declarations);
+    if (!out || !allocator || !allocator->alloc || !allocator->free ||
+        rh_validate_view(&view)) return -1;
+    if (!declarations) { *out = NULL; return 0; }
+    pool = rh_snapshot_pool(declarations);
+    capacity = declarations->pool_bytes + declarations->count * (RH_PATH + 2u);
+    if (capacity > RH_CONFIG_BYTES) capacity = RH_CONFIG_BYTES;
+    text = allocator->alloc(allocator->cookie, capacity);
+    if (!text) return -7;
+    for (i = 0; i < declarations->count; i++) {
+        const struct rh_indexed_rule *rule = &declarations->rules[i];
+        const char *source = pool + rule->source_offset;
+        const char *destination = (rule->flags & RH_INDEX_SYSTEM) ?
+            RH_SYSTEM_DESTINATION : pool + rule->destination_offset;
+        uint32_t a = rule->source_length;
+        uint32_t b = (rule->flags & RH_INDEX_SYSTEM) ?
+            sizeof(RH_SYSTEM_DESTINATION)-1u : rule->destination_length;
+        char path[RH_PATH];
+        if (rule->flags & RH_INDEX_QUICKAPP) {
+            const char *package = rh_quickapp_package(source);
+            uint32_t p = 0, root_length = sizeof(app_root)-1u;
+            if (!package) { rc = -2; break; }
+            if (!resolve) continue;
+            {
+                uint32_t k;
+                for (k = 0; k < RH_PATH; k++) path[k] = 0;
+            }
+            rc = resolve(cookie, package, path);
+            if (rc < 0) { rc = rc == -2 ? -9 : -8; break; }
+            if (!rc) continue;
+            if (rc != 1) { rc = -8; break; }
+            /* Never trust the resolver's path length. */
+            a = 0;
+            while (a < RH_PATH && path[a]) a++;
+            while (package[p]) p++;
+            if (a >= RH_PATH || a <= root_length+p+1u ||
+                rh_key_compare(path, root_length, app_root, root_length) ||
+                rh_key_compare(path+root_length, p, package, p) ||
+                path[root_length+p] != '/' || a < 4u ||
+                rh_key_compare(path+a-4u, 4u, ".bin", 4u)) { rc = -8; break; }
+            source = path;
+        }
+        if (a+1u+b+1u > capacity-used) { rc = -6; break; }
+        {
+            uint32_t k;
+            for (k = 0; k < a; k++) text[used++] = source[k];
+            text[used++] = '\t';
+            for (k = 0; k < b; k++) text[used++] = destination[k];
+            text[used++] = '\n';
+        }
+        rc = 0;
+    }
+    if (!rc) rc = rh_parse_snapshot(text, used, allocator, out);
+    allocator->free(allocator->cookie, text);
+    return rc;
 }

@@ -1,4 +1,7 @@
-import { THEME_DESTINATION_ROOT, safeThemeDestination } from "./resource-path";
+import {
+  THEME_DESTINATION_ROOT, isBinFileDestination, isQuickAppIconSource,
+  safeAbsoluteResourcePath, safeRelativeResourcePath, safeResourceSource, safeThemeDestination
+} from "./resource-path";
 import { parseResourcePackManifest } from "./resource-pack";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import {
@@ -76,14 +79,6 @@ function utf8Length(value: string): number {
     } else bytes += 3;
   }
   return bytes;
-}
-
-function safeAbsolutePath(value: string): boolean {
-  if (!value || value[0] !== "/" || utf8Length(value) >= MAX_PATH_BYTES) return false;
-  const segments = value.slice(1).split("/");
-  return segments.every((segment, index) =>
-    (segment !== "" || index === segments.length - 1) && segment !== "." && segment !== ".." &&
-    !/[\\:\u0000-\u001f\u007f]/.test(segment));
 }
 
 function parseGenerationIndex(text: string | null): StoredGenerationIndex {
@@ -201,8 +196,9 @@ function serializeMappings(rules: ActiveMappingRule[]): string {
 }
 
 function validMappingRule(rule: ActiveMappingRule): boolean {
-  if (!safeAbsolutePath(rule.source)) return false;
+  if (!safeResourceSource(rule.source)) return false;
   if (rule.destination === SYSTEM_RESOURCE_CHOICE) return !rule.source.endsWith("/");
+  if (isQuickAppIconSource(rule.source) && !isBinFileDestination(rule.destination)) return false;
   return safeThemeDestination(rule.destination) &&
     rule.source.endsWith("/") === rule.destination.endsWith("/");
 }
@@ -214,6 +210,15 @@ export function planActiveMappings(
   overrides: ResourceOverrides = Object.create(null) as ResourceOverrides,
 ): ActiveMappingsPlan {
   if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
+  // Validate before grouping: virtual icon keys must never enter directory expansion.
+  for (const theme of themesHighToLow) {
+    for (const mapping of theme.manifest.mappings) {
+      if (!safeRelativeResourcePath(mapping.destination) ||
+          !validMappingRule({ source: mapping.source,
+            destination: `${THEME_DESTINATION_ROOT}${theme.themeId}/${mapping.destination}` }))
+        throw new Error("合并后的资源映射路径无效");
+    }
+  }
   const priorityThemes = themesHighToLow.filter(theme => theme.active !== false);
   const groups = collectSourceGroups(priorityThemes);
   let rules: ActiveMappingRule[] = [];
@@ -262,7 +267,7 @@ export function planActiveMappings(
           if (!sourcePath.startsWith(sourceRoot))
             throw new Error(`资源映射展开后超出活动根路径：${sourcePath}`);
           if (utf8Length(sourcePath) >= MAX_PATH_BYTES) continue;
-          if (!safeAbsolutePath(sourcePath))
+          if (!safeAbsoluteResourcePath(sourcePath))
             throw new Error(`资源路径展开后无效：${sourcePath}`);
           // A more-specific rule masks this broad rule even if its destination
           // does not contain the concrete file.
@@ -319,7 +324,7 @@ export function planActiveMappings(
     if (!relativeDestination || relativeDestination.endsWith("/"))
       throw new Error(`混搭微调资源目标不是文件：${sourcePath}`);
     const destination = `${THEME_DESTINATION_ROOT}${theme.themeId}/${relativeDestination}`;
-    if (!safeAbsolutePath(sourcePath) || !safeThemeDestination(destination))
+    if (!validMappingRule({ source: sourcePath, destination }))
       throw new Error(`混搭微调资源路径超过模块限制：${sourcePath}`);
     overrideRules.push({ source: sourcePath, destination });
   }
