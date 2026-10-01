@@ -23,7 +23,7 @@
 ## 已实现
 
 - 最多 256 条目录前缀或精确文件映射，最长匹配优先，从快应用 `internal://files/mappings.tsv` 对应原生路径完整校验后提交。
-  TSV source 为绝对路径；实验性 Band 11 快应用图标另支持 `@quickapp-icon/<package>`。
+  TSV source 为绝对路径；实验性快应用图标（11 `.139/.155`、10 Pro `.043`）另支持 `@quickapp-icon/<package>`。
   普通目标为 `themes/...` 相对路径；模块按目标展开到 10 Pro 的 `/data/files/ng.lst.corona/` 或 11 的 `/data/quickapp/files/ng.lst.corona/`，不接受绝对目标路径。精确文件规则可将目标设为 `@system`，明确透传固件原资源并遮蔽更宽目录规则。路径最多 255 字节，
   配置最多 32 KiB。替代资源限于同根目录的 `themes/` 子树；拒绝路径穿越、重复规则和非法
   前缀，主题树不得含逃逸符号链接。Manager 对应 URI 根目录为 `internal://files/`。
@@ -96,13 +96,16 @@ Manager 的 CRPack v1 支持可选 `quickappIcons: [{"package":"ng.lst.corona",
 不是固定常驻最大规则数组。状态中的规则数仍是当前有效文件映射数，不是安装应用数。
 重载错误 `-2104` 表示查询失败，`-2105` 表示不支持的目标/图标 source；不消费失败 revision。
 
-**当前实现仅启用 Band 11 `.139/.155` 的 BIN 文件图标链路；10 Pro `.043` 拒绝此类
-声明，原有路径功能不变。** PNG 回退、内存描述符、树外/派生 owner 不支持；替代图标建议
-保持原尺寸，因为通用 image 刷新不重新计算启动器缩放。旧模块不支持新的 source 类型，
-必须配套升级。Canopus 精确目标包须登记新的 `app_lookup_package` 入口；同级框架已按
-两版独立证据登记，保持 restricted/PENDING，未提升为通用 SDK 导出或实机通过。
-不能绕过 ELF 地址白名单；未更新目标包会拒绝构建。
-静态/宿主测试不代表实机安装、GPU 完成或显示成功。固件证据见各目标的 `quickapp-icons.md`。
+**当前支持 Band 11 `.139/.155` 和 10 Pro `.043` 的 BIN 文件图标链路。**
+11 查询路径根为 `/data/quickapp/app/<package>/`；10 Pro 为 `/data/app/<package>/`，
+记录字段及服务身份独立适配。`.155` 已有用户报告的实机成功；`.043` 本次仅完成宿主、
+真实 AP 指令与构建校验，尚待实机验证。PNG 回退、内存描述符、树外/派生 owner 不支持；
+替代图标建议保持原尺寸，因为通用 image 刷新不重新计算启动器缩放。
+旧模块不支持新的 source 类型，必须配套升级。Band 11 的 Canopus 精确目标包须登记
+`app_lookup_package` 入口；10 Pro 复用已登记的 `calendar_app_lookup_name`，不新增别名或
+调用权限。三版证据保持 restricted/PENDING，未提升为通用 SDK 导出或全面硬件验收。
+不能绕过 ELF 地址白名单；静态/宿主测试不代表实机安装、GPU 完成或显示成功。
+固件证据见各目标的 `quickapp-icons.md`。
 
 ## 规则内存与匹配验证
 
@@ -170,6 +173,10 @@ unzip -p ../../temp/miwear.watch.q66tc_v4.100.139_full_a02b7af5.bin vela_ap.bin 
 RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.139 \
 RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
   "$FIRMWARE_PYTHON" tests/firmware_reload.py
+
+# 快应用只读查询：独立编译/执行三个精确目标；.043 图标缓存及 owner 刷新另测
+"$FIRMWARE_PYTHON" tests/firmware_quickapp_icon.py
+"$FIRMWARE_PYTHON" tests/firmware_quickapp_reload_1043.py
 ```
 
 该测试临时编译所选目标源码，不读取签名密钥，不依赖已签名 payload。两个 AP 上的
@@ -213,6 +220,8 @@ style get/refresh；地址与证据见该目标 `ui-reload-audit.md` 的当前�
 ```sh
 # 三组 ASan/UBSan 宿主测试、ARM 编译、ELF verifier；不需要私钥
 sh scripts/build.sh xiaomi-band-11-4.100.155
+# 10 Pro .043（包含快应用包名图标；尚待实机验证）
+sh scripts/build.sh xiaomi-band-10-pro-3.101.043
 # 不传目标仍构建 .139；build/resource-hook.elf 是最近一次构建的目标
 
 # 完整签名交付：运行全部检查，然后生成 payload、安装表盘资源和 ZIP

@@ -81,7 +81,8 @@ checks, not allocation-liveness proof; owner serialization remains mandatory.
 Success 1 requires canonical ASCII absolute path beneath exactly
 `/data/quickapp/app/<package>/`, no empty/dot/traversal components, and lowercase
 `.bin`. Invalid records/unsafe paths/root-package mismatch return -1; non-file
-sources, other roots or formats (including PNG) return -2. .043 returns -2.
+sources, other roots or formats (including PNG) return -2. The independently
+adapted .043 lookup uses its own `/data/app/` root and record layout.
 Every failure empties output. No allocator, file open/read/write, notification,
 registration, rendering, cache eviction, or make-icon call is used.
 
@@ -111,14 +112,15 @@ not additional call permissions. Ranges, generated SDK and verifier are unchange
 ## Tests
 
 - `python3 tests/test_quickapp_icon_native.py`: host C builds for all three
-  targets; injects only read/lookup leaves, no Unicorn dependency (5 tests).
+  targets; injects only read/lookup leaves, no Unicorn dependency (10 tests).
 - `build/firmware-tests/bin/python tests/firmware_quickapp_icon.py`: builds
-  production ARM C and executes both fingerprinted APs' package wrapper,
-  registry wrapper, hash, hashmap get and bucket search (5 tests). strcmp is a
+  production ARM C and executes the independently fingerprinted targets'
+  native lookup/hashmap instructions (11 tests). strcmp is a
   documented modeled leaf. Synthetic maps/records exercise misses, identity,
   bad pointers, bounded strings, cycles, unsafe paths, PNG/non-file rejection,
   exact service guards and independent output ownership. Only stack/output
-  writes are permitted; .043 executes only its unsupported module stub.
+  writes are permitted. The independently adapted .043 lookup now executes
+  its own AP instructions; see that target's `quickapp-icons.md`.
 
 Both target records/evidence bundles pass schema validation. Exact callable
 ELF probes pass; nearby/wrong-target addresses and removal of the record fail.

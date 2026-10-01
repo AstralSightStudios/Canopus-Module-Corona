@@ -53,11 +53,6 @@ static unsigned quickapp_lookups, quickapp_owner_calls, quickapp_restores;
 static const char *quickapp_path = QUICKAPP_ICON;
 int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
     assert(!locked && package && out);
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    /* The unaudited target must never claim a launcher lookup. */
-    (void)package;
-    return -2;
-#else
     if (!quickapp_mode) return 0; /* Legacy modes have no installed apps. */
     assert(in_ui_timer && !strcmp(package, QUICKAPP_PACKAGE));
     quickapp_lookups++;
@@ -72,7 +67,6 @@ int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
         strcpy(out, quickapp_path);
     }
     return quickapp_result;
-#endif
 }
 #define CALENDAR_RESOURCE "/resource/calendar/background.bin"
 int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
@@ -863,25 +857,6 @@ static int test_quickapp_integration(void) {
     quickapp_mode = 1;
     quickapp_result = 0; reenter_lookup = 0; quickapp_path = QUICKAPP_ICON;
     input = declarations;
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    (void)drops; (void)owners; (void)lookups; (void)before;
-    assert(d->prepare(NULL) == -2007 && slot == backend);
-    assert(!quickapp_lookups && !persistent_allocs && allocations == frees);
-    input = "/resource/icon.bin\tthemes/base/icon.bin\n";
-    assert(!d->activate(NULL));
-    fire_timers(50u);
-    quickapp_count(1);
-    control_config = declarations;
-    control_signal = "resource-hook-reload-v1\tquickapp-unsupported\n";
-    fire_timers(1000u);
-    assert(strstr(result_record, "\t-2105\t"));
-    quickapp_count(1);
-    quickapp_open("resource/icon.bin", (RH_THEME_ROOT "base/icon.bin") + 1);
-    assert(!quickapp_lookups && !quickapp_owner_calls && !quickapp_restores);
-    assert(allocations == frees + persistent_allocs && !locked);
-    puts("QuickApp .043 preparation/reload rejection preserves ordinary maps");
-    return 0;
-#else
     /* Preparation stores declarations separately and projects normal rules,
      * without consulting launcher state on the non-UI startup path. */
     assert(!d->prepare(NULL) && slot == backend && !quickapp_lookups);
@@ -1000,6 +975,26 @@ static int test_quickapp_integration(void) {
     quickapp_count(2);
     quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
 
+    /* An explicit @system declaration restores stock while retaining polling
+     * intent. Repeating its accepted revision does not refresh image owners. */
+    owners = quickapp_restores;
+    control_config = "/resource/icon.bin\tthemes/base/icon.bin\n"
+        QUICKAPP_KEY "\t@system\n";
+    control_signal = "resource-hook-reload-v1\tquickapp-system\n";
+    fire_timers(1000u);
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (QUICKAPP_ICON2) + 1);
+    assert(quickapp_restores > owners && strstr(result_record, "\t0\t0\t"));
+    drops = image_drops; owners = quickapp_owner_calls;
+    fire_timers(1000u);
+    assert(image_drops == drops && quickapp_owner_calls == owners);
+    control_config = declarations;
+    control_signal = "resource-hook-reload-v1\tquickapp-theme-reapply\n";
+    fire_timers(1000u);
+    quickapp_count(2);
+    quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
+    assert(quickapp_owner_calls > owners && image_drops > drops);
+
     /* Publication while the backend owns the old bank cannot free that bank. */
     control_config = "/resource/icon.bin\tthemes/base/icon.bin\n"
         QUICKAPP_KEY "\tthemes/next/icon.bin\n";
@@ -1018,9 +1013,8 @@ static int test_quickapp_integration(void) {
     fire_timers(1000u);
     assert(quickapp_lookups == lookups && !persistent_allocs && !live_bytes);
     assert(allocations == frees && !locked && active_timers(1000u) == 1);
-    puts("QuickApp UI polling, install/reinstall/uninstall, revisions, LKG, OOM and pins passed");
+    puts("QuickApp UI polling, install/reinstall/uninstall, @system restore, revisions, LKG, OOM and pins passed");
     return 0;
-#endif
 }
 int main(int argc, char **argv) {
     test_relative_config();

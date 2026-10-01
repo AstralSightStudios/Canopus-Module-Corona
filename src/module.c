@@ -606,13 +606,8 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         if (!rc && rh_snapshot_has_quickapps(candidate)) {
             declarations = candidate;
             candidate = 0;
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-            /* The ROM launcher owner path is not audited on this target. */
-            rc = -9;
-#else
             rc = rh_materialize_snapshot(declarations, 0, 0,
                                          &snapshot_allocator, &candidate);
-#endif
         }
         if (rc) rc = rc == -7 ? -2006 : -2007;
     }

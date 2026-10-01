@@ -105,16 +105,17 @@ unchanged. Do not invoke indirectly to evade the absolute-address verifier.
 
 ## Tests / limitations
 
-`python3 tests/test_quickapp_icon_native.py` (5 tests) compiles host C for
+`python3 tests/test_quickapp_icon_native.py` (10 tests) compiles host C for
 .139/.155/.043 and injects only native read/lookup leaves. It needs no Unicorn.
-`build/firmware-tests/bin/python tests/firmware_quickapp_icon.py` (5 tests)
-compiles production ARM C, checks exact AP hashes and executes both APs'
-wrappers/hashmap/hash/bucket instructions on synthetic registries. The known
+`build/firmware-tests/bin/python tests/firmware_quickapp_icon.py` (11 tests)
+compiles production ARM C, checks exact AP hashes and executes each target's
+native lookup/hashmap instructions on synthetic registries. The known
 strcmp thunk leads to missing ROM `0x0026c095`; comparison is explicitly modeled,
 not guessed/emulated ROM code. The AP lookup is unmodified. Probes cover absent
 service/registry, exact callback identity, invalid/cyclic records, string bounds,
 package/path identity, PNG/non-file rejection and independent copied output;
-only stack/output writes are allowed. .043 stub returns -2 with no native read.
+only stack/output writes are allowed. The independently adapted .043 lookup
+now runs its own AP instructions; see that target's `quickapp-icons.md`.
 
 Both target records/evidence bundles pass schema validation. Exact callable
 ELF probes pass; nearby/wrong-target addresses and removal of the record fail.

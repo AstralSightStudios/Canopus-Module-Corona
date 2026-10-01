@@ -22,7 +22,21 @@ if not DEFAULT_SDK.is_dir():
     DEFAULT_SDK = ROOT.parent / 'Canopus-Private'
 SDK = Path(os.environ.get('CANOPUS_ROOT', DEFAULT_SDK)).resolve()
 EVIDENCE_ID = 'EVID-RESOURCE-QUICKAPP-ICON-001'
+CALENDAR_EVIDENCE_ID = 'EVID-RESOURCE-CALENDAR-001'
+TARGET_1043 = 'xiaomi-band-10-pro-3.101.043'
+
+
+def symbol_name(target):
+    return 'calendar_app_lookup_name' if target == TARGET_1043 else 'app_lookup_package'
+
+
+def evidence_ids(target):
+    return [CALENDAR_EVIDENCE_ID, EVIDENCE_ID] if target == TARGET_1043 else [EVIDENCE_ID]
+
 TARGETS = {
+    'xiaomi-band-10-pro-3.101.043': (
+        0x0ca69e80, 0x0ca69e81,
+        '519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec'),
     'xiaomi-band-11-4.100.139': (
         0x0c6a16a2, 0x0c6a16a3,
         '31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74'),
@@ -70,7 +84,7 @@ class QuickAppAllowlist(unittest.TestCase):
                 '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
                 '-fno-unwind-tables', '-Os', '-Wall', '-Wextra', '-Werror',
                 '-c', str(source), '-o', str(obj)], check=True)
-            subprocess.run([cls.linker, '-r', str(obj), '-o', str(elf)], check=True)
+            subprocess.run([cls.linker, '-r', '-e', 'quickapp_probe', str(obj), '-o', str(elf)], check=True)
             cls.probes[address] = elf
 
     def run_cli(self, *args):
@@ -79,7 +93,7 @@ class QuickAppAllowlist(unittest.TestCase):
 
     def symbol_path(self, target):
         return (SDK / 'targets' / target / 'symbols' /
-                f'{target}.app_lookup_package.json')
+                f'{target}.{symbol_name(target)}.json')
 
     def evidence_path(self, target):
         return SDK / 'targets' / target / 'evidence' / f'{EVIDENCE_ID}.json'
@@ -92,8 +106,8 @@ class QuickAppAllowlist(unittest.TestCase):
                 result = self.run_cli('symbol', 'validate', path)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 expected = {'schema': 1, 'target_id': target,
-                    'symbol_id': f'{target}.app_lookup_package',
-                    'name': 'app_lookup_package', 'kind': 'function',
+                    'symbol_id': f'{target}.{symbol_name(target)}',
+                    'name': symbol_name(target), 'kind': 'function',
                     'instruction_set': 'thumb', 'calling_convention': 'arm-aapcs',
                     'policy': 'restricted', 'status': 'STATIC_RECOVERED',
                     'approval_state': 'PENDING'}
@@ -104,16 +118,21 @@ class QuickAppAllowlist(unittest.TestCase):
                 self.assertEqual(entry | 1, callable_address)
                 self.assertIn('const char *', symbol['prototype'])
                 self.assertTrue(symbol['contexts']['allowed'])
-                self.assertFalse(symbol['contexts']['blocking'])
+                self.assertEqual(symbol['contexts']['blocking'], target == TARGET_1043)
                 self.assertTrue(symbol['ownership']['argument'])
                 self.assertTrue(symbol['ownership']['return_value'])
                 self.assertEqual(symbol['proof']['static'], 'recovered')
                 self.assertEqual(symbol['proof']['device'], 'not_probed')
-                self.assertEqual(symbol['proof']['evidence_ids'], [EVIDENCE_ID])
+                self.assertCountEqual(symbol['proof']['evidence_ids'], evidence_ids(target))
                 self.assertEqual(symbol['provenance']['firmware_sha256'], firmware_hash)
-                self.assertEqual(symbol['provenance']['evidence_ids'], [EVIDENCE_ID])
+                self.assertCountEqual(symbol['provenance']['evidence_ids'], evidence_ids(target))
                 self.assertTrue(symbol['provenance']['source'])
                 self.assertNotIn('promotion', symbol)
+                if target == TARGET_1043:
+                    self.assertTrue(symbol['proof']['host_tested'])
+                    self.assertEqual(symbol['side_effects'], ['reads_active_package_name_registry'])
+                    self.assertIn('borrow', symbol['ownership']['argument'].lower())
+                    self.assertIn('borrow', symbol['ownership']['return_value'].lower())
 
     def test_evidence_schema_exact_firmware_and_host_firmware_links(self):
         for target, (_, _, firmware_hash) in TARGETS.items():
@@ -127,7 +146,7 @@ class QuickAppAllowlist(unittest.TestCase):
                 self.assertEqual(evidence['evidence_id'], EVIDENCE_ID)
                 self.assertEqual(evidence['verdict'], 'STATIC_RECOVERED')
                 self.assertEqual(evidence['candidate_symbols'],
-                                 [f'{target}.app_lookup_package'])
+                                 [f'{target}.{symbol_name(target)}'])
                 self.assertTrue(evidence['question'])
                 self.assertTrue(evidence['ownership_analysis'])
                 self.assertTrue(evidence['unsafe_assumptions'])
@@ -150,7 +169,8 @@ class QuickAppAllowlist(unittest.TestCase):
                 self.assertEqual(manifest['target_id'], target)
                 self.assertEqual(manifest['firmware_sha256'], firmware_hash)
                 self.assertEqual(manifest['firmware_address_ranges'],
-                                 [{'base': 0x0c000000, 'size': 0x00d00000}])
+                                 [{'base': 0x0c000000, 'size':
+                                    0x00e00000 if target == TARGET_1043 else 0x00d00000}])
 
     def verify_probe(self, target, address, targets_dir=None):
         result = self.run_cli('verify', self.probes[address], '--target', target,
@@ -188,10 +208,18 @@ class QuickAppAllowlist(unittest.TestCase):
                 self.assertTrue(report['ok'])
                 self.assertEqual(report['errors'], [])
                 self.assertEqual(report['summary']['absolute_address_hits'], 0)
-            other = next(row[1] for name, row in TARGETS.items() if name != target)
-            for rejected in (address - 2, address + 2, other):
+            others = [row[1] for name, row in TARGETS.items() if name != target]
+            for rejected in (address - 2, address + 2, *others):
                 with self.subTest(target=target, rejected=hex(rejected)):
                     self.assert_address_rejected(target, rejected)
+
+    def test_1043_reuses_calendar_record_without_redundant_alias(self):
+        alias = SDK / 'targets' / TARGET_1043 / 'symbols' / f'{TARGET_1043}.app_lookup_package.json'
+        self.assertFalse(alias.exists(), 'Reuse the exact calendar active-name lookup record')
+        calendar = SDK / 'targets' / TARGET_1043 / 'evidence' / f'{CALENDAR_EVIDENCE_ID}.json'
+        evidence = json.loads(calendar.read_text())
+        self.assertEqual(evidence['evidence_id'], CALENDAR_EVIDENCE_ID)
+        self.assertIn(f'{TARGET_1043}.{symbol_name(TARGET_1043)}', evidence['candidate_symbols'])
 
     def test_cli_rejects_callable_without_its_exact_symbol_record(self):
         # Deletion is only in a temporary copy. This causal control prevents a

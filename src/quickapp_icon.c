@@ -1,9 +1,18 @@
 #include "resource_hook_quickapp.h"
 
-#if !(defined(RH_TARGET_1043) && RH_TARGET_1043)
 /* Independently recovered from the exact AP IDBs, not a relocation rule.
  * Slot 3 is the active package-name registry; slot 4 is a different registry.
  * See targets/<exact-target>/quickapp-icons.md for instruction fingerprints. */
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#define QA_SERVICE_SLOT 0x200eb658u
+#define QA_REGISTRY_SLOT 0x200eb650u
+#define QA_SERVICE 0x2cdbb054u
+#define QA_LOOKUP 0x0ca69e81u
+#define QA_PACKAGE_OFFSET 8u
+#define QA_ICON_OFFSET 12u
+#define QA_APP_ROOT "/data/app/"
+#define QA_FLASH_END 0x0cde8190u
+#else
 #define QA_SERVICE_SLOT 0x20084ec4u
 #define QA_REGISTRY_SLOT 0x20084ebcu
 #if defined(RH_TARGET_155) && RH_TARGET_155
@@ -12,6 +21,11 @@
 #else
 #define QA_SERVICE 0x2ca3da68u
 #define QA_LOOKUP 0x0c6a16a3u
+#endif
+#define QA_PACKAGE_OFFSET 12u
+#define QA_ICON_OFFSET 16u
+#define QA_APP_ROOT "/data/quickapp/app/"
+#define QA_FLASH_END 0x0cd00000u
 #endif
 
 /* Host memory/native-leaf injection follows the font adapter convention.
@@ -36,8 +50,8 @@ static int ram(uint32_t p, uint32_t n) {
            region(p, n, 0x3c000000u, 0x3d000000u);
 }
 static int readable(uint32_t p) {
-    return ram(p, 1) || region(p, 1, 0x0c0c0000u, 0x0cd00000u) ||
-           region(p, 1, 0x2c0c0000u, 0x2cd00000u);
+    return ram(p, 1) || region(p, 1, 0x0c0c0000u, QA_FLASH_END) ||
+           region(p, 1, 0x2c0c0000u, QA_FLASH_END + 0x20000000u);
 }
 static int string(uint32_t p, char out[RH_PATH]) {
     uint32_t i;
@@ -94,17 +108,9 @@ static int safe_path(const char *s) {
         ++i;
     }
 }
-#endif
 
 int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    (void)package;
-    if (out) out[0] = 0;
-    /* Different record layout/root and unavailable display ROM: deliberately
-     * unsupported, with no service reads or speculative ROM calls. */
-    return -2;
-#else
-    static const char root[] = "/data/quickapp/app/";
+    static const char root[] = QA_APP_ROOT;
     char identity[RH_PATH], path[RH_PATH];
     uint32_t service, map, app, pkg, icon, i, n;
     int length;
@@ -123,9 +129,9 @@ int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
     if (!registry_valid(map, package, identity)) return -1;
     app = lookup(QA_LOOKUP, package);
     if (!app) return 0;
-    if ((app & 3u) || !ram(app, 20u)) return -1;
-    pkg = word(app + 12u);
-    icon = word(app + 16u);
+    if ((app & 3u) || !ram(app, QA_ICON_OFFSET + 4u)) return -1;
+    pkg = word(app + QA_PACKAGE_OFFSET);
+    icon = word(app + QA_ICON_OFFSET);
     if (string(pkg, identity) < 0 || !equal(identity, package)) return -1;
     if (!icon) return 0;
     length = string(icon, path);
@@ -145,8 +151,7 @@ int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
     /* Recheck the borrowed owner fields before publishing the independent copy.
      * This detects replacement, not arbitrary races; owner task is mandatory. */
     if (word(QA_SERVICE_SLOT) != service || word(QA_REGISTRY_SLOT) != map ||
-        word(app + 12u) != pkg || word(app + 16u) != icon) return -1;
+        word(app + QA_PACKAGE_OFFSET) != pkg || word(app + QA_ICON_OFFSET) != icon) return -1;
     for (i = 0; i <= (uint32_t)length; ++i) out[i] = path[i];
     return 1;
-#endif
 }
