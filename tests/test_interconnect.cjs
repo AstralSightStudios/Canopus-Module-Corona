@@ -359,17 +359,129 @@ async function main() {
   assert.equal(resumedStates.at(-1).phase, 'success');
   assert.equal(resumedStates.at(-1).percent, 100);
 
-  // Mapping capacity does not change the independent 128-file transfer limit.
+  const transferStateUri = 'internal://files/interconnect-transfer.json';
+  const installedUri = 'internal://files/interconnect-themes.json';
+  const finishedDarkState = native.text.get(transferStateUri);
+  for (const fileCount of [0, -1, 1.5, '129', null, 65537, Number.MAX_SAFE_INTEGER + 1]) {
+    reply = messages(await deliver('T' + JSON.stringify({
+      operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount, totalBytes: 2
+    })));
+    assert(reply.some(packet => packet.errorCode === 'invalid-manifest'), `reject count ${fileCount}`);
+    assert.equal(native.text.get(transferStateUri), finishedDarkState, 'invalid headers preserve saved progress');
+  }
   reply = messages(await deliver('T' + JSON.stringify({
-    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 129, totalBytes: 2
+    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 129,
+    totalBytes: 64 * 1024 * 1024 + 1
   })));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
-  assert.equal(JSON.parse(native.text.get('internal://files/interconnect-transfer.json')).themeId, 'dark');
+  assert.equal(native.text.get(transferStateUri), finishedDarkState, 'the 64 MiB bound is unchanged');
+
+  // The largest representable file index is 0xffff, allowing 65,536 files, not 65,535.
   reply = messages(await deliver('T' + JSON.stringify({
-    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 128, totalBytes: 2
+    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 65536,
+    totalBytes: 64 * 1024 * 1024
   })));
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
-  assert.equal(JSON.parse(native.text.get('internal://files/interconnect-transfer.json')).fileCount, 128);
+  assert.equal(JSON.parse(native.text.get(transferStateUri)).fileCount, 65536);
+
+  // One directory mapping can back more than 128 actual transferred files.
+  const manyFiles = [
+    { relativePath: 'canora.json', bytes: Buffer.from(JSON.stringify({ ...canoraObject, themeId: 'legacy' })) },
+    ...Array.from({ length: 129 }, (_, index) => ({
+      relativePath: `icons/${index}.bin`, bytes: Buffer.from([index])
+    }))
+  ];
+  const manyHeader = { themeId: 'legacy', mode: 'replace', fileCount: manyFiles.length,
+    totalBytes: manyFiles.reduce((sum, entry) => sum + entry.bytes.length, 0) };
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader })));
+  assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+  for (const [fileIndex, entry] of manyFiles.entries()) {
+    if (fileIndex === manyFiles.length - 1) {
+      reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
+      assert(reply.some(packet => packet.status === 'reject' && packet.errorCode === 'invalid-manifest'),
+        'a large manifest must still contain the declared number of entries');
+    }
+    reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'legacy', fileIndex,
+      relativePath: entry.relativePath, sizeBytes: entry.bytes.length })));
+    assert(reply.some(packet => packet.operation === 'ack' && packet.fileIndex === fileIndex));
+  }
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'legacy',
+    fileIndex: manyFiles.length, relativePath: 'icons/extra.bin', sizeBytes: 0 })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'), 'unreceived files cannot be installed');
+  const savedManyManifest = native.text.get(transferStateUri);
+
+  function restartReceiver() {
+    receiver.stop();
+    receiver = new InterconnectThemeReceiver();
+    receiver.subscribe(snapshot => resumedStates.push(snapshot));
+    receiver.start();
+  }
+  // Loading large inventories must retain all existing persisted-state validation.
+  const invalidSavedStates = [
+    state => { state.fileCount = 65537; },
+    state => { state.fileCount = 0; },
+    state => { state.fileCount = 129.5; },
+    state => { state.manifestSeen = state.fileCount + 1; },
+    state => { state.manifestSeen--; },
+    state => { state.files.pop(); },
+    state => { state.files.push({ ...state.files[1], relativePath: 'icons/extra.bin', sizeBytes: 0 }); },
+    state => { state.files[1].relativePath = '../escape'; },
+    state => { state.files[2].relativePath = state.files[1].relativePath; },
+    state => { state.totalBytes = 64 * 1024 * 1024 + 1; }
+  ];
+  for (const mutate of invalidSavedStates) {
+    const state = JSON.parse(savedManyManifest);
+    mutate(state);
+    const invalidText = JSON.stringify(state);
+    native.text.set(transferStateUri, invalidText);
+    restartReceiver();
+    reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader, mode: 'resume' })));
+    assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+    assert.equal(native.text.get(transferStateUri), invalidText, 'invalid loaded states must not be rewritten');
+  }
+
+  native.text.set(transferStateUri, savedManyManifest);
+  restartReceiver();
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader,
+    mode: 'resume', fileCount: manyHeader.fileCount - 1 })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  assert.equal(native.text.get(transferStateUri), savedManyManifest, 'resume requires a matching count');
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader, mode: 'resume' })));
+  assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'),
+    'a new receiver accepts a persisted manifest larger than 128 files');
+  for (const [fileIndex, entry] of manyFiles.entries()) {
+    reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'legacy', fileIndex,
+      relativePath: entry.relativePath, sizeBytes: entry.bytes.length })));
+    assert(reply.some(packet => packet.operation === 'ack' && packet.fileIndex === fileIndex));
+  }
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  for (const [fileIndex, entry] of manyFiles.entries()) {
+    reply = messages(await deliver('P' + JSON.stringify({ themeId: 'legacy', fileIndex,
+      sizeBytes: entry.bytes.length, chunkSizeBytes: entry.bytes.length, chunkCount: 1 })));
+    assert(reply.some(packet => packet.status === 'ready'));
+    const fileHex = fileIndex.toString(16).padStart(4, '0');
+    assert.deepEqual(await deliver(`F${fileHex}0000${encodeBase91(entry.bytes)}`), [`A${fileHex}0000`]);
+    assert.deepEqual(await deliver(`C${fileHex}`), [`C${fileHex}`]);
+    assert.deepEqual(Buffer.from(native.binary.get(`internal://files/themes/legacy/${entry.relativePath}`)),
+      entry.bytes);
+  }
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  assert.equal(resumedStates.at(-1).phase, 'success');
+  assert.equal(resumedStates.at(-1).fileCount, manyFiles.length);
+  assert.equal(resumedStates.at(-1).percent, 100);
+  assert.deepEqual(JSON.parse(native.text.get(installedUri)), ['dark', 'legacy']);
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/resource-order.json')).order,
+    ['legacy', 'dark', '@system']);
+  assert.deepEqual(JSON.parse(native.text.get('internal://files/resource-files.json')).themes.legacy,
+    manyFiles.map(entry => ({ relativePath: entry.relativePath, sizeBytes: entry.bytes.length })));
+  assert.equal(native.text.get('internal://files/themes/legacy/mappings.tsv'),
+    '/resource/icons/\tthemes/legacy/icons/\n');
 
   reply = messages(await deliver('T' + JSON.stringify({
     operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 1, totalBytes: 2
@@ -382,7 +494,7 @@ async function main() {
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
 
   async function transferCapacityPack(ruleCount) {
-    // Many source aliases can reference one resource without raising the file limit.
+    // Mapping-rule capacity remains independent of the number of transferred files.
     const bytes = Buffer.from(JSON.stringify({ ...canoraObject, themeId: 'legacy',
       mappings: Array.from({ length: ruleCount }, (_, index) => ({
         source: `/resource/${index}.bin`, destination: 'shared.bin'
@@ -438,8 +550,36 @@ async function main() {
     '257 rules must not publish a derived TSV or register the rejected package');
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
 
+  // Exercise the highest wire index without sending 65,536 manifest/control sequences.
+  // All earlier files are complete in this persisted transfer; only 0xffff needs one chunk.
+  const wireFiles = Array.from({ length: 65536 }, (_, index) => ({
+    relativePath: index === 0 ? 'canora.json' : `icons/${index}.bin`,
+    sizeBytes: index === 0 || index === 65535 ? 1 : 0,
+    chunkSizeBytes: 1,
+    chunkCount: index === 0 || index === 65535 ? 1 : 0,
+    receivedBitmap: index === 65535 ? '0' : '',
+    complete: index !== 65535
+  }));
+  native.text.set(transferStateUri, JSON.stringify({
+    version: 1, themeId: 'wirebound', mode: 'replace', fileCount: wireFiles.length,
+    totalBytes: 2, files: wireFiles, manifestComplete: true, manifestReceiving: false,
+    manifestSeen: wireFiles.length, finished: false
+  }));
+  restartReceiver();
+  reply = messages(await deliver('P' + JSON.stringify({ themeId: 'wirebound', fileIndex: 65536,
+    sizeBytes: 1, chunkSizeBytes: 1, chunkCount: 1 })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  reply = messages(await deliver('P' + JSON.stringify({ themeId: 'wirebound', fileIndex: 65535,
+    sizeBytes: 1, chunkSizeBytes: 1, chunkCount: 1 })));
+  assert(reply.some(packet => packet.fileIndex === 65535 && packet.status === 'ready'));
+  assert.deepEqual(await deliver(`Fffff0000${encodeBase91([7])}`), ['Affff0000']);
+  assert.deepEqual(await deliver('Cffff'), ['Cffff']);
+  assert.deepEqual([...native.binary.get('internal://files/themes/wirebound/icons/65535.bin')], [7]);
+  reply = messages(await deliver('C10000'));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'), 'C still requires exactly four hex digits');
+
   receiver.stop();
-  console.log('Interconnect 256-rule manifests, unchanged file limit, path validation, Base91, resume and finish tests passed.');
+  console.log('Interconnect large transfers, four-hex wire bound, 256-rule manifests, path validation, Base91, resume and finish tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true });

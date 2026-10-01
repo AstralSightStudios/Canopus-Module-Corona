@@ -53,7 +53,7 @@ dark.crpack  (ZIP)
 
 - 普通文件条目必须位于 ZIP 根下，不能多套一层 wrapper 目录；安全的目录条目可忽略，拒绝加密条目、符号链接及其他特殊文件、重复路径、绝对路径、反斜杠、空段、`.` / `..`、越界路径、超限 manifest 及解压后超限内容。不得通过路径规范化来“修复”不安全条目。仅支持 ZIP Store/Deflate；校验 CRC，并按实际解压字节数执行限额，不能只信任 ZIP 目录中声明的大小。
 - ZIP 内所有普通文件都是待传输文件，包括 `canora.json`；空目录不传输。`fileCount` 和 `totalBytes` 均包含该文件，接收后路径为 `themes/<themeId>/canora.json`。CRPack v1 中不允许携带包内 `mappings.tsv`，避免两份映射来源不一致。
-- 待传输文件数最多 128、解压总量最多 64 MiB；`canora.json` 最多 64 KiB，并且在 `.crpack` 中必须恰有一份。Manager 生成的主题派生及活动 `mappings.tsv` 最多 32 KiB；派生文件不计入传输 `fileCount` / `totalBytes`。单文件还必须能在协商的 `chunkSizeBytes` 和本地 2,048 片上限内传完。路径安全规则与下方协议接收端校验一致。
+- CRPack 容器不设文件数量上限；Interconnect 单次传输最多 65,536 个文件（受 4 位十六进制文件序号限制），解压总量最多 64 MiB；`canora.json` 最多 64 KiB，并且在 `.crpack` 中必须恰有一份。Manager 生成的主题派生及活动 `mappings.tsv` 最多 32 KiB；派生文件不计入传输 `fileCount` / `totalBytes`。单文件还必须能在协商的 `chunkSizeBytes` 和本地 2,048 片上限内传完。路径安全规则与下方协议接收端校验一致。
 - 导入层负责解析并校验 `canora.json` 的映射数组及资源包约束；之后的 Interconnect 传输层仍只传路径、大小和文件数据，不传 ZIP、不重写映射。接收端在登记前验证 `canora.json` 与传输 `themeId` 一致，并从其规则生成主题目录内的派生 `mappings.tsv`；设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；元数据文件在登记后损坏时退回显示 `themeId`。设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；新包进入排序列表顶部。资源管理页保存包括“系统样式”分界项在内的顺序；分界上方参与活动映射生成，下方不生效。
 - marker 用于识别格式，不代表发布者可信或文件安全；v1 没有签名。ZIP CRC 只能发现部分传输损坏，不能证明来源或内容真实性。
 
@@ -79,7 +79,7 @@ themes/dark/icons/confirm.bin
 
 CRPack v1 的 `themeId` 取自 `canora.json`，限定为 1–12 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`canora.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
 
-Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级合并到不可变活动代次，低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块要求最多 256 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数；规则上限增加不改变每包最多 128 个传输文件（含 `canora.json`）及 manifest 最多 64 KiB 的限制。发送端导入检查文件路径安全、文件数和总大小；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
+Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级合并到不可变活动代次，低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块要求最多 256 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数；CRPack 容器及已安装主题文件清单不设文件数量上限，文件清单仍受既有索引存储预算约束；Interconnect 单次传输受文件序号编码限制，最多 65,536 个文件（含 `canora.json`）；manifest 仍最多 64 KiB。旧版 Manager 的 128 文件限制已移除，超过 128 个文件的包需更新接收端 Manager。发送端导入检查文件路径安全和总大小，并在传输前检查文件数是否可由协议编码；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
 
 模块发布配置时使用紧凑索引快照，按实际 TSV 字节数及有效规则数分配；定向刷新按需保留旧快照引用，引用释放后回收，不为第二份最大容量规则表永久预留额外 32 KiB Umem。读取及解析仍需临时缓冲，32 KiB 是配置字节预算，不是每份快照的固定常驻开销；分配失败保留 last-known-good 并在后续轮询重试。
 
@@ -138,7 +138,7 @@ P{"themeId":"dark","fileIndex":1,"sizeBytes":13580,"chunkSizeBytes":12000,"chunk
 P{"themeId":"dark","fileIndex":1,"status":"resume","window":4,"receivedRanges":[[0,0]]}
 ```
 
-响应 `status` 为 `ready`、`resume`、`complete` 或 `reject`；`receivedRanges` 是已写入的闭区间分片序号。文件序号和分片序号均用 4 位十六进制，单文件最多 65,536 片；实际文件数受 Manager 本地配置限制。接收端根据当前清单的 `themeId` 与 `fileIndex` 决定写入路径，不接受传输端指定绝对路径。
+响应 `status` 为 `ready`、`resume`、`complete` 或 `reject`；`receivedRanges` 是已写入的闭区间分片序号。文件序号和分片序号均用 4 位十六进制，文件序号范围为 `0x0000`–`0xffff`，因此单次传输最多 65,536 个文件；分片编码可表示单文件最多 65,536 片，实际仍受 Manager 本地 2,048 片限制。接收端根据当前清单的 `themeId` 与 `fileIndex` 决定写入路径，不接受传输端指定绝对路径。
 
 ### `F` — 文件数据
 
@@ -152,7 +152,7 @@ F<fileIndex:4位十六进制><chunkIndex:4位十六进制><data:Base91>
 ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~"
 ```
 
-测试向量：ASCII `test` 编码为 `fPNKd`。Manager 目前本地限制为最多 128 个文件、主题总大小 64 MiB、单文件最多 2,048 片；没有可用的文件系统剩余空间 API，因此通过本地上限预检，实际写入失败时回 `write-failed`。
+测试向量：ASCII `test` 编码为 `fPNKd`。Manager 不再设置人为文件数量上限，仅保留协议文件序号范围（单次传输最多 65,536 个文件）、主题总大小 64 MiB 和单文件最多 2,048 片的限制；没有可用的文件系统剩余空间 API，因此通过本地上限预检，实际写入失败时回 `write-failed`。
 
 ### `A` — 分片确认
 

@@ -89,6 +89,115 @@ async function main() {
 
   {
     const file = makeFileApi();
+    const entries = [
+      { relativePath: 'canora.json', sizeBytes: 1 },
+      ...Array.from({ length: 256 }, (_, index) => ({ relativePath: `assets/${index}.bin`, sizeBytes: 1 }))
+    ];
+    await order.writeThemeFileInventory('large', entries, file);
+    await order.registerThemeInResourceOrder('large', [], file);
+    assert.deepEqual(await order.loadResourceOrder(['large'], file), ['large', systemId]);
+    assert.deepEqual(await order.readThemeFileInventory('large', file), entries,
+      'installed inventories have no 128-file ceiling');
+    assert.deepEqual(await order.readThemeFileInventories(file), { large: entries });
+    await order.writeThemeFileInventory('other', [{ relativePath: 'other.bin', sizeBytes: 0 }], file);
+    assert.deepEqual(await order.readThemeFileInventory('large', file), entries,
+      'updating another inventory preserves all large-pack entries');
+    const saved = file.text.get(fileIndexUri);
+    const invalidEntries = [
+      [{ relativePath: '../escape', sizeBytes: 0 }],
+      [{ relativePath: '/absolute', sizeBytes: 0 }],
+      [{ relativePath: 'assets/a\\b', sizeBytes: 0 }],
+      [{ relativePath: 'assets/a\tb', sizeBytes: 0 }],
+      [{ relativePath: 'x'.repeat(256), sizeBytes: 0 }],
+      [entries[0], entries[0]],
+      [{ relativePath: 'a', sizeBytes: -1 }],
+      [{ relativePath: 'a', sizeBytes: 0.5 }],
+      [{ relativePath: 'a', sizeBytes: 64 * 1024 * 1024 + 1 }]
+    ];
+    for (const invalid of invalidEntries) {
+      await assert.rejects(order.writeThemeFileInventory('large', invalid, file), /文件清单无效/);
+      assert.equal(file.text.get(fileIndexUri), saved, 'invalid writes cannot replace the saved inventory');
+      file.text.set(fileIndexUri, JSON.stringify({ version: 1, themes: { large: invalid } }));
+      await assert.rejects(order.readThemeFileInventory('large', file), /条目无效/);
+      file.text.set(fileIndexUri, saved);
+    }
+    await assert.rejects(order.writeThemeFileInventory('../bad', entries, file), /文件清单无效/);
+
+    // The existing index storage budget remains in force, independently of file count.
+    const fullIndex = saved + ' '.repeat(2 * 1024 * 1024 - saved.length);
+    file.text.set(fileIndexUri, fullIndex);
+    assert.deepEqual(await order.readThemeFileInventory('large', file), entries);
+    file.text.set(fileIndexUri, fullIndex + ' ');
+    await assert.rejects(order.readThemeFileInventories(file), /超过 2 MiB/);
+    file.text.set(fileIndexUri, saved);
+    const oversizedEntries = Array.from({ length: 10000 }, (_, index) => ({
+      relativePath: `assets/${'x'.repeat(220)}${index}`, sizeBytes: 0
+    }));
+    await assert.rejects(order.writeThemeFileInventory('large', oversizedEntries, file), /超过 2 MiB/);
+    assert.equal(file.text.get(fileIndexUri), saved);
+    await order.removeThemeFileInventory('large', file);
+    assert.equal(await order.readThemeFileInventory('large', file), null);
+    assert.deepEqual(await order.readThemeFileInventory('other', file), [{ relativePath: 'other.bin', sizeBytes: 0 }]);
+  }
+
+  {
+    const file = makeFileApi();
+    const rootUri = 'internal://files/themes/recursive/';
+    const assets = Array.from({ length: 129 }, (_, index) => ({
+      relativePath: `assets/${index}.bin`, sizeBytes: 1
+    }));
+    file.readFileInfo = async (uri, recursive) => {
+      assert.equal(uri, rootUri);
+      assert.equal(recursive, true);
+      return { type: 'dir', length: 0, subFiles: [
+        { uri: `${rootUri}canora.json`, type: 'file', length: 1 },
+        { uri: `${rootUri}mappings.tsv`, type: 'file', length: 1 },
+        { uri: `${rootUri}assets/`, type: 'dir', length: 0,
+          subFiles: assets.map(entry => ({ uri: rootUri + entry.relativePath, type: 'file', length: entry.sizeBytes })) }
+      ] };
+    };
+    file.listDirectory = async () => { throw new Error('A complete recursive inventory must not fall back'); };
+    assert.deepEqual(await order.enumerateThemeFiles('recursive', file),
+      [...assets, { relativePath: 'canora.json', sizeBytes: 1 }].sort((a, b) =>
+        a.relativePath.localeCompare(b.relativePath)));
+
+    // On-disk discovery is not constrained by the interconnect four-hex index field.
+    const beyondWire = Array.from({ length: 65537 }, (_, index) => ({
+      uri: `${rootUri}assets/${index}.bin`, type: 'file', length: 0
+    }));
+    file.readFileInfo = async () => ({ type: 'dir', length: 0, subFiles: beyondWire });
+    const discovered = await order.enumerateThemeFiles('recursive', file);
+    assert.equal(discovered.length, 65537);
+    assert(discovered.some(entry => entry.relativePath === 'assets/65536.bin'));
+  }
+
+  {
+    const file = makeFileApi();
+    const rootUri = 'internal://files/themes/budget/';
+    const entries = [
+      { uri: `${rootUri}a.bin`, type: 'file', length: 64 * 1024 * 1024 },
+      { uri: `${rootUri}b.bin`, type: 'file', length: 0 }
+    ];
+    file.readFileInfo = async uri => uri === rootUri
+      ? { type: 'dir', length: 0, subFiles: entries }
+      : entries.find(entry => entry.uri === uri);
+    file.listDirectory = async () => entries;
+    assert.equal((await order.enumerateThemeFiles('budget', file)).length, 2,
+      'an exactly 64 MiB inventory remains valid');
+    entries[1].length = 1;
+    await assert.rejects(order.enumerateThemeFiles('budget', file), /文件清单超出限制/,
+      'both recursive and list/get discovery preserve the aggregate 64 MiB bound');
+    entries[0].length = 64 * 1024 * 1024 + 1;
+    await assert.rejects(order.enumerateThemeFiles('budget', file), /文件大小无效/);
+    entries[0].length = -1;
+    await assert.rejects(order.enumerateThemeFiles('budget', file), /文件大小无效/);
+    entries[0].length = 0;
+    entries[0].uri = `${rootUri}../escape`;
+    await assert.rejects(order.enumerateThemeFiles('budget', file), /文件路径无效/);
+  }
+
+  {
+    const file = makeFileApi();
     const initial = await order.loadResourceOrder(['base', 'weather'], file);
     assert.deepEqual(initial, ['base', 'weather', systemId]);
     assert.deepEqual(JSON.parse(file.text.get(orderUri)), { version: 1, order: initial });
@@ -163,7 +272,7 @@ async function main() {
     file.text.set('internal://files/themes/top/canora.json', topManifest);
     file.text.set('internal://files/themes/base/canora.json', baseManifest);
     const entries = {
-      top: ['icons/top.bin'],
+      top: Array.from({ length: 129 }, (_, index) => `icons/top-${index}.bin`),
       base: ['assets/base.bin']
     };
     file.listDirectory = async uri => {
@@ -183,13 +292,15 @@ async function main() {
         ? Buffer.byteLength(uri.includes('/top/') ? topManifest : baseManifest) : (uri.endsWith('/') ? 0 : 1),
       type: uri.endsWith('/') ? 'dir' : 'file'
     });
-    file.binary.set('internal://files/themes/top/icons/top.bin', Uint8Array.from([7]));
+    for (const relativePath of entries.top)
+      file.binary.set(`internal://files/themes/top/${relativePath}`, Uint8Array.from([7]));
     file.binary.set('internal://files/themes/base/assets/base.bin', Uint8Array.from([3]));
     const plan = await activation.regenerateActiveMappings(['top', 'base', systemId], 'legacy1', file);
     assert.deepEqual(plan.copies.map(copy => copy.sourceUri), [
-      'internal://files/themes/top/icons/top.bin',
+      ...entries.top.slice().sort((a, b) => a.localeCompare(b)).map(relativePath =>
+        `internal://files/themes/top/${relativePath}`),
       'internal://files/themes/base/assets/base.bin'
-    ], 'activation uses an in-memory inventory when the optional index is absent');
+    ], 'activation discovers and overlays more than 128 files when the optional index is absent');
     assert.equal(file.text.get(fileIndexUri), undefined,
       'rebuilding mappings does not require an optional inventory index write');
   }
@@ -441,7 +552,7 @@ async function main() {
       'valid per-pack TSV budgets must not bypass the merged active 32 KiB budget');
   }
 
-  console.log('Resource order, 256-rule capacity, merged TSV byte budget, overlays and generation cleanup passed.');
+  console.log('Resource order, uncapped inventories and legacy discovery, 256-rule capacity, byte budgets, overlays and generation cleanup passed.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

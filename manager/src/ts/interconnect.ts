@@ -12,7 +12,9 @@ const VERSION = 2;
 const TRANSFER_STATE_VERSION = 1;
 const MAX_TEXT_CHARS = 18000;
 const MAX_WINDOW = 4;
-const MAX_FILES = 128;
+// F/A/C encode file indices in exactly four hex digits (0x0000..0xffff).
+// This wire bound applies to transfers, not to installed file inventories.
+const MAX_PROTOCOL_TRANSFER_FILES = 0x10000;
 const MAX_THEME_BYTES = 64 * 1024 * 1024;
 const MAX_CANORA_BYTES = 64 * 1024;
 const MAX_CHUNKS_PER_FILE = 2048;
@@ -408,7 +410,7 @@ export class InterconnectThemeReceiver {
       catch (_error) { throw protocolError("invalid-manifest", "本地续传状态损坏"); }
       if (!isRecord(parsed) || parsed.version !== TRANSFER_STATE_VERSION || !validThemeId(parsed.themeId) ||
           (parsed.mode !== "replace" && parsed.mode !== "resume") ||
-          !integer(parsed.fileCount, 1, MAX_FILES) || !integer(parsed.totalBytes, 0, MAX_THEME_BYTES) ||
+          !integer(parsed.fileCount, 1, MAX_PROTOCOL_TRANSFER_FILES) || !integer(parsed.totalBytes, 0, MAX_THEME_BYTES) ||
           !Array.isArray(parsed.files) || !integer(parsed.manifestSeen, 0, parsed.fileCount) ||
           typeof parsed.manifestComplete !== "boolean" || typeof parsed.manifestReceiving !== "boolean" ||
           typeof parsed.finished !== "boolean")
@@ -571,7 +573,7 @@ export class InterconnectThemeReceiver {
     const fileCount = message.fileCount;
     const totalBytes = message.totalBytes;
     if (!validThemeId(themeId) || (mode !== "replace" && mode !== "resume") ||
-        !integer(fileCount, 1, MAX_FILES) || !integer(totalBytes, 0, MAX_THEME_BYTES))
+        !integer(fileCount, 1, MAX_PROTOCOL_TRANSFER_FILES) || !integer(totalBytes, 0, MAX_THEME_BYTES))
       throw protocolError("invalid-manifest", "主题清单头无效或超过本地上限");
 
     await this.ensureStateLoaded();

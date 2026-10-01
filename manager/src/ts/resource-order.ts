@@ -6,7 +6,7 @@ export const RESOURCE_ORDER_URI = "internal://files/resource-order.json";
 export const RESOURCE_FILES_URI = "internal://files/resource-files.json";
 
 const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/;
-const MAX_THEME_FILES = 128;
+// Installed inventories are storage-bounded, independent of transfer file-index width.
 const MAX_FILE_INDEX_BYTES = 2 * 1024 * 1024;
 
 export interface ResourceOrderFileApi {
@@ -96,7 +96,7 @@ export async function enumerateThemeFiles(
     }
     files.set(relativePath, { relativePath, sizeBytes });
     totalBytes += sizeBytes;
-    if (files.size > MAX_THEME_FILES || totalBytes > 64 * 1024 * 1024)
+    if (totalBytes > 64 * 1024 * 1024)
       throw new Error(`资源包 ${themeId} 文件清单超出限制`);
   }
 
@@ -257,7 +257,7 @@ export async function writeThemeFileInventory(
   files: ThemeAssetFile[],
   file: ResourceOrderFileApi,
 ): Promise<void> {
-  if (!validThemeId(themeId) || files.length > MAX_THEME_FILES ||
+  if (!validThemeId(themeId) ||
       files.some(item => !validRelativePath(item.relativePath) ||
         !Number.isSafeInteger(item.sizeBytes) || item.sizeBytes < 0 ||
         item.sizeBytes > 64 * 1024 * 1024) ||
@@ -286,7 +286,7 @@ function parseThemeFileRecords(text: string): ThemeFileRecord {
   const result: ThemeFileRecord = {};
   for (const themeId of Object.keys(source)) {
     const entries = source[themeId];
-    if (!validThemeId(themeId) || !Array.isArray(entries) || entries.length > MAX_THEME_FILES ||
+    if (!validThemeId(themeId) || !Array.isArray(entries) ||
         entries.some(item => typeof item !== "object" || item === null ||
           !validRelativePath((item as { relativePath?: unknown }).relativePath) ||
           !Number.isSafeInteger((item as { sizeBytes?: unknown }).sizeBytes) ||
