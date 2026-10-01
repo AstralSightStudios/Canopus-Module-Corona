@@ -71,13 +71,20 @@ static int resolve(void *cookie, const char *package, char out[RH_PATH]) {
     }
     return l->result;
 }
+static int opaque_resolve(void *cookie, const char *package, char out[RH_PATH]) {
+    assert(!strcmp(package, "单 名/"));
+    assert(cookie == NULL);
+    strcpy(out, APP_ROOT "independent/install/icon.bin");
+    return 1;
+}
 static void grammar(void) {
     static const char *valid[] = {
-        "a.b", "_._", "0.9", "org.example-app", "a.b-c_d.ef", "A.B", "a.b-"
+        "a.b", "_._", "0.9", "org.example-app", "a.b-c_d.ef", "A.B", "a.b-",
+        "", "a", ".a", "a.", "a..b", "-a.b", "a.-b", "a/b.c", "a.b/",
+        "a.b c", "a.b\\c", "a.b:c", "a.b@c", "中.a", "a.b\200"
     };
     static const char *invalid[] = {
-        "", "a", ".a", "a.", "a..b", "-a.b", "a.-b", "a/b.c", "a.b/",
-        "a.b c", "a.b\t", "a.b\n", "a.b\\c", "a.b:c", "a.b@c", "a.b\177", "a.b\200"
+        "a.b\t", "a.b\n", "a.b\r", "a.b\177", "a.b\001"
     };
     char key[RH_PATH];
     unsigned i;
@@ -92,20 +99,16 @@ static void grammar(void) {
         snprintf(key, sizeof(key), "%s%s", RH_QUICKAPP_ICON_PREFIX, invalid[i]);
         assert(!rh_quickapp_package(key));
     }
-    strcpy(key, RH_QUICKAPP_ICON_PREFIX "a.");
-    i = (unsigned)strlen(RH_QUICKAPP_ICON_PREFIX);
-    memset(key+i+2, 'x', RH_QUICKAPP_PACKAGE_MAX-2);
-    key[i+RH_QUICKAPP_PACKAGE_MAX] = 0;
+    memset(key, 'x', sizeof(key));
+    memcpy(key, RH_QUICKAPP_ICON_PREFIX, strlen(RH_QUICKAPP_ICON_PREFIX));
+    key[RH_PATH-1u] = 0;
     assert(rh_quickapp_package(key));
-    key[i+RH_QUICKAPP_PACKAGE_MAX] = 'x';
-    key[i+RH_QUICKAPP_PACKAGE_MAX+1] = 0;
+    key[RH_PATH-1u] = 'x';
     assert(!rh_quickapp_package(key));
 }
 static void declarations(void) {
     static const char *invalid[] = {
-        "@quickapp-icon/a\tthemes/icon.bin\n",
-        "@quickapp-icon/a..b\tthemes/icon.bin\n",
-        "@quickapp-icon/a.b/\tthemes/icon.bin\n",
+        "@quickapp-icon/a\001b\tthemes/icon.bin\n",
         KEY "\tthemes/icons/\n", KEY "\tthemes/icon.png\n",
         KEY "\tthemes/icon.BIN\n", KEY "\tthemes/icon.bin/\n",
         KEY "\tthemes/../icon.bin\n", KEY "\tthemes/a//icon.bin\n",
@@ -114,6 +117,22 @@ static void declarations(void) {
         KEY "\t@system/\n", KEY "\t@system\textra\n",
         KEY "\tthemes/a.bin\n" KEY "\tthemes/b.bin\n"
     };
+    struct rh_snapshot *opaque = parse("@quickapp-icon/\tthemes/empty.bin\n"
+        "@quickapp-icon/单 名/\tthemes/opaque.bin\n"
+        "@quickapp-icon/single\t@system\n"
+        "@quickapp-icon/a..b\tthemes/shared.bin\n");
+    assert(opaque && opaque->count == 4);
+    for (unsigned j = 0; j < opaque->count; ++j) {
+        assert(opaque->rules[j].flags & RH_INDEX_QUICKAPP);
+        assert(!(opaque->rules[j].flags & RH_INDEX_DIRECTORY));
+    }
+    dispose(opaque);
+    opaque = parse("@quickapp-icon/单 名/\tthemes/opaque.bin\n");
+    struct rh_snapshot *materialized = NULL;
+    assert(!rh_materialize_snapshot(opaque, opaque_resolve, NULL, &allocator, &materialized));
+    expect_path(materialized, APP_ROOT "independent/install/icon.bin", RH_THEME_ROOT "opaque.bin");
+    expect_path(materialized, APP_ROOT "independent/install/icon.bin/child", NULL);
+    dispose(materialized); dispose(opaque);
     struct rh_snapshot *s = parse("# icons\r\n" KEY "\tthemes/icons/theme.bin\r\n"
         "@quickapp-icon/org.other\t@system\n/resource/\tthemes/base/\n");
     struct rh_snapshot *out = s;
@@ -199,8 +218,7 @@ static void materialization(void) {
 static void paths_and_conflicts(void) {
     static const char *bad_paths[] = {
         "", "data/quickapp/app/" PACKAGE "/icon.bin", "/resource/icon.bin",
-        FOREIGN_ROOT PACKAGE "/icon.bin", APP_ROOT "org.other/icon.bin",
-        APP_ROOT PACKAGE "-evil/icon.bin", APP_ROOT PACKAGE "/../icon.bin",
+        FOREIGN_ROOT PACKAGE "/icon.bin", APP_ROOT PACKAGE "/../icon.bin",
         APP_ROOT PACKAGE "/./icon.bin", APP_ROOT PACKAGE "//icon.bin",
         APP_ROOT PACKAGE "/res/a\\b.bin", APP_ROOT PACKAGE "/res/a:b.bin",
         APP_ROOT PACKAGE "/res/a\177.bin",
@@ -217,6 +235,17 @@ static void paths_and_conflicts(void) {
         if (rc >= 0) fprintf(stderr, "unsafe resolver path accepted: %s\n", l.path);
         assert(rc < 0);
         assert(out == old && live == before);
+    }
+    // Trust the matched registry record, not a synthesized package directory.
+    static const char *registered_paths[] = {
+        APP_ROOT "org.other/icon.bin", APP_ROOT PACKAGE "-suffix/icon.bin",
+        APP_ROOT "目录 空格/@icon.bin"
+    };
+    for (i = 0; i < sizeof(registered_paths)/sizeof(registered_paths[0]); ++i) {
+        l.path = registered_paths[i]; out = NULL;
+        assert(!rh_materialize_snapshot(decls, resolve, &l, &allocator, &out));
+        expect_path(out, l.path, RH_THEME_ROOT "icon.bin");
+        dispose(out); out = old;
     }
     l.unterminated = 1;
     assert(rh_materialize_snapshot(decls, resolve, &l, &allocator, &out) < 0);
@@ -272,6 +301,6 @@ static void limits(void) {
 int main(void) {
     grammar(); declarations(); materialization(); paths_and_conflicts(); limits();
     assert(!live);
-    puts("QuickApp package grammar, declarations, safe BIN materialization, conflicts and limits passed");
+    puts("Opaque QuickApp keys, declarations, safe BIN materialization, conflicts and transport limits passed");
     return 0;
 }

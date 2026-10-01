@@ -120,8 +120,12 @@ These are bounded AP evidence windows, **not new callable permissions/ranges**.
 ## Contract, framework registration and tests
 
 `rh_platform_quickapp_icon_path` now supports .043 with the same result codes
-as Band 11: 1 gives a caller-owned canonical lowercase BIN path under exactly
-`/data/app/<package>/`; 0 means absent/uninitialized; -1 means invalid/transient
+as Band 11: 1 gives the exactly matched registry record's registered caller-owned
+canonical lowercase BIN path under `/data/app/`; package keys are opaque strings
+within C-string/TSV byte budgets, not directory names. Native paths allow UTF-8 and
+literal punctuation, rejecting ASCII controls/DEL, colon, backslash and traversal
+without URL decoding. Shared icon paths do not imply exclusive package ownership.
+0 means absent/uninitialized; -1 means invalid/transient
 state; -2 means an unsupported source root/type/format. Non-success empties
 output. Strings may be in bounded RAM or this exact AP's code/cached-flash
 regions ending at `0x0cde8190` / `0x2cde8190`, never unproven ROM.

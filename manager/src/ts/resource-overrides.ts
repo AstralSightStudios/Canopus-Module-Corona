@@ -1,5 +1,5 @@
 import { parseResourcePackManifest } from "./resource-pack";
-import { safeResourceSource } from "./resource-path";
+import { safeResourceSource, isDirectoryResourceSource } from "./resource-path";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import type { ActiveMappingsPlan } from "./resource-activation";
 import {
@@ -166,7 +166,7 @@ function utf8Length(value: string): number {
 }
 
 export function validSourcePath(value: unknown): value is string {
-  return typeof value === "string" && !value.endsWith("/") && safeResourceSource(value);
+  return typeof value === "string" && !isDirectoryResourceSource(value) && safeResourceSource(value);
 }
 
 function validChoice(value: unknown): value is string {
@@ -211,7 +211,7 @@ function serializeOverrides(overrides: ResourceOverrides): string {
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
-  return source.endsWith("/") ? resourcePath.startsWith(source) : resourcePath === source;
+  return isDirectoryResourceSource(source) ? resourcePath.startsWith(source) : resourcePath === source;
 }
 
 function concreteSourcePath(mapping: ResourcePackMapping, relativePath: string): string | null {

@@ -66,10 +66,6 @@ static int equal(const char *a, const char *b) {
     while (*a && *a == *b) { ++a; ++b; }
     return *a == *b;
 }
-static int name_char(unsigned char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
-}
 /* Native hashmap lookup asserts on a null root and follows unchecked chains.
  * Preflight precisely the selected bucket with bounded, readable keys/nodes;
  * the owner-task contract keeps this view stable through the native call.
@@ -92,8 +88,9 @@ static int registry_valid(uint32_t map, const char *package, char scratch[RH_PAT
     }
     return 1;
 }
-/* Absolute, canonical ASCII path. Reject empty/dot/traversal segments and
- * protocol/descriptor sources. Package-root identity is checked separately. */
+/* Absolute, canonical byte pathname. Reject empty/dot/traversal segments and
+ * protocol/descriptor sources. The native record, not its package spelling,
+ * determines the icon pathname beneath the target app root. */
 static int safe_path(const char *s) {
     uint32_t i = 1, start = 1;
     if (s[0] != '/') return 0;
@@ -104,7 +101,10 @@ static int safe_path(const char *s) {
                 (n == 2 && s[start] == '.' && s[start + 1] == '.')) return 0;
             if (!s[i]) return 1;
             start = i + 1;
-        } else if (!name_char((unsigned char)s[i])) return 0;
+        } else {
+            unsigned char c = (unsigned char)s[i];
+            if (c < 32u || c == 127u || c == ':' || c == '\\') return 0;
+        }
         ++i;
     }
 }
@@ -117,9 +117,13 @@ int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
     if (!out) return -1;
     out[0] = 0;
     if (!package) return -1;
-    for (n = 0; n < RH_PATH && package[n]; ++n)
-        if (!name_char((unsigned char)package[n])) return -1;
-    if (!n || n == RH_PATH || equal(package, ".") || equal(package, "..")) return -1;
+    /* Opaque registry key, including empty: constrain only byte length and
+     * C-string/TSV transport controls, never interpret it as a pathname. */
+    for (n = 0; n < RH_PATH && package[n]; ++n) {
+        unsigned char c = (unsigned char)package[n];
+        if (c < 32u || c == 127u) return -1;
+    }
+    if (n == RH_PATH) return -1;
     service = word(QA_SERVICE_SLOT);
     if (!service) return 0;
     /* Never dereference a substituted table or call an unverified callback. */
@@ -141,13 +145,10 @@ int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
     if (!safe_path(path)) return -1;
     for (i = 0; i < sizeof(root) - 1u; ++i)
         if (path[i] != root[i]) return -2;
-    /* Verify exact package boundary, not a prefix of another package. */
-    if ((uint32_t)length < sizeof(root) - 1u + n + 1u) return -1;
-    for (i = 0; i < n; ++i)
-        if (path[sizeof(root) - 1u + i] != package[i]) return -1;
-    i += sizeof(root) - 1u;
-    if (i >= (uint32_t)length || path[i] != '/') return -1;
-    if ((uint32_t)length < i + 6u || !equal(path + length - 4, ".bin")) return -2;
+    /* Trust the exact app record's registered path, not a package directory.
+     * Retain a minimum five-byte relative pathname and lowercase BIN suffix. */
+    if ((uint32_t)length < sizeof(root) - 1u + 5u ||
+        !equal(path + length - 4, ".bin")) return -2;
     /* Recheck the borrowed owner fields before publishing the independent copy.
      * This detects replacement, not arbitrary races; owner task is mandatory. */
     if (word(QA_SERVICE_SLOT) != service || word(QA_REGISTRY_SLOT) != map ||

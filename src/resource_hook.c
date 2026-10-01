@@ -38,26 +38,17 @@ static int system_destination(const char *destination) {
 }
 const char *rh_quickapp_package(const char *source) {
     static const char marker[] = RH_QUICKAPP_ICON_PREFIX;
-    uint32_t n = length(source), i, segment = 0, dots = 0;
+    uint32_t n = length(source), i;
     const char *package;
-    if (n <= sizeof(marker)-1u || n >= RH_PATH ||
+    if (n < sizeof(marker)-1u || n >= RH_PATH ||
         !prefix(source, marker, sizeof(marker)-1u)) return NULL;
     package = source + sizeof(marker)-1u;
-    n -= sizeof(marker)-1u;
-    if (n > RH_QUICKAPP_PACKAGE_MAX) return NULL;
-    for (i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)package[i];
-        if (c == '.') {
-            if (!segment) return NULL;
-            segment = 0; dots++;
-        } else {
-            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                  (c >= '0' && c <= '9') || c == '_' || (c == '-' && segment)))
-                return NULL;
-            segment++;
-        }
+    /* Opaque package strings: only the C-string/TSV transport is constrained. */
+    for (i = sizeof(marker)-1u; i < n; i++) {
+        unsigned char c = (unsigned char)source[i];
+        if (c < 32u || c == 127u) return NULL;
     }
-    return segment && dots ? package : NULL;
+    return package;
 }
 static int rule_ok(const struct rh_rule *r) {
     static const char root[] = RH_THEME_ROOT;
@@ -67,10 +58,11 @@ static int rule_ok(const struct rh_rule *r) {
     if (package && !system_destination(r->destination) &&
         (b < 4u || rh_key_compare(r->destination+b-4u, 4u, ".bin", 4u))) return 0;
     /* System means leave the exact file on its original firmware path. */
-    if (system_destination(r->destination)) return r->source[a-1u] != '/';
+    if (system_destination(r->destination)) return package || r->source[a-1u] != '/';
     if (!valid(r->destination) || !prefix(r->destination, root, sizeof(root)-1u)) return 0;
     /* Directory rules append a suffix; file rules replace one exact path. */
-    return (r->source[a-1u] == '/') == (r->destination[b-1u] == '/');
+    return package ? r->destination[b-1u] != '/' :
+        (r->source[a-1u] == '/') == (r->destination[b-1u] == '/');
 }
 
 static int legacy_compare(const struct rh_rule *rules, uint16_t a, uint16_t b) {

@@ -78,9 +78,13 @@ icon at `+16`. Strings may also reside in the known AP/alias range; no ROM
 string dereference is assumed. Those region checks are coarse firmware-region
 checks, not allocation-liveness proof; owner serialization remains mandatory.
 
-Success 1 requires canonical ASCII absolute path beneath exactly
-`/data/quickapp/app/<package>/`, no empty/dot/traversal components, and lowercase
-`.bin`. Invalid records/unsafe paths/root-package mismatch return -1; non-file
+Success 1 requires the exactly matched registry record's registered canonical absolute
+path beneath `/data/quickapp/app/`, no empty/dot/traversal components, and lowercase
+`.bin`. Package keys are opaque strings within C-string/TSV byte budgets; they are
+not interpreted as directory names. Native paths allow UTF-8 and literal punctuation,
+rejecting ASCII controls/DEL, colon and backslash without URL decoding. Shared native
+icon paths are possible; exclusive per-package file ownership is not claimed.
+Invalid records/unsafe paths return -1; non-file
 sources, other roots or formats (including PNG) return -2. The independently
 adapted .043 lookup uses its own `/data/app/` root and record layout.
 Every failure empties output. No allocator, file open/read/write, notification,

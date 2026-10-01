@@ -15,7 +15,6 @@
 #define RH_THEME_ROOT RH_APP_FILES_ROOT "themes/"
 #define RH_SYSTEM_DESTINATION "@system"
 #define RH_QUICKAPP_ICON_PREFIX "@quickapp-icon/"
-#define RH_QUICKAPP_PACKAGE_MAX 127u
 /* Directory rules map source prefixes into the app-private themes tree and
  * append the unmatched suffix; file rules map one exact source path. The
  * reserved RH_SYSTEM_DESTINATION exact-file rule explicitly keeps the firmware

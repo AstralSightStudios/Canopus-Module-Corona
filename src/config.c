@@ -41,9 +41,9 @@ static int next_row(const char *text, uint32_t size, uint32_t *position,
         }
         *source_length = a;
         *destination_length = is_system ? 0 : b;
-        *flags = (uint8_t)((text[split-1u] == '/' ? RH_INDEX_DIRECTORY : 0u) |
-                          (is_system ? RH_INDEX_SYSTEM : 0u) |
-                          (rh_quickapp_package(row->source) ? RH_INDEX_QUICKAPP : 0u));
+        *flags = rh_quickapp_package(row->source) ? RH_INDEX_QUICKAPP :
+            (text[split-1u] == '/' ? RH_INDEX_DIRECTORY : 0u);
+        if (is_system) *flags |= RH_INDEX_SYSTEM;
         return 1;
     }
     return 0;
@@ -291,7 +291,7 @@ int rh_materialize_snapshot(const struct rh_snapshot *declarations,
         char path[RH_PATH];
         if (rule->flags & RH_INDEX_QUICKAPP) {
             const char *package = rh_quickapp_package(source);
-            uint32_t p = 0, root_length = sizeof(app_root)-1u;
+            uint32_t root_length = sizeof(app_root)-1u;
             if (!package) { rc = -2; break; }
             if (!resolve) continue;
             {
@@ -305,11 +305,9 @@ int rh_materialize_snapshot(const struct rh_snapshot *declarations,
             /* Never trust the resolver's path length. */
             a = 0;
             while (a < RH_PATH && path[a]) a++;
-            while (package[p]) p++;
-            if (a >= RH_PATH || a <= root_length+p+1u ||
+            /* The exact registry record owns this path; its package is not a path component. */
+            if (a >= RH_PATH || a < root_length+5u ||
                 rh_key_compare(path, root_length, app_root, root_length) ||
-                rh_key_compare(path+root_length, p, package, p) ||
-                path[root_length+p] != '/' || a < 4u ||
                 rh_key_compare(path+a-4u, 4u, ".bin", 4u)) { rc = -8; break; }
             source = path;
         }

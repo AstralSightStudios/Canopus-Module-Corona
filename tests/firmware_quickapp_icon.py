@@ -91,7 +91,7 @@ class QuickAppIconNative(unittest.TestCase):
             if digest != target['sha256']:
                 raise RuntimeError(f'{version}: firmware fingerprint mismatch: {digest}')
 
-    def machine(self, version, path=Ellipsis, identity=PACKAGE):
+    def machine(self, version, path=Ellipsis, identity=PACKAGE, package=PACKAGE):
         self.version = version
         self.target = TARGETS[version]
         self.path = self.target['root'] + PACKAGE + '/images/icon.bin'
@@ -109,7 +109,7 @@ class QuickAppIconNative(unittest.TestCase):
         for address, data in segments:
             self.u.mem_write(address, data)
         self.next_memory = 0x3c710000
-        self.package = self.text(PACKAGE)
+        self.package = self.text(package)
         self.output = self.mem(256)
         self.executed, self.writes, self.reads, self.comparisons = set(), [], [], []
         self.u.hook_add(UC_HOOK_CODE,
@@ -133,7 +133,7 @@ class QuickAppIconNative(unittest.TestCase):
         self.icon = self.text(path) if path is not None else 0
         self.word(self.app + self.target['package_offset'], self.identity)
         self.word(self.app + self.target['icon_offset'], self.icon)
-        self.node = self.add(PACKAGE, self.app)
+        self.node = self.add(package, self.app)
         strcmp = self.target['strcmp']
         rom = self.target['strcmp_rom'] & ~1
         self.assertEqual(bytes(self.u.mem_read(strcmp, 8)),
@@ -162,8 +162,9 @@ class QuickAppIconNative(unittest.TestCase):
         return p
 
     def text(self, s):
-        p = self.mem(len(s) + 1)
-        self.u.mem_write(p, s.encode() + b'\0')
+        encoded = s.encode()
+        p = self.mem(len(encoded) + 1)
+        self.u.mem_write(p, encoded + b'\0')
         return p
 
     def word(self, p, value=None):
@@ -178,12 +179,13 @@ class QuickAppIconNative(unittest.TestCase):
         return self.map + 4 * (1 + (h & 15))
 
     def add(self, key, record):
+        encoded = key.encode()
         h = 5381
-        for b in key.encode():
+        for b in encoded:
             h = (h * 33 + b) & 0xffffffff
         bucket = self.map + 4 * (1 + (h & 15))
         node = self.mem(20)
-        for off, value in ((0, h), (4, self.text(key)), (8, len(key) + 1),
+        for off, value in ((0, h), (4, self.text(key)), (8, len(encoded) + 1),
                            (12, record), (16, self.word(bucket))):
             self.word(node + off, value)
         self.word(bucket, node)
@@ -422,23 +424,55 @@ class QuickAppIconNative(unittest.TestCase):
                   + PACKAGE + '/icon.bin', -2),
                  ('internal://files/icon.bin', -2), ('/resource/icon.bin', -2),
                  (root + '../icon.bin', -1), (root + './icon.bin', -1),
-                 (root + 'a//icon.bin', -1), (root + 'icon.bin?x', -1),
+                 (root + 'a//icon.bin', -1), (root + 'icon.bin?x', -2),
                  (root + 'icon\\.bin', -1), (root + 'icon\n.bin', -1),
-                 (root + '%2e%2e/icon.bin', -1),
-                 (TARGETS[version]['root'] + PACKAGE + '.other/icon.bin', -1),
-                 (TARGETS[version]['root'] + PACKAGE, -1),
+                 (root + 'icon\x7f.bin', -1), (root + 'icon:.bin', -1),
+                 (root + '%2e%2e/icon.bin', 1),
+                 (TARGETS[version]['root'] + PACKAGE + '.other/icon.bin', 1),
+                 (TARGETS[version]['root'] + PACKAGE, -2),
+                 (TARGETS[version]['root'] + 'i.bin', 1),
+                 (TARGETS[version]['root'] + '.bin', -2),
+                 (TARGETS[version]['root'] + '../icon.bin', -1),
                  (root + 'i.bin', 1), (root + 'x' * (255 - len(root) - 4) + '.bin', 1)]
             for path, expected in cases:
                 with self.subTest(version=version, path=path):
                     self.machine(version, path=path)
                     self.assertEqual(self.call(), expected)
 
+    def test_opaque_keys_use_native_hash_and_exact_record_identity(self):
+        packages = ['', '.', '..', '../bad', 'white space',
+                    'a/b:c\\d!?%#;[]()', '应用/图标 🚀',
+                    'x' * 255, 'é' * 127 + 'x']
+        for version in TARGETS:
+            path = TARGETS[version]['root'] + 'other app/图标 %?#;[]()/图标 !.bin'
+            for package in packages:
+                with self.subTest(version=version, package=package):
+                    self.machine(version, path=path, identity=package, package=package)
+                    self.assertEqual(self.call(), 1)
+                    self.assertTrue(self.native_called())
+                    encoded = path.encode()
+                    self.assertEqual(bytes(self.u.mem_read(self.output, len(encoded) + 1)),
+                                     encoded + b'\0')
+                    self.assertTrue(any(a == b == package.encode()
+                                        for a, b in self.comparisons))
+                    if 'strlen' in self.target:
+                        self.assertIn(self.target['strlen'], self.executed)
+                    # A native miss must not resolve an unrelated active record.
+                    self.assertEqual(self.call(self.text('missing opaque key')), 0)
+                    self.assertTrue(self.native_called())
+                    # Even a safe path cannot excuse a mismatched record identity.
+                    self.word(self.app + self.target['package_offset'],
+                              self.text('wrong opaque identity'))
+                    self.assertEqual(self.call(), -1)
+                    self.assertTrue(self.native_called())
+
     def test_null_bad_package_do_not_call_native(self):
         for version in TARGETS:
             self.machine(version)
             self.assertEqual(self.call(output=0), -1)
             self.assertFalse(self.native_called())
-            for package in (None, '', '.', '..', '../bad', 'x' * 256):
+            for package in (None, 'x' * 256, 'é' * 128,
+                            *('key' + chr(c) for c in (*range(1, 32), 127))):
                 with self.subTest(version=version, package=package):
                     self.machine(version)
                     self.assertEqual(self.call(0 if package is None else self.text(package)), -1)

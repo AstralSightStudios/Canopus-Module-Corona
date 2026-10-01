@@ -60,21 +60,31 @@ async function testQuickAppIcons(temporary) {
   assert.throws(() => parseObject({ ...base, mappings: pack.mappings }), /重复/);
   assert.deepEqual(parseObject({ ...base, mappings: pack.mappings, quickappIcons: undefined }), pack);
 
-  for (const packageId of ['a.b', '_a.1-a.B_2', `a.${'x'.repeat(125)}`]) {
+  const maxPackageBytes = 255 - Buffer.byteLength('@quickapp-icon/');
+  for (const packageId of ['a.b', '_a.1-a.B_2', '', 'single', '.a.b', 'a.b.',
+    'a..b', 'a.-b', '-a.b', 'a/b.c', 'a\\b.c', 'a:b.c', '中.a', 'a b.c',
+    `${key}/`, 'a.b/', 'a.b/child.bin', 'a\u0085b', 'x'.repeat(maxPackageBytes)]) {
     const source = `@quickapp-icon/${packageId}`;
     assert.equal(validSourcePath(source), true);
-    assert.equal(parseObject({ ...base, quickappIcons: [{ package: packageId,
-      destination: 'icons/icon.bin' }] }).mappings[0].source, source);
+    const opaque = parseObject({ ...base, quickappIcons: [{ package: packageId,
+      destination: 'icons/icon.bin' }] });
+    assert.equal(opaque.mappings[0].source, source);
+    assert.deepEqual(parseObject(opaque), opaque);
+    assert.equal(plan([{ themeId: 'top', manifest: opaque, files: null }], 'opaque').mappings,
+      serialize(opaque));
+    assert.equal(plan([], 'opaque', { [source]: '@system' }).mappings, `${source}\t@system\n`);
   }
-  for (const packageId of ['', 'single', '.a.b', 'a.b.', 'a..b', 'a.-b', '-a.b',
-    'a/b.c', 'a\\b.c', 'a:b.c', 'a.b\n', 'a.b\r', 'a.b\t', 'a.b\0', '中.a',
-    'a b.c', `a.${'x'.repeat(126)}`, null, 42]) {
+  for (const packageId of [null, 42, {}, []]) {
     assert.throws(() => parseObject({ ...base, quickappIcons: [{ package: packageId,
       destination: 'icons/corona.bin' }] }), /package/);
+  }
+  for (const packageId of ['a.b\n', 'a.b\r', 'a.b\t', 'a.b\0', 'a\x7fb',
+    'x'.repeat(maxPackageBytes + 1), '中'.repeat(Math.floor(maxPackageBytes / 3) + 1)]) {
+    assert.throws(() => parseObject({ ...base, quickappIcons: [{ package: packageId,
+      destination: 'icons/corona.bin' }] }));
     assert.equal(validSourcePath(`@quickapp-icon/${packageId}`), false);
   }
-  for (const source of ['@arbitrary/a.b', '@system', '@quickapp-icon/', `${key}/`,
-    `${key}/child.bin`, `@quickapp-icon/${'x'.repeat(256)}`]) {
+  for (const source of ['@arbitrary/a.b', '@system', `@quickapp-icon/${'x'.repeat(256)}`]) {
     assert.equal(validSourcePath(source), false);
     assert.throws(() => parseObject({ ...base, quickappIcons: [],
       mappings: [{ source, destination: 'icons/corona.bin' }] }));
@@ -130,6 +140,21 @@ async function testQuickAppIcons(temporary) {
   assert.throws(() => parseObject({ ...base, quickappIcons: [{
     package: 'ng.lst.corona', destination: 'x' + longestBin
   }] }), /路径限制/);
+
+  // Package slashes are data, never directory-prefix or inventory matches.
+  const slashPack = parseObject({ ...base, quickappIcons: [
+    { package: 'opaque/', destination: 'icons/slash.bin' },
+    { package: 'opaque/child', destination: 'icons/child.bin' }
+  ] });
+  const slashLow = parseObject({ ...base, themeId: 'low', quickappIcons: [
+    { package: 'opaque/', destination: 'icons/other.bin' }
+  ] });
+  const slashPlan = plan([{ themeId: 'top', manifest: slashPack, files: null },
+    { themeId: 'low', manifest: slashLow, files: null }], 'opaque',
+    { '@quickapp-icon/opaque/': '@system' });
+  assert.equal(slashPlan.copies.length, 0);
+  assert.ok(slashPlan.mappings.includes('@quickapp-icon/opaque/\t@system\n'));
+  assert.ok(slashPlan.mappings.includes('@quickapp-icon/opaque/child\tthemes/top/icons/child.bin\n'));
 
   const low = parseObject({ ...base, themeId: 'low', name: 'Low' });
   const themes = [{ themeId: 'top', manifest: pack, files: null },

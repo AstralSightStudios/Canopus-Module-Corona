@@ -74,7 +74,7 @@ function parseMappings(value: unknown, quickappIcons: unknown, themeId: string):
     throw new Error(`mappings 与 quickappIcons 合计最多 ${MAX_MAPPING_RULES} 条`);
   const normalizedIcons = icons.map((item, index) => {
     if (!isRecord(item) || !validQuickAppPackage(item.package))
-      throw new Error(`quickappIcons[${index}].package 无效或超过 127 字节`);
+      throw new Error(`quickappIcons[${index}].package 必须是字符串`);
     return { source: `${QUICKAPP_ICON_SOURCE_PREFIX}${item.package}`, destination: item.destination };
   });
 
@@ -91,8 +91,7 @@ function parseMappings(value: unknown, quickappIcons: unknown, themeId: string):
     const resolvedDestination = `${THEME_DESTINATION_ROOT}${themeId}/${destination}`;
     if (!safeThemeDestination(resolvedDestination))
       throw new Error(`mappings[${index}].destination 展开后超过设备路径限制`);
-    if ((source[source.length - 1] === "/") !==
-        (destination[destination.length - 1] === "/"))
+    if (!isQuickAppIconSource(source) && (source.endsWith("/") !== destination.endsWith("/")))
       throw new Error(`mappings[${index}] 源路径与目标路径的目录/文件类型不一致`);
     if (seenSources.has(source)) throw new Error(`mappings[${index}] source 重复`);
     seenSources.add(source);

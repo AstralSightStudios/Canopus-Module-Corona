@@ -21,17 +21,21 @@ export function utf8PathLength(value: string): number {
   return bytes;
 }
 
-/** Package identifiers are ASCII, with at least two nonempty dot-separated segments. */
+/** Package identifiers are opaque strings, not filesystem paths. */
 export function validQuickAppPackage(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 127 &&
-    !/[^A-Za-z0-9_.-]/.test(value) &&
-    /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.[A-Za-z0-9_][A-Za-z0-9_-]*)+$/.test(value);
+  return typeof value === "string";
 }
 
 /** Virtual icon keys are semantic identifiers, not filesystem paths. */
 export function isQuickAppIconSource(value: string): boolean {
+  // These are transport constraints, not a package-name grammar.
   return value.startsWith(QUICKAPP_ICON_SOURCE_PREFIX) && utf8PathLength(value) <= 255 &&
-    validQuickAppPackage(value.slice(QUICKAPP_ICON_SOURCE_PREFIX.length));
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+/** Semantic icon keys always match exactly, including a package ending in '/'. */
+export function isDirectoryResourceSource(value: string): boolean {
+  return !value.startsWith(QUICKAPP_ICON_SOURCE_PREFIX) && value.endsWith("/");
 }
 
 export function safeAbsoluteResourcePath(value: string): boolean {

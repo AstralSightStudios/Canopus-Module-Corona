@@ -1,5 +1,5 @@
 import {
-  THEME_DESTINATION_ROOT, isBinFileDestination, isQuickAppIconSource,
+  THEME_DESTINATION_ROOT, isBinFileDestination, isQuickAppIconSource, isDirectoryResourceSource,
   safeAbsoluteResourcePath, safeRelativeResourcePath, safeResourceSource, safeThemeDestination
 } from "./resource-path";
 import { parseResourcePackManifest } from "./resource-pack";
@@ -123,13 +123,13 @@ export async function readProtectedThemeIds(
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
-  return source.endsWith("/") ? resourcePath.startsWith(source) : resourcePath === source;
+  return isDirectoryResourceSource(source) ? resourcePath.startsWith(source) : resourcePath === source;
 }
 
 function mappingsOverlap(left: ResourcePackMapping, right: ResourcePackMapping): boolean {
   if (left.source === right.source) return true;
-  if (left.source.endsWith("/") && right.source.startsWith(left.source)) return true;
-  if (right.source.endsWith("/") && left.source.startsWith(right.source)) return true;
+  if (isDirectoryResourceSource(left.source) && right.source.startsWith(left.source)) return true;
+  if (isDirectoryResourceSource(right.source) && left.source.startsWith(right.source)) return true;
   return false;
 }
 
@@ -167,7 +167,7 @@ function collectSourceGroups(themesHighToLow: ThemeRules[]): SourceGroupEntry[][
 }
 
 function needsFileResolution(entries: SourceGroupEntry[]): boolean {
-  return entries.length > 1 && entries.some(entry => entry.mapping.source.endsWith("/"));
+  return entries.length > 1 && entries.some(entry => isDirectoryResourceSource(entry.mapping.source));
 }
 
 function themesNeedingInventory(themesHighToLow: ThemeRules[]): Set<string> {
@@ -197,10 +197,11 @@ function serializeMappings(rules: ActiveMappingRule[]): string {
 
 function validMappingRule(rule: ActiveMappingRule): boolean {
   if (!safeResourceSource(rule.source)) return false;
-  if (rule.destination === SYSTEM_RESOURCE_CHOICE) return !rule.source.endsWith("/");
-  if (isQuickAppIconSource(rule.source) && !isBinFileDestination(rule.destination)) return false;
+  if (rule.destination === SYSTEM_RESOURCE_CHOICE) return !isDirectoryResourceSource(rule.source);
+  if (isQuickAppIconSource(rule.source))
+    return isBinFileDestination(rule.destination) && safeThemeDestination(rule.destination);
   return safeThemeDestination(rule.destination) &&
-    rule.source.endsWith("/") === rule.destination.endsWith("/");
+    isDirectoryResourceSource(rule.source) === rule.destination.endsWith("/");
 }
 
 /** Prefer exact winning-file rules; materialize all overlapping groups only if needed. */
@@ -235,7 +236,7 @@ export function planActiveMappings(
       continue;
     }
 
-    const directorySources = entries.map(entry => entry.mapping.source).filter(source => source.endsWith("/"));
+    const directorySources = entries.map(entry => entry.mapping.source).filter(isDirectoryResourceSource);
     const sourceRoot = directorySources.sort((left, right) => left.length - right.length)[0];
     if (!sourceRoot || entries.some(entry => !entry.mapping.source.startsWith(sourceRoot)))
       throw new Error("无法合并重叠的资源映射路径");

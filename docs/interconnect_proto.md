@@ -47,7 +47,7 @@ dark.crpack  (ZIP)
 }
 ```
 
-`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 与下述可选 `quickappIcons` 是规范的映射声明来源，合计最多 256 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径或有效的 `@quickapp-icon/<package>` 精确图标 key，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。两者目录/文件结尾斜杠类型须相同。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 TAB、CR、LF 或控制字符。允许 `mappings` 为空；只有它与 `quickappIcons` 均为空时，该主题才不产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 256、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
+`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 与下述可选 `quickappIcons` 是规范的映射声明来源，合计最多 256 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径或有效的 `@quickapp-icon/<package>` 精确图标 key，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。普通路径的目录/文件结尾斜杠类型须相同；快应用语义 key 始终是精确文件规则，包名末尾斜杠不表示目录。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 ASCII 控制字节（含 NUL、TAB、CR、LF）或 DEL。允许 `mappings` 为空；只有它与 `quickappIcons` 均为空时，该主题才不产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 256、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
 
 ### 可选快应用图标声明
 
@@ -66,14 +66,19 @@ dark.crpack  (ZIP)
 
 `quickappIcons` 可省略；接收端归一化为 source `@quickapp-icon/ng.lst.corona` 的
 精确映射。归一化 manifest 只保存合并后的 `mappings`，避免重复序列化声明；原始
-传输文件仍原样保存。包名最多 127 ASCII 字节，至少两个点分非空段，各段首字符为
-字母、数字或 `_`，其余字符可包含 `-`。重复包名 key（包括和 `mappings` 重复）拒绝。
+传输文件仍原样保存。`package` 是不透明字符串，按原始值精确匹配，不限定 ASCII、
+点分段数或包名语法，不 trim，也不按文件路径解释。尾部 `/` 仍属于包名，不形成目录规则。
+现有 C 字符串和 TSV 传输不接受 NUL、TAB、CR、LF、其他 ASCII 控制字节或 DEL；
+`@quickapp-icon/` 加原包名合计最多 255 UTF-8 字节。这是传输容量约束，不是小米包名规范。
+重复包名 key（包括和 `mappings` 重复）拒绝。
 `destination` 必须对应包内真实的、小写 `.bin` 后缀文件，不允许目录或 PNG。
 目标长度、合计规则数与生成 TSV 大小仍按现有预算校验。
 
 活动配置中该 key 可通过混搭生成 `@system` 目标，资源包内 destination 仍必须对应
 真实文件。包名 key 不参与目录展开；不同包优先级按同一包名 key 决定，指定资源包与
 系统透传选择沿用混搭语义。模块在 UI owner 查询当前注册应用的实际 BIN 图标路径，
+以精确匹配的注册记录为权威来源，包名不参与目录拼接；真实记录若共用图标路径，
+不能保证独占效果，展开后的同源规则冲突仍拒绝，保留 last-known-good。
 不在 Manager 推测 manifest 文件名，也不写回原生展开结果。当前支持 Band 11
 `.139/.155` 和 10 Pro `.043`；PNG/内存 source 仍拒绝。需要新版模块与已登记的精确目标
 入口；10 Pro 复用现有 active-name 查询入口。`.043` 尚待实机验证，不因资源包声明而获批。

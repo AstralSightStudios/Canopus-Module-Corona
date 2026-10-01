@@ -291,9 +291,13 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
                   + PACKAGE + b'/icon.bin', -2),
                  (b'/resource/icon.bin', -2), (prefix + b'../icon.bin', -1),
                  (prefix + b'./icon.bin', -1), (prefix + b'a//icon.bin', -1),
-                 (prefix + b'icon.bin?x', -1), (prefix + b'icon\\.bin', -1),
-                 (prefix + b'icon\n.bin', -1), (prefix + b'%2e%2e/icon.bin', -1),
-                 (prefix[:-1] + b'.other/icon.bin', -1), (prefix[:-1], -1),
+                 (prefix + b'icon.bin?x', -2), (prefix + b'icon\\.bin', -1),
+                 (prefix + b'icon\n.bin', -1), (prefix + b'icon\x7f.bin', -1),
+                 (prefix + b'icon:.bin', -1), (prefix + b'%2e%2e/icon.bin', 1),
+                 (prefix[:-1] + b'.other/icon.bin', 1), (prefix[:-1], -2),
+                 (TARGETS[version]['root'] + b'i.bin', 1),
+                 (TARGETS[version]['root'] + b'.bin', -2),
+                 (TARGETS[version]['root'] + b'../icon.bin', -1),
                  (prefix + b'i.bin', 1),
                  (prefix + b'x' * (255 - len(prefix) - 4) + b'.bin', 1)]
             for path, expected in cases:
@@ -301,10 +305,29 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
                     self.machine(version, path=path)
                     self.assertEqual(self.call(), expected)
 
+    def test_opaque_keys_use_exact_record_not_package_directory(self):
+        packages = [b'', b'.', b'..', b'../bad', b'white space',
+                    b'a/b:c\\d!?%#;[]()', '应用/图标 🚀'.encode(),
+                    b'x' * 255, 'é'.encode() * 127 + b'x']
+        for version in TARGETS:
+            path = TARGETS[version]['root'] + 'other app/图标 %?#;[]()/图标 !.bin'.encode()
+            for package in packages:
+                with self.subTest(version=version, package=package):
+                    self.machine(version, path=path, identity=package)
+                    self.node(package)
+                    self.assertEqual(self.call(package), 1)
+                    self.assertEqual(self.calls, [(self.target['lookup'], package)])
+                    self.assertEqual(self.out.value, path)
+                    # A path under the right root cannot excuse wrong identity.
+                    self.word(self.app + self.target['package_offset'],
+                              self.text(b'wrong opaque identity'))
+                    self.assertEqual(self.call(package), -1)
+
     def test_bad_package_and_null_output_do_not_call_native(self):
         for version in TARGETS:
             self.machine(version)
-            for package in (None, b'', b'.', b'..', b'../bad', b'x' * 256):
+            for package in (None, b'x' * 256, b'\xc3\xa9' * 128,
+                            *(b'key' + bytes([c]) for c in (*range(1, 32), 127))):
                 self.assertEqual(self.call(package), -1)
                 self.assertEqual(self.calls, [])
             self.assertEqual(self.lib.rh_platform_quickapp_icon_path(PACKAGE, None), -1)

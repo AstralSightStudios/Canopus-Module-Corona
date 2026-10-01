@@ -64,21 +64,23 @@ existence/decoding.
 
 `int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH])`:
 
-- 1: exact package identity and canonical lowercase `.bin` path under exactly
-  `/data/quickapp/app/<package>/`; caller owns the bounded NUL-terminated copy.
+- 1: exact registry-record package identity and its registered canonical lowercase `.bin`
+  path under `/data/quickapp/app/`; caller owns the bounded NUL-terminated copy.
 - 0: absent/uninitialized service, registry, app or icon.
 - -1: invalid/transient service identity, callback, registry/record/string or
-  unsafe path/package-boundary mismatch; retry on a later owner turn.
+  unsafe path; retry on a later owner turn.
 - -2: unsupported target or source format/type (PNG, non-file, other root).
 
-Non-success empties output. Parent supplies grammar-validated package and
-non-overlapping output. The exact table pointer and slot-3 callback must match
+Non-success empties output. Parent supplies an opaque package byte string within the
+C-string/TSV transport budget and non-overlapping output. The exact table pointer and slot-3 callback must match
 before the explicit call. Records must be aligned/readable RAM, with package
 `+12` exactly equal to the requested package and bounded source `+16`. Strings
 may reside in known RAM/AP/alias regions, not unproven ROM. Region checks are
 coarse and do not prove allocation liveness; owner context remains essential.
-Safe paths reject non-ASCII punctuation, backslash, control/URL characters,
-empty/dot/traversal components. Owner fields are rechecked before publishing.
+Safe native paths reject backslash, colon, ASCII controls/DEL and empty/dot/traversal
+components; UTF-8 and literal punctuation are allowed. No URL decoding occurs.
+The exact record's icon path is authoritative: no `root + package` path is guessed,
+and exclusive per-package file ownership is not claimed. Owner fields are rechecked before publishing.
 No filesystem, allocation, notification, rendering or cache operations occur.
 
 ## Exact framework registration and audited data identities
