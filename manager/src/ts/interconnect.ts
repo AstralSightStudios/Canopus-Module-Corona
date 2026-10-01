@@ -7,6 +7,7 @@ import type { ResourcePackManifest } from "./resource-pack";
 import { validateResourcePackFiles } from "./resource-pack";
 import { registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
 import { invalidateResourceCatalog, withResourceOperation } from "./resource-overrides";
+import { readProtectedThemeIds } from "./resource-activation";
 
 const VERSION = 2;
 const TRANSFER_STATE_VERSION = 1;
@@ -942,6 +943,8 @@ export class InterconnectThemeReceiver {
 
   private async isThemeActive(themeId: string): Promise<boolean> {
     const mappings = await file.readOptionalText(MAPPINGS_URI);
+    const protectedThemeIds = await readProtectedThemeIds(file);
+    if (protectedThemeIds.includes(themeId)) return true;
     if (!mappings) return false;
     const destinationPrefix = `${THEME_DESTINATION_ROOT}${themeId}/`;
     return mappings.split(/\r?\n/).some(line => {

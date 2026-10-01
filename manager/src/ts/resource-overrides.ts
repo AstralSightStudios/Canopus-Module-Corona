@@ -1,5 +1,6 @@
 import { parseResourcePackManifest } from "./resource-pack";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
+import type { ActiveMappingsPlan } from "./resource-activation";
 import {
   enumerateThemeFiles,
   mappingMatchesRelativeFile,
@@ -41,6 +42,8 @@ export interface ResourcePackSnapshot {
   }>;
   paths: RegisteredResourcePath[];
   byPath: Map<string, RegisteredResourcePath>;
+  // Shared across page bundles; package invalidation replaces the owning snapshot.
+  activeMappings?: { key: string; plan: ActiveMappingsPlan };
 }
 
 export interface ResourceCatalog extends ResourcePackSnapshot {

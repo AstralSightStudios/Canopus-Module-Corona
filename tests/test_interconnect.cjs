@@ -7,6 +7,8 @@ const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'resource-hook-interconnect-')));
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~"';
+const mappingsUri = 'internal://files/mappings.tsv';
+const generationsUri = 'internal://files/resource-active-generations.json';
 
 function encodeBase91(data) {
   let accumulator = 0;
@@ -39,8 +41,9 @@ function makeNativeApi() {
   const text = new Map();
   const binary = new Map();
   const directories = new Set(['internal://files/']);
+  const mutations = [];
   const native = {
-    text, binary, directories,
+    text, binary, directories, mutations,
     readText(options) {
       if (text.has(options.uri)) {
         options.success({ text: text.get(options.uri) });
@@ -53,6 +56,7 @@ function makeNativeApi() {
       options.fail('missing', 301);
     },
     writeText(options) {
+      mutations.push(['writeText', options.uri]);
       text.set(options.uri, options.text);
       options.success();
     },
@@ -63,6 +67,7 @@ function makeNativeApi() {
       options.success({ buffer: value.slice(start, options.length === undefined ? undefined : start + options.length) });
     },
     writeArrayBuffer(options) {
+      mutations.push(['writeArrayBuffer', options.uri]);
       const previous = binary.get(options.uri) || new Uint8Array(0);
       const start = options.position || 0;
       const next = new Uint8Array(Math.max(previous.length, start + options.buffer.length));
@@ -83,6 +88,7 @@ function makeNativeApi() {
       }
     },
     mkdir(options) {
+      mutations.push(['mkdir', options.uri]);
       let current = 'internal://';
       for (const part of options.uri.slice('internal://'.length).split('/').filter(Boolean)) {
         current += `${part}/`;
@@ -92,11 +98,13 @@ function makeNativeApi() {
       options.success();
     },
     delete(options) {
+      mutations.push(['delete', options.uri]);
       text.delete(options.uri);
       binary.delete(options.uri);
       options.success();
     },
     rmdir(options) {
+      mutations.push(['rmdir', options.uri]);
       const prefix = options.uri.endsWith('/') ? options.uri : `${options.uri}/`;
       for (const key of [...binary.keys()]) if (key.startsWith(prefix)) binary.delete(key);
       for (const key of [...text.keys()]) if (key.startsWith(prefix)) text.delete(key);
@@ -116,6 +124,12 @@ async function main() {
   ], { stdio: 'inherit' });
 
   const native = makeNativeApi();
+  const nativeStorageSnapshot = () => ({
+    text: new Map(native.text),
+    binary: new Map([...native.binary].map(([uri, bytes]) => [uri, [...bytes]])),
+    directories: new Set(native.directories),
+    mutationCount: native.mutations.length
+  });
   const sent = [];
   const innerSent = () => sent.map(envelope => {
     assert.deepEqual(Object.keys(envelope), ['msg']);
@@ -253,10 +267,12 @@ async function main() {
 
   native.text.set('internal://files/mappings.tsv',
     '/resource/icons/\tthemes/locked/icons/\n');
+  const beforeActiveReplace = nativeStorageSnapshot();
   const activeReply = messages(await deliver('T' + JSON.stringify({
     operation: 'begin', themeId: 'locked', mode: 'replace', fileCount: 1, totalBytes: 2
   })));
   assert(activeReply.some(packet => packet.errorCode === 'active-theme'));
+  assert.deepEqual(nativeStorageSnapshot(), beforeActiveReplace);
 
   const manifest = [
     { relativePath: 'canora.json', sizeBytes: canoraBytes.length },
@@ -578,8 +594,79 @@ async function main() {
   reply = messages(await deliver('C10000'));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'), 'C still requires exactly four hex digits');
 
+  const protectedReplacePacket = 'T' + JSON.stringify({
+    operation: 'begin', themeId: 'dark', mode: 'replace', fileCount: 1, totalBytes: 2
+  });
+  function seedPriorPack() {
+    native.text.set(transferStateUri, finishedDarkState);
+    native.text.set(installedUri, JSON.stringify(['dark']));
+    native.text.set('internal://files/themes/dark/canora.json', canoraText);
+    native.binary.set('internal://files/themes/dark/icons/a.bin', Uint8Array.from([1, 2, 255]));
+    native.directories.add('internal://files/themes/dark/');
+    native.directories.add('internal://files/themes/dark/icons/');
+  }
+
+  // The newer TSV may be published even though native still depends on the prior direct pack.
+  for (const mappings of [
+    '/resource/icons/a.bin\tthemes/light/icons/a.bin\n', '', null
+  ]) {
+    seedPriorPack();
+    if (mappings === null) native.text.delete(mappingsUri);
+    else native.text.set(mappingsUri, mappings);
+    native.text.set(generationsUri, JSON.stringify({ version: 1, generations: [],
+      protectedThemes: mappings ? ['dark', 'light'] : ['dark'] }));
+    restartReceiver();
+    const before = nativeStorageSnapshot();
+    reply = messages(await deliver(protectedReplacePacket));
+    assert(reply.some(packet => packet.errorCode === 'active-theme'));
+    assert.equal(reply.some(packet => packet.operation === 'ack'), false);
+    assert.deepEqual(nativeStorageSnapshot(), before,
+      'durable protection must reject replacement without touching files, index or transfer state');
+
+    // Matching acknowledged cleanup releases the old pack but keeps the new direct dependency.
+    const acknowledgedRegistry = JSON.stringify({ version: 1, generations: [],
+      protectedThemes: mappings ? ['light'] : [] });
+    native.text.set(generationsUri, acknowledgedRegistry);
+    reply = messages(await deliver(protectedReplacePacket));
+    assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+    assert.equal(native.text.has('internal://files/themes/dark/canora.json'), false);
+    assert.equal(native.binary.has('internal://files/themes/dark/icons/a.bin'), false);
+    assert.deepEqual(JSON.parse(native.text.get(installedUri)), []);
+    assert.equal(JSON.parse(native.text.get(transferStateUri)).manifestReceiving, true);
+    assert.equal(native.text.get(generationsUri), acknowledgedRegistry);
+  }
+
+  const malformedRegistries = [
+    '{invalid', 'null',
+    JSON.stringify({ version: 2, generations: [], protectedThemes: ['dark'] }),
+    JSON.stringify({ version: 1, generations: 'bad', protectedThemes: ['dark'] }),
+    ...[null, 'dark', [42], [''], ['Dark'], ['too_long_theme'], ['../dark'], ['dark', 'dark']]
+      .map(protectedThemes => JSON.stringify({ version: 1, generations: [], protectedThemes }))
+  ];
+  for (const [index, registry] of malformedRegistries.entries()) {
+    seedPriorPack();
+    native.text.set(mappingsUri, index % 2 ? '/resource/icons/\tthemes/light/icons/\n' : '');
+    native.text.set(generationsUri, registry);
+    restartReceiver();
+    const before = nativeStorageSnapshot();
+    reply = messages(await deliver(protectedReplacePacket));
+    assert(reply.some(packet => typeof packet.errorCode === 'string'));
+    assert.equal(reply.some(packet => packet.operation === 'ack'), false);
+    assert.deepEqual(nativeStorageSnapshot(), before,
+      'malformed durable protection must fail closed without any mutations');
+  }
+
+  // A legacy v1 registry without protectedThemes must not block otherwise inactive replacement.
+  seedPriorPack();
+  native.text.set(mappingsUri, '');
+  native.text.set(generationsUri, JSON.stringify({ version: 1, generations: [] }));
+  restartReceiver();
+  reply = messages(await deliver(protectedReplacePacket));
+  assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+  assert.equal(native.binary.has('internal://files/themes/dark/icons/a.bin'), false);
+
   receiver.stop();
-  console.log('Interconnect large transfers, four-hex wire bound, 256-rule manifests, path validation, Base91, resume and finish tests passed.');
+  console.log('Interconnect large transfers, four-hex wire bound, 256-rule manifests, path validation, Base91, resume, finish and durable protection tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true });

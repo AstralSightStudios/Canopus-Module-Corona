@@ -249,20 +249,17 @@ async function main() {
 
     const plan = await activation.regenerateActiveMappings(
       ['top', 'base', systemId, 'inactive'], 'g1', file);
-    assert.equal(plan.generation, 'g1');
-    assert.equal(plan.copies.length, 2, 'only winning file versions are materialized');
-    assert.match(plan.mappings, /^\/resource\/icons\/\tthemes\/.active-g1\/r0\/\n$/);
+    assert.equal(plan.generation, null);
+    assert.deepEqual(plan.copies, [], 'small overlapping packs need no copies');
+    assert.equal(plan.mappings,
+      '/resource/icons/a.bin\tthemes/top/icons/a.bin\n' +
+      '/resource/icons/b.bin\tthemes/base/other/b.bin\n');
     assert(!plan.mappings.includes('inactive'));
-    assert.deepEqual([...file.binary.get('internal://files/themes/.active-g1/r0/a.bin')], [9, 9]);
-    assert.deepEqual([...file.binary.get('internal://files/themes/.active-g1/r0/b.bin')], [2]);
     assert.equal(file.text.get(mappingsUri), plan.mappings);
-    assert.deepEqual(JSON.parse(file.text.get(activeIndexUri)), { version: 1, generations: ['g1'] });
-
-    await activation.cleanupInactiveGenerations('g1', file);
-    file.text.set(activeIndexUri, JSON.stringify({ version: 1, generations: ['g1', 'g2'] }));
-    await activation.cleanupInactiveGenerations('g2', file);
-    assert(!file.directories.has('internal://files/themes/.active-g1/'));
-    assert.deepEqual(JSON.parse(file.text.get(activeIndexUri)), { version: 1, generations: ['g2'] });
+    assert.deepEqual(JSON.parse(file.text.get(activeIndexUri)),
+      { version: 1, generations: [], protectedThemes: ['base', 'top'] },
+      'direct rules record protected packages without creating an overlay generation');
+    assert(![...file.binary.keys()].some(uri => uri.includes('/.active-')));
   }
 
   {
@@ -272,7 +269,7 @@ async function main() {
     file.text.set('internal://files/themes/top/canora.json', topManifest);
     file.text.set('internal://files/themes/base/canora.json', baseManifest);
     const entries = {
-      top: Array.from({ length: 129 }, (_, index) => `icons/top-${index}.bin`),
+      top: Array.from({ length: 257 }, (_, index) => `icons/top-${index}.bin`),
       base: ['assets/base.bin']
     };
     file.listDirectory = async uri => {
@@ -300,9 +297,17 @@ async function main() {
       ...entries.top.slice().sort((a, b) => a.localeCompare(b)).map(relativePath =>
         `internal://files/themes/top/${relativePath}`),
       'internal://files/themes/base/assets/base.bin'
-    ], 'activation discovers and overlays more than 128 files when the optional index is absent');
+    ], 'activation discovers more than 256 files and falls back to an immutable overlay');
+    assert.equal(plan.generation, 'legacy1');
     assert.equal(file.text.get(fileIndexUri), undefined,
       'rebuilding mappings does not require an optional inventory index write');
+    const next = await activation.regenerateActiveMappings(['top', 'base', systemId], 'legacy2', file);
+    assert.equal(next.copies.length, 258, 'calls without snapshots do not cache activations');
+    assert(file.binary.has('internal://files/themes/.active-legacy1/r0/base.bin'),
+      'old generation survives publication until acknowledgement');
+    await activation.cleanupInactiveGenerations(next.generation, file);
+    assert(!file.directories.has('internal://files/themes/.active-legacy1/'));
+    assert.deepEqual(JSON.parse(file.text.get(activeIndexUri)), { version: 1, generations: ['legacy2'] });
   }
 
   {
@@ -322,14 +327,12 @@ async function main() {
         { relativePath: 'icons/b.bin', sizeBytes: 1 }
       ] }
     ], 'g-prefix');
-    assert.equal(plan.mappings.split('\n').filter(Boolean).length, 1,
-      'overlapping broad and nested sources collapse to one ordered rule');
-    assert(plan.mappings.startsWith('/resource/\t'));
-    assert.deepEqual(plan.copies.map(copy => copy.sourceUri), [
-      'internal://files/themes/top/root/icons/a.bin',
-      'internal://files/themes/top/root/other.bin',
-      'internal://files/themes/base/icons/b.bin'
-    ]);
+    assert.equal(plan.mappings,
+      '/resource/icons/a.bin\tthemes/top/root/icons/a.bin\n' +
+      '/resource/other.bin\tthemes/top/root/other.bin\n' +
+      '/resource/icons/b.bin\tthemes/base/icons/b.bin\n');
+    assert.deepEqual(plan.copies, []);
+    assert.equal(plan.generation, null);
   }
 
   {
@@ -339,15 +342,19 @@ async function main() {
         { source: '/resource/icons/', destination: 'specific/' }
       ] }, files: [
         { relativePath: 'root/icons/a.bin', sizeBytes: 1 },
+        { relativePath: 'root/icons/hole.bin', sizeBytes: 1 },
         { relativePath: 'specific/other.bin', sizeBytes: 1 }
       ] },
       { themeId: 'base', manifest: { mappings: [
         { source: '/resource/icons/', destination: 'icons/' }
       ] }, files: [{ relativePath: 'icons/a.bin', sizeBytes: 1 }] }
     ], 'g-specific');
-    assert(plan.copies.some(copy => copy.sourceUri === 'internal://files/themes/base/icons/a.bin'));
-    assert(!plan.copies.some(copy => copy.sourceUri === 'internal://files/themes/top/root/icons/a.bin'),
+    assert.match(plan.mappings, /\/resource\/icons\/a\.bin\tthemes\/base\/icons\/a\.bin\n/);
+    assert(!plan.mappings.includes('top/root/icons/a.bin'),
       'a broad rule must not bypass a more-specific rule with a missing file');
+    assert(!plan.mappings.includes('hole.bin') && !plan.mappings.includes('/resource/\t'),
+      'holes leave no broad rule that could bypass firmware fallback');
+    assert.deepEqual(plan.copies, []);
   }
 
   {
@@ -399,7 +406,8 @@ async function main() {
       source: '/resource/', destination: 'base/'
     }));
     file.text.set(fileIndexUri, JSON.stringify({ version: 1, themes: {
-      top: [{ relativePath: 'top/a.bin', sizeBytes: 1 }],
+      top: [{ relativePath: 'top/a.bin', sizeBytes: 1 },
+        ...Array.from({ length: 256 }, (_, index) => ({ relativePath: `top/${index}.bin`, sizeBytes: 1 }))],
       base: [{ relativePath: 'base/a.bin', sizeBytes: 1 }]
     } }));
     file.binary.set('internal://files/themes/base/base/a.bin', Uint8Array.from([1]));
@@ -407,6 +415,43 @@ async function main() {
     assert.equal(file.text.get(mappingsUri), 'old active config', 'failed preparation must not publish config');
     assert.deepEqual(JSON.parse(file.text.get(activeIndexUri)), { version: 1, generations: [] });
     assert(!file.directories.has('internal://files/themes/.active-g-fail/'));
+  }
+
+  {
+    const themes = ['top', 'base'].map(themeId => ({ themeId, manifest: { mappings: [
+      { source: '/icons/', destination: 'assets/' }
+    ] }, files: Array.from({ length: 256 }, (_, index) => ({
+      relativePath: `assets/${index}.bin`, sizeBytes: 1
+    })) }));
+    const direct = activation.planActiveMappings(themes, 'g-edge');
+    assert.equal(direct.mappings.split('\n').filter(Boolean).length, 256);
+    assert.equal(direct.generation, null, 'exactly 256 resolved files fit');
+    const fallback = activation.planActiveMappings(themes, 'g-edge-overlay', {
+      '/icons/0.bin': 'base', '/outside.bin': '@system'
+    });
+    assert.equal(fallback.generation, 'g-edge-overlay', 'budget includes every explicit rule');
+    assert.equal(fallback.copies.length, 255);
+    assert(!fallback.copies.some(copy => copy.sourceUri.endsWith('/0.bin')),
+      'direct custom choices never waste an overlay copy');
+    assert.match(fallback.mappings, /\/icons\/0\.bin\tthemes\/base\/assets\/0\.bin\n/);
+    assert.match(fallback.mappings, /\/outside\.bin\t@system\n/);
+  }
+
+  {
+    const suffix = '中'.repeat(50);
+    const themes = ['top', 'base'].map(themeId => ({ themeId, manifest: { mappings: [
+      { source: '/bytes/', destination: 'assets/' }
+    ] }, files: Array.from({ length: 110 }, (_, index) => ({
+      relativePath: `assets/${suffix}${index}.bin`, sizeBytes: 1
+    })) }));
+    const plan = activation.planActiveMappings(themes, 'g-byte-fallback', {
+      [`/bytes/${suffix}0.bin`]: '@system'
+    });
+    assert.equal(plan.generation, 'g-byte-fallback', 'UTF-8 TSV byte budget can force fallback below 256 files');
+    assert.equal(plan.copies.length, 109);
+    assert(!plan.copies.some(copy => copy.sourceUri.endsWith(`${suffix}0.bin`)),
+      'system choices are absent from the materialized overlay');
+    assert(Buffer.byteLength(plan.mappings) <= 32 * 1024);
   }
 
   {
@@ -474,9 +519,9 @@ async function main() {
         { relativePath: `low/${oversizedSuffix}`, sizeBytes: 1 }
       ] }
     ], 'g-long-path', { '/resource/a.bin': 'low' });
-    assert.deepEqual(plan.copies.map(copy => copy.sourceUri), [
-      'internal://files/themes/top/top/a.bin'
-    ], 'unrepresentable source paths are skipped while direct per-file overrides add no copies');
+    assert.deepEqual(plan.copies, []);
+    assert.equal(plan.mappings, '/resource/a.bin\tthemes/low/low/a.bin\n',
+      'unrepresentable source paths are skipped while explicit choices stay direct');
   }
 
   {

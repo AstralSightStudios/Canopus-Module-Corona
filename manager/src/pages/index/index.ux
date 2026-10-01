@@ -29,8 +29,8 @@ import * as file from "../../ts/file"
 import router from "@system.router"
 import { sendReloadSignal, waitForReloadOutcome } from "../../ts/reload-signal"
 import { cleanupInactiveGenerations, regenerateActiveMappings } from "../../ts/resource-activation"
-import { loadResourceOrder, readInstalledThemeIds } from "../../ts/resource-order"
-import { getResourceFileApi, invalidateResourceCatalog, loadResourcePackSnapshot, reconcileResourceOverrides, withResourceOperation } from "../../ts/resource-overrides"
+import { loadResourceOrder } from "../../ts/resource-order"
+import { getResourceCatalog, getResourceFileApi, reconcileResourceOverrides, withResourceOperation } from "../../ts/resource-overrides"
 
 export default {
   private: {
@@ -63,13 +63,9 @@ export default {
     try {
       const revision = `${this.reloadRevision}-${Math.floor(Math.random() * 1000000).toString(36)}`
       const reloadFile = getResourceFileApi(file)
-      // Reload is authoritative, including files changed outside the current page session.
-      invalidateResourceCatalog()
-      const installedThemeIds = await readInstalledThemeIds(reloadFile)
-      const [order, snapshot] = await Promise.all([
-        loadResourceOrder(installedThemeIds, reloadFile),
-        loadResourcePackSnapshot(installedThemeIds, reloadFile)
-      ])
+      // Receiver writes and deletion invalidate this app-owned snapshot.
+      const snapshot = await getResourceCatalog(reloadFile)
+      const order = await loadResourceOrder(snapshot.installedThemeIds, reloadFile)
       const overrides = await reconcileResourceOverrides(snapshot.paths, reloadFile)
       const plan = await regenerateActiveMappings(order, revision, reloadFile, overrides, snapshot)
       mappingsGenerated = true
@@ -78,7 +74,7 @@ export default {
       const outcome = await waitForReloadOutcome(revision, reloadFile)
       prompt.showToast({ message: outcome.message })
       if (outcome.successful) {
-        try { await cleanupInactiveGenerations(plan.generation, reloadFile); }
+        try { await cleanupInactiveGenerations(plan.generation, reloadFile, plan.mappings); }
         catch (_cleanupError) { /* Keep unused generations rather than risk the active one. */ }
       }
     } catch (error) {

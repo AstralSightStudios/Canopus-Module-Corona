@@ -206,26 +206,25 @@ async function testReload() {
   const order = deferred();
   const paths = deferred();
   const readsStarted = deferred();
+  const orderStarted = deferred();
   const snapshot = catalog();
   const nativeFile = {};
   const started = [];
   const home = page('index', {
     getResourceFileApi() { return nativeFile; },
-    invalidateResourceCatalog() { started.push('invalidate'); },
-    readInstalledThemeIds: async file => {
-      assert.equal(file, nativeFile);
-      return ['base'];
-    },
-    loadResourceOrder(ids, file) {
-      assert.equal(file, nativeFile);
-      started.push('order');
-      return order.promise;
-    },
-    loadResourcePackSnapshot(ids, file) {
+    invalidateResourceCatalog() { throw new Error('Reload must retain the package snapshot'); },
+    getResourceCatalog(file) {
       assert.equal(file, nativeFile);
       started.push('catalog');
       readsStarted.resolve();
       return paths.promise;
+    },
+    loadResourceOrder(ids, file) {
+      assert.equal(ids, snapshot.installedThemeIds);
+      assert.equal(file, nativeFile);
+      started.push('order');
+      orderStarted.resolve();
+      return order.promise;
     },
     async reconcileResourceOverrides(paths) {
       assert.equal(paths, snapshot.paths);
@@ -234,7 +233,7 @@ async function testReload() {
     },
     async regenerateActiveMappings(order, revision, file, overrides, input) {
       assert.equal(file, nativeFile);
-      assert.equal(input, snapshot, 'activation consumes the same fresh operation snapshot');
+      assert.equal(input, snapshot, 'activation consumes the app-owned reusable snapshot');
       started.push('generate');
       return { generation: 'test' };
     },
@@ -257,9 +256,11 @@ async function testReload() {
   for (let click = 0; click < 10; click++) await home.requestReload();
   assert.equal(home.reloadRevision, revision, 'rapid clicks cannot start another reload');
   await readsStarted.promise;
-  assert.deepEqual(started, ['invalidate', 'order', 'catalog']);
-  order.resolve(['base', '@system']);
+  assert.deepEqual(started, ['catalog']);
   paths.resolve(snapshot);
+  await orderStarted.promise;
+  assert.deepEqual(started, ['catalog', 'order']);
+  order.resolve(['base', '@system']);
   await receiptStarted.promise;
   assert.equal(opacity(home), 0.4, 'busy persists while waiting for the module receipt');
   await home.requestReload();
@@ -269,17 +270,16 @@ async function testReload() {
   assert.equal(opacity(home), 0.4, 'busy persists until generation cleanup finishes');
   cleanup.resolve();
   await pending;
-  assert.deepEqual(started, ['invalidate', 'order', 'catalog', 'reconcile', 'generate', 'signal', 'cleanup']);
+  assert.deepEqual(started, ['catalog', 'order', 'reconcile', 'generate', 'signal', 'cleanup']);
   assert.equal(home.sendingReload, false);
   assert.equal(opacity(home), 1);
 
   for (const failure of ['snapshot', 'copy', 'receipt']) {
     const events = [];
     const failed = page('index', {
-      invalidateResourceCatalog() {},
-      readInstalledThemeIds: async () => ['base'],
+      invalidateResourceCatalog() { throw new Error('Reload must not invalidate resources'); },
       loadResourceOrder: async () => ['base', '@system'],
-      async loadResourcePackSnapshot() {
+      async getResourceCatalog() {
         if (failure === 'snapshot') throw new Error('snapshot failed');
         return snapshot;
       },
@@ -300,6 +300,47 @@ async function testReload() {
     assert.equal(failed.sendingReload, false);
     assert.equal(opacity(failed), 1, 'errors restore full opacity and allow another click');
   }
+
+  const revisions = [];
+  const retained = catalog();
+  let expectedOrder = ['base', 'dark', '@system'];
+  let expectedOverrides = {};
+  let acknowledged = false;
+  let cleanups = 0;
+  const dependencies = {
+    invalidateResourceCatalog() { throw new Error('Repeated reload cannot drop the cached snapshot'); },
+    getResourceCatalog: async () => retained,
+    loadResourceOrder: async ids => {
+      assert.equal(ids, retained.installedThemeIds);
+      return expectedOrder;
+    },
+    reconcileResourceOverrides: async () => expectedOverrides,
+    async regenerateActiveMappings(order, revision, file, overrides, input) {
+      assert.equal(input, retained, 'returning home shares the same snapshot');
+      assert.equal(order, expectedOrder, 'order is reread even when the package snapshot is cached');
+      assert.equal(overrides, expectedOverrides, 'choices are reread even when the package snapshot is cached');
+      return { generation: 'retained' };
+    },
+    async sendReloadSignal(revision) { revisions.push(revision); },
+    async waitForReloadOutcome(revision) {
+      assert.equal(revision, revisions[revisions.length - 1]);
+      return { successful: acknowledged, message: 'result' };
+    },
+    async cleanupInactiveGenerations(generation) {
+      assert.equal(generation, 'retained');
+      cleanups++;
+    }
+  };
+  await page('index', dependencies).requestReload();
+  assert.equal(cleanups, 0, 'a rejected receipt cannot clean the reusable generation');
+  acknowledged = true;
+  const returningHome = page('index', dependencies);
+  await returningHome.requestReload();
+  expectedOrder = ['dark', 'base', '@system'];
+  expectedOverrides = { '/resource/a.bin': '@system' };
+  await returningHome.requestReload();
+  assert.equal(new Set(revisions).size, 3, 'each cached reload still sends a fresh request revision');
+  assert.equal(cleanups, 2);
 
   const queue = deferred();
   const queued = page('index', { withResourceOperation: () => queue.promise });

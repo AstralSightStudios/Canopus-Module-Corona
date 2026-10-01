@@ -469,6 +469,10 @@ async function testApplicationSession(api, entry, storageEntry) {
     assert.equal(file.count('read', inventoryUri), 1);
     assert.equal(listFile.calls.length + selectFile.calls.length, 0, 'page namespace identities do not fork the coordinator');
     assert.equal(receiverBundle.isResourceCatalogCurrent(snapshot), true);
+    const prepared = { key: 'unchanged-inputs', plan: { mappings: '# Cached\n', generation: null, copies: [] } };
+    snapshot.activeMappings = prepared;
+    assert.strictEqual((await selectBundle.getResourceCatalog(selectFile)).activeMappings, prepared,
+      'activation metadata shares the app-owned snapshot across page bundles');
 
     const gate = deferred();
     file.onWrite = async () => { if (file.count('write') === 1) await gate.promise; };
@@ -490,6 +494,7 @@ async function testApplicationSession(api, entry, storageEntry) {
     assert.equal(listBundle.isResourceCatalogCurrent(snapshot), false, 'receiver invalidation reaches a retained list page');
     const updated = await listBundle.getResourceCatalog(listFile);
     assert.equal(updated.paths[0].themes[0].name, 'Updated across bundles');
+    assert.equal(updated.activeMappings, undefined, 'same-ID package updates invalidate prepared mappings');
     assert.strictEqual(await selectBundle.getResourceCatalog(selectFile), updated);
 
     // Exercise the real deletion hook from yet another module namespace.
@@ -526,6 +531,7 @@ async function testApplicationSession(api, entry, storageEntry) {
     const removed = await selectBundle.getResourceCatalog(selectFile);
     assert.deepEqual(removed.installedThemeIds, []);
     assert.deepEqual(removed.paths, []);
+    assert.equal(removed.activeMappings, undefined, 'deletion cannot reuse an older activation plan');
     assert.equal(savedOverrides(file)['/resource/shared.bin'], '@default');
 
     // Teardown invalidates identity as well as revision, without restarting old I/O.

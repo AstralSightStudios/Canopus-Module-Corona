@@ -64,8 +64,8 @@ The `UV_FS_COPYFILE` worker dispatches to `0x0c3f63d0`:
 There is no recursive parent-directory creation and no atomic rename/publication
 of the destination. Manager therefore prepares each distinct destination parent
 once and copies only into a new, unpublished `.active-<revision>/` generation.
-It waits for every copy and verifies destination size before changing the active
-TSV. A failure removes the new generation; old generations are retained until a
+It waits for every native copy to succeed before changing the active TSV; Manager
+no longer stats every source and destination. A failure removes the new generation; old generations are retained until a
 matching successful module receipt.
 
 The worker's internal sendfile implementation can fall back to native buffered
@@ -97,13 +97,26 @@ No timeout that could race an ongoing native copy is introduced in this change.
   the fresh snapshot during reload preparation or while awaiting its module receipt.
   Receiver writes/deletions wait until that operation completes; the receipt polling
   interval and attempt budget are unchanged.
-- Source length/type must match the operation snapshot before copying.
-- Destination length/type is checked after the success callback.
+- Overlapping directories use exact-file mappings when the complete TSV fits the
+  256-rule / 32 KiB budgets; immutable materialization is the fallback.
+- The app-owned package snapshot retains the last successfully published plan.
+  Unchanged order and overrides reuse it without new copies or a TSV rewrite.
+  Receiver/package deletion invalidation replaces the snapshot and its plan;
+  application restart also drops this memory-only cache. Every reload still sends
+  a unique request revision and awaits its matching receipt before cleanup.
+- No per-asset source/destination stat or content hash is performed. Inventory
+  validation still rejects malformed metadata; copied empty assets are rejected.
 - Native errors are propagated, never reinterpreted as API unavailability.
-- All copies and checks finish before `mappings.tsv` is written or a reload request
-  is sent.
-- Equal length is not a content checksum. Same-size concurrent external edits and
-  power-loss consistency are outside this audit's guarantees.
+- All native copies finish before `mappings.tsv` is written or a reload request
+  is sent. Failure removes only the new unpublished generation.
+- The existing generation registry also persists `protectedThemes`: the union
+  of prior/candidate direct-package dependencies is written before the active TSV.
+  Delete/replace guards consult both the TSV and this registry, failing closed on
+  malformed metadata. Only matched successful acknowledgement narrows protection
+  to the acknowledged plan, including after a failed switch or app restart.
+- Directly mapped active packages cannot be replaced/deleted until acknowledged
+  switch-out. External file edits are unsupported; power-loss consistency is
+  outside this audit's guarantees.
 
 Official contract:
 https://iot.mi.com/vela/quickapp/zh/features/data/file.html#file-copy-object

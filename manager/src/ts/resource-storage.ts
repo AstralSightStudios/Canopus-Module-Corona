@@ -1,4 +1,5 @@
 import { THEME_DESTINATION_ROOT } from "./resource-path";
+import { readProtectedThemeIds } from "./resource-activation";
 import { removeThemeFileInventory, removeThemeFromResourceOrder } from "./resource-order";
 import { getResourceFileApi, invalidateResourceCatalog, removeThemeFromResourceOverrides, withResourceOperation } from "./resource-overrides";
 
@@ -71,7 +72,9 @@ async function removeInstalledThemeInOperation(
   }
 
   const mappings = await file.readOptionalText(MAPPINGS_URI);
-  if (mappings !== null && mappingsUseTheme(mappings, themeId))
+  const protectedThemeIds = await readProtectedThemeIds(file);
+  if ((mappings !== null && mappingsUseTheme(mappings, themeId)) ||
+      protectedThemeIds.includes(themeId))
     throw storageError("active-theme", "正在使用的资源包不能删除");
 
   invalidateResourceCatalog();

@@ -5,6 +5,7 @@ import {
   enumerateThemeFiles,
   mappingMatchesRelativeFile,
   readThemeFileInventories,
+  serializeResourceOrder,
   SYSTEM_STYLE_ID
 } from "./resource-order";
 import type { ResourceAssetFileApi, ThemeAssetFile } from "./resource-order";
@@ -59,6 +60,7 @@ interface SourceGroupEntry {
 interface StoredGenerationIndex {
   version: 1;
   generations: string[];
+  protectedThemes?: string[];
 }
 
 function utf8Length(value: string): number {
@@ -97,7 +99,32 @@ function parseGenerationIndex(text: string | null): StoredGenerationIndex {
       new Set((value as { generations: string[] }).generations).size !==
         (value as { generations: string[] }).generations.length)
     throw new Error("活动资源代次索引格式无效");
-  return value as StoredGenerationIndex;
+  const index = value as StoredGenerationIndex;
+  if (index.protectedThemes !== undefined &&
+      (!Array.isArray(index.protectedThemes) || index.protectedThemes.some(themeId =>
+        typeof themeId !== "string" || !/^[a-z0-9_-]{1,12}$/.test(themeId)) ||
+        new Set(index.protectedThemes).size !== index.protectedThemes.length))
+    throw new Error("活动资源包保护索引格式无效");
+  return index;
+}
+
+function directlyMappedThemes(mappings: string): string[] {
+  const themes = new Set<string>();
+  for (const line of mappings.split(/\r?\n/)) {
+    if (!line || line[0] === "#") continue;
+    const separator = line.indexOf("\t");
+    if (separator <= 0) continue;
+    const match = /^themes\/([a-z0-9_-]{1,12})\//.exec(line.slice(separator + 1));
+    if (match) themes.add(match[1]);
+  }
+  return Array.from(themes).sort();
+}
+
+/** Protects every possibly resident direct package until an acknowledged switch. */
+export async function readProtectedThemeIds(
+  file: Pick<ResourceAssetFileApi, "readOptionalText">,
+): Promise<string[]> {
+  return parseGenerationIndex(await file.readOptionalText(ACTIVE_GENERATIONS_URI)).protectedThemes || [];
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
@@ -144,19 +171,43 @@ function collectSourceGroups(themesHighToLow: ThemeRules[]): SourceGroupEntry[][
   return groups;
 }
 
-function needsMaterialization(entries: SourceGroupEntry[]): boolean {
+function needsFileResolution(entries: SourceGroupEntry[]): boolean {
   return entries.length > 1 && entries.some(entry => entry.mapping.source.endsWith("/"));
 }
 
 function themesNeedingInventory(themesHighToLow: ThemeRules[]): Set<string> {
   const needed = new Set<string>();
   for (const group of collectSourceGroups(themesHighToLow)) {
-    if (needsMaterialization(group)) group.forEach(entry => needed.add(entry.themeId));
+    if (needsFileResolution(group)) group.forEach(entry => needed.add(entry.themeId));
   }
   return needed;
 }
 
-/** Builds the ordered mappings, then applies per-file overrides before TSV serialization. */
+interface ResolvedFile {
+  sourcePath: string;
+  entry: SourceGroupEntry;
+  asset: ThemeAssetFile;
+}
+
+interface ResolvedGroup {
+  ruleIndex: number;
+  sourceRoot: string;
+  files: ResolvedFile[];
+}
+
+function serializeMappings(rules: ActiveMappingRule[]): string {
+  return rules.length ? rules.map(rule => `${rule.source}\t${rule.destination}\n`).join("")
+    : "# No active resource replacements.\n";
+}
+
+function validMappingRule(rule: ActiveMappingRule): boolean {
+  if (!safeAbsolutePath(rule.source)) return false;
+  if (rule.destination === SYSTEM_RESOURCE_CHOICE) return !rule.source.endsWith("/");
+  return safeThemeDestination(rule.destination) &&
+    rule.source.endsWith("/") === rule.destination.endsWith("/");
+}
+
+/** Prefer exact winning-file rules; materialize all overlapping groups only if needed. */
 export function planActiveMappings(
   themesHighToLow: ThemeRules[],
   generation: string,
@@ -165,19 +216,20 @@ export function planActiveMappings(
   if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
   const priorityThemes = themesHighToLow.filter(theme => theme.active !== false);
   const groups = collectSourceGroups(priorityThemes);
-  const rules: ActiveMappingRule[] = [];
-  const copies: ActiveFileCopy[] = [];
-  let usedGeneration = false;
+  let rules: ActiveMappingRule[] = [];
+  const fallbackRules: ActiveMappingRule[] = [];
+  const resolvedGroups: ResolvedGroup[] = [];
   for (let ruleIndex = 0; ruleIndex < groups.length; ruleIndex++) {
     const entries = groups[ruleIndex];
-    if (!needsMaterialization(entries)) {
+    if (!needsFileResolution(entries)) {
       const winner = entries[0];
-      rules.push({ source: winner.mapping.source,
-        destination: `${THEME_DESTINATION_ROOT}${winner.themeId}/${winner.mapping.destination}` });
+      const rule = { source: winner.mapping.source,
+        destination: `${THEME_DESTINATION_ROOT}${winner.themeId}/${winner.mapping.destination}` };
+      rules.push(rule);
+      fallbackRules.push(rule);
       continue;
     }
 
-    usedGeneration = true;
     const directorySources = entries.map(entry => entry.mapping.source).filter(source => source.endsWith("/"));
     const sourceRoot = directorySources.sort((left, right) => left.length - right.length)[0];
     if (!sourceRoot || entries.some(entry => !entry.mapping.source.startsWith(sourceRoot)))
@@ -187,13 +239,14 @@ export function planActiveMappings(
         throw new Error(`资源包 ${entry.themeId} 缺少文件清单，无法生成叠加资源`);
     }
 
-    const activeDestination = `${THEME_DESTINATION_ROOT}${ACTIVE_DIRECTORY_PREFIX}${generation}/r${ruleIndex}/`;
-    if (!safeThemeDestination(activeDestination)) throw new Error("生成的活动资源目录路径过长");
-    rules.push({ source: sourceRoot, destination: activeDestination });
+    fallbackRules.push({ source: sourceRoot,
+      destination: `${THEME_DESTINATION_ROOT}${ACTIVE_DIRECTORY_PREFIX}${generation}/r${ruleIndex}/` });
+    const resolvedGroup: ResolvedGroup = { ruleIndex, sourceRoot, files: [] };
+    resolvedGroups.push(resolvedGroup);
 
-    // Resolve each concrete path by normal pack order, then replace that decision
-    // with an explicit pack choice. System choices remain absent from the overlay;
-    // the hook then falls back to the original firmware resource.
+    // Resolve longest prefix within each pack before applying pack priority.
+    // Emit only concrete winners: absent files and masked broad paths must
+    // still fall through to the original firmware resource.
     const candidatesByTheme = new Map<string, Map<string, { entry: SourceGroupEntry; asset: ThemeAssetFile }>>();
     const themeIds = Array.from(new Set(entries.map(entry => entry.themeId)));
     for (const themeId of themeIds) {
@@ -238,16 +291,11 @@ export function planActiveMappings(
         }
       }
       if (!winner) return;
-      const suffix = sourcePath.slice(sourceRoot.length);
-      if (!suffix) throw new Error(`资源映射未指向具体文件：${sourcePath}`);
-      const expandedDestination = `${activeDestination}${suffix}`;
-      if (!safeThemeDestination(expandedDestination))
-        throw new Error(`活动资源路径超过模块限制：${expandedDestination}`);
-      copies.push({
-        sourceUri: `${THEME_ROOT_URI}${winner.entry.themeId}/${winner.asset.relativePath}`,
-        destinationUri: `internal://files/themes/${ACTIVE_DIRECTORY_PREFIX}${generation}/r${ruleIndex}/${suffix}`,
-        sizeBytes: winner.asset.sizeBytes
-      });
+      if (!sourcePath.slice(sourceRoot.length))
+        throw new Error(`资源映射未指向具体文件：${sourcePath}`);
+      resolvedGroup.files.push({ sourcePath, entry: winner.entry, asset: winner.asset });
+      rules.push({ source: sourcePath,
+        destination: `${THEME_DESTINATION_ROOT}${winner.entry.themeId}/${winner.asset.relativePath}` });
     });
   }
 
@@ -275,29 +323,48 @@ export function planActiveMappings(
       throw new Error(`混搭微调资源路径超过模块限制：${sourcePath}`);
     overrideRules.push({ source: sourcePath, destination });
   }
-  for (const overrideRule of overrideRules) {
-    for (let index = rules.length - 1; index >= 0; index--) {
-      if (rules[index].source === overrideRule.source) rules.splice(index, 1);
+  if (overrideRules.some(rule => !validMappingRule(rule)))
+    throw new Error("合并后的资源映射路径无效");
+  const overriddenPaths = new Set(overrideRules.map(rule => rule.source));
+  rules = rules.filter(rule => !overriddenPaths.has(rule.source)).concat(overrideRules);
+  for (const group of resolvedGroups)
+    group.files = group.files.filter(winner => !overriddenPaths.has(winner.sourcePath));
+  const directMappings = rules.length <= MAX_MAPPING_RULES ? serializeMappings(rules) : null;
+  if (directMappings !== null && utf8Length(directMappings) <= MAX_CONFIG_BYTES &&
+      rules.every(validMappingRule)) {
+    for (const group of resolvedGroups) {
+      for (const winner of group.files) {
+        if (winner.asset.sizeBytes === 0)
+          throw new Error(`不能叠加空资源文件：${THEME_ROOT_URI}${winner.entry.themeId}/${winner.asset.relativePath}`);
+      }
     }
-    rules.push(overrideRule);
+    return { mappings: directMappings, generation: null, copies: [] };
   }
 
+  // Retain the established full-overlay fallback instead of greedily choosing
+  // groups: bounded TSV size and immutable-generation cleanup stay predictable.
+  rules = fallbackRules.filter(rule => !overriddenPaths.has(rule.source)).concat(overrideRules);
   if (rules.length > MAX_MAPPING_RULES)
     throw new Error(`合并后映射超过模块上限 ${MAX_MAPPING_RULES} 条`);
-  const mappings = rules.length
-    ? rules.map(rule => `${rule.source}\t${rule.destination}\n`).join("")
-    : "# No active resource replacements.\n";
+  const mappings = serializeMappings(rules);
   if (utf8Length(mappings) > MAX_CONFIG_BYTES)
     throw new Error("生成的活动 mappings.tsv 超过 32 KiB");
-  const invalidRule = rules.some(rule => {
-    if (!safeAbsolutePath(rule.source)) return true;
-    if (rule.destination === SYSTEM_RESOURCE_CHOICE) return rule.source.endsWith("/");
-    return !safeThemeDestination(rule.destination) ||
-      rule.source.endsWith("/") !== rule.destination.endsWith("/");
-  });
-  if (invalidRule) throw new Error("合并后的资源映射路径无效");
-
-  return { mappings, generation: usedGeneration ? generation : null, copies };
+  if (rules.some(rule => !validMappingRule(rule))) throw new Error("合并后的资源映射路径无效");
+  const copies: ActiveFileCopy[] = [];
+  for (const group of resolvedGroups) {
+    for (const winner of group.files) {
+      const suffix = winner.sourcePath.slice(group.sourceRoot.length);
+      const destination = `${THEME_DESTINATION_ROOT}${ACTIVE_DIRECTORY_PREFIX}${generation}/r${group.ruleIndex}/${suffix}`;
+      if (!safeThemeDestination(destination))
+        throw new Error(`活动资源路径超过模块限制：${destination}`);
+      copies.push({
+        sourceUri: `${THEME_ROOT_URI}${winner.entry.themeId}/${winner.asset.relativePath}`,
+        destinationUri: `internal://files/${destination}`,
+        sizeBytes: winner.asset.sizeBytes
+      });
+    }
+  }
+  return { mappings, generation: resolvedGroups.length ? generation : null, copies };
 }
 
 async function ensureDirectory(uri: string, file: ResourceAssetFileApi): Promise<void> {
@@ -327,18 +394,12 @@ async function copyAsset(
     preparedDirectories.add(directory);
   }
 
-  const source = await file.readFileInfo(copy.sourceUri);
-  if (source.length !== copy.sizeBytes || (source.type !== undefined && source.type !== "file"))
-    throw new Error(`资源文件大小与快照不一致：${copy.sourceUri}`);
-  // The native worker truncates an existing destination; errors must not publish mappings.
+  // Inventory is authoritative until receiver/delete invalidation. Await native
+  // completion and propagate its errors; per-asset source/destination stats are unnecessary.
   await file.copyFile(copy.sourceUri, copy.destinationUri);
-  const destination = await file.readFileInfo(copy.destinationUri);
-  if (destination.length !== copy.sizeBytes ||
-      (destination.type !== undefined && destination.type !== "file"))
-    throw new Error(`资源文件复制大小不一致：${copy.destinationUri}`);
 }
 
-/** Materializes overlays before mappings.tsv is changed, preserving the prior active generation. */
+/** Prepares a plan before publication; unchanged snapshot inputs reuse the last published plan. */
 export async function regenerateActiveMappings(
   order: string[],
   generation: string,
@@ -350,22 +411,31 @@ export async function regenerateActiveMappings(
   if (systemIndex < 0 || order.lastIndexOf(SYSTEM_STYLE_ID) !== systemIndex)
     throw new Error("资源顺序必须包含唯一的系统样式分界");
 
+  const canonicalOrder = serializeResourceOrder(order);
+  if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
+  const cacheKey = JSON.stringify([canonicalOrder,
+    Object.keys(overrides).sort().map(sourcePath => [sourcePath, overrides[sourcePath]])]);
   const activeThemeIds = order.slice(0, systemIndex);
   const installedThemeIds = order.filter(themeId => themeId !== SYSTEM_STYLE_ID);
   const activeIds = new Set(activeThemeIds);
   const selectedIds = new Set(Object.keys(overrides).map(sourcePath => overrides[sourcePath])
     .filter(choice => choice !== DEFAULT_RESOURCE_CHOICE && choice !== SYSTEM_RESOURCE_CHOICE &&
       installedThemeIds.includes(choice)));
-  const themesHighToLow: ThemeRules[] = [];
-  const loadManifest = async (themeId: string, required: boolean): Promise<ResourcePackManifest | null> => {
-    if (snapshot) {
+  if (snapshot) {
+    // Fail closed even on a cache hit. Identity checks are cheap; inventories
+    // themselves are immutable until the shared catalog is invalidated.
+    for (const themeId of new Set([...snapshot.installedThemeIds, ...installedThemeIds])) {
       const theme = snapshot.themes.get(themeId);
       if (!snapshot.installedThemeIds.includes(themeId) || !theme ||
-          theme.themeId !== themeId || theme.manifest.themeId !== themeId ||
-          !Array.isArray(theme.files))
+          theme.themeId !== themeId || !theme.manifest || theme.manifest.themeId !== themeId ||
+          !Array.isArray(theme.manifest.mappings) || !Array.isArray(theme.files))
         throw new Error(`资源快照缺少资源包 ${themeId}，无法生成映射`);
-      return theme.manifest;
     }
+    if (snapshot.activeMappings?.key === cacheKey) return snapshot.activeMappings.plan;
+  }
+  const themesHighToLow: ThemeRules[] = [];
+  const loadManifest = async (themeId: string, required: boolean): Promise<ResourcePackManifest | null> => {
+    if (snapshot) return snapshot.themes.get(themeId)!.manifest;
     const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
     if (text === null) {
       if (required) throw new Error(`资源包 ${themeId} 的 canora.json 不存在，无法生成映射`);
@@ -392,8 +462,7 @@ export async function regenerateActiveMappings(
       themesHighToLow.push({ themeId, manifest: { ...manifest, mappings }, files: null, active: false });
   }
 
-  // File lists are needed for overlapping groups and directory overrides that
-  // must be materialized to preserve a system-resource hole.
+  // Inventories resolve overlapping groups for exact rules or the overlay fallback.
   const inventoryThemeIds = themesNeedingInventory(
     themesHighToLow.filter(theme => theme.active !== false));
   // Legacy callers also read the shared optional index at most once per operation.
@@ -423,6 +492,19 @@ export async function regenerateActiveMappings(
   try {
     const preparedDirectories = new Set<string>();
     for (const copy of plan.copies) await copyAsset(copy, file, preparedDirectories);
+    const previousMappings = await file.readOptionalText(ACTIVE_MAPPINGS_URI);
+    const protectedThemes = Array.from(new Set([
+      ...(generationIndex.protectedThemes || []),
+      ...directlyMappedThemes(previousMappings || ""),
+      ...directlyMappedThemes(plan.mappings)
+    ])).sort();
+    // Either native write can fail after truncation. Preserve dependencies on
+    // disk first, and never reuse a cache that could skip repairing the TSV.
+    if (snapshot) delete snapshot.activeMappings;
+    if (JSON.stringify(protectedThemes) !== JSON.stringify(generationIndex.protectedThemes || [])) {
+      generationIndex.protectedThemes = protectedThemes;
+      await file.writeText(ACTIVE_GENERATIONS_URI, JSON.stringify(generationIndex));
+    }
     await file.writeText(ACTIVE_MAPPINGS_URI, plan.mappings);
   } catch (error) {
     if (plan.generation) {
@@ -444,6 +526,10 @@ export async function regenerateActiveMappings(
     }
     throw error;
   }
+  // Retain only the latest published plan: acknowledged cleanup may remove any
+  // earlier overlay. Signal/receipt failure outside this function does not evict it.
+  if (snapshot) snapshot.activeMappings = { key: cacheKey,
+    plan: plan.copies.length ? { mappings: plan.mappings, generation: plan.generation, copies: [] } : plan };
   return plan;
 }
 
@@ -451,9 +537,14 @@ export async function regenerateActiveMappings(
 export async function cleanupInactiveGenerations(
   activeGeneration: string | null,
   file: ResourceAssetFileApi,
+  acknowledgedMappings?: string,
 ): Promise<void> {
   const text = await file.readOptionalText(ACTIVE_GENERATIONS_URI);
   const index = parseGenerationIndex(text);
+  const mappings = acknowledgedMappings === undefined
+    ? await file.readOptionalText(ACTIVE_MAPPINGS_URI) : acknowledgedMappings;
+  if (mappings === null && index.protectedThemes?.length)
+    throw new Error("缺少已确认的活动映射，保留资源包保护");
   const retained: string[] = [];
   for (const generation of index.generations) {
     if (generation === activeGeneration) {
@@ -466,8 +557,10 @@ export async function cleanupInactiveGenerations(
       if (!file.isFileNotFound(error)) retained.push(generation);
     }
   }
-  if (retained.length) await file.writeText(ACTIVE_GENERATIONS_URI,
-    JSON.stringify({ version: 1, generations: retained }));
-  else if (text !== null) await file.writeText(ACTIVE_GENERATIONS_URI,
-    JSON.stringify({ version: 1, generations: [] }));
+  const next: StoredGenerationIndex = { version: 1, generations: retained };
+  const protectedThemes = directlyMappedThemes(mappings || "");
+  if (protectedThemes.length) next.protectedThemes = protectedThemes;
+  const serialized = JSON.stringify(next);
+  if ((text !== null || retained.length || protectedThemes.length) && text !== serialized)
+    await file.writeText(ACTIVE_GENERATIONS_URI, serialized);
 }

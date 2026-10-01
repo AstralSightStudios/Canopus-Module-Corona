@@ -70,13 +70,21 @@ async function testPortableDestinations() {
       '/resource/icons/a.bin': 'low', '/resource/icons/b.bin': '@system'
     });
     assert.equal(overlay.mappings,
-      '/resource/icons/\tthemes/.active-portable/r0/\n' +
       '/resource/icons/a.bin\tthemes/low/icons/a.bin\n' +
       '/resource/icons/b.bin\t@system\n');
-    assert.equal(overlay.copies.length, 2);
-    assert.ok(overlay.copies.every(copy => copy.destinationUri.startsWith(
-      'internal://files/themes/.active-portable/r0/')));
+    assert.equal(overlay.copies.length, 0);
+    assert.equal(overlay.generation, null);
     assert.ok(!overlay.mappings.includes('/data/'));
+    const fallback = plan([
+      themes[0],
+      { themeId: 'low', manifest: low, files: Array.from({ length: 257 }, (_, index) =>
+        asset(`icons/icon${index}.bin`)) }
+    ], 'portable');
+    assert.equal(fallback.mappings, '/resource/icons/\tthemes/.active-portable/r0/\n');
+    assert.equal(fallback.copies.length, 258);
+    assert.ok(fallback.copies.every(copy => copy.destinationUri.startsWith(
+      'internal://files/themes/.active-portable/r0/')));
+    assert.ok(!fallback.mappings.includes('/data/'));
 
     for (const unsafe of ['../escape', './a', 'a/../b', 'a//b', '/absolute',
       'internal://files/a', 'a\\b', 'a\tb', 'a\nb', 'a\0b', 'a:b']) {
@@ -165,10 +173,13 @@ async function testPortableDestinations() {
 
     const generation = 'g'.repeat(32);
     const maxOverlaySuffix = 255 - 35 - Buffer.byteLength(`themes/.active-${generation}/r0/`);
-    const overlayThemes = suffix => themes.map(theme => ({ ...theme,
-      files: [asset(`icons/${suffix}`)] }));
-    assert.equal(plan(overlayThemes('x'.repeat(maxOverlaySuffix)), generation).copies.length, 1);
-    assert.throws(() => plan(overlayThemes('x'.repeat(maxOverlaySuffix + 1)), generation));
+    const overlayThemes = (suffix, forceFallback = false) => themes.map(theme => ({ ...theme,
+      files: [asset(`icons/${suffix}`), ...(forceFallback ? Array.from({ length: 256 }, (_, index) =>
+        asset(`icons/padding${index}.bin`)) : [])] }));
+    assert.equal(plan(overlayThemes('x'.repeat(maxOverlaySuffix + 1)), generation).copies.length, 0,
+      'direct pack paths need not satisfy the longer overlay-generation path budget');
+    assert.equal(plan(overlayThemes('x'.repeat(maxOverlaySuffix), true), generation).copies.length, 257);
+    assert.throws(() => plan(overlayThemes('x'.repeat(maxOverlaySuffix + 1), true), generation));
     assert.throws(() => plan(themes, 'portable', {
       [`/resource/icons/${'x'.repeat(maxFile)}`]: 'low'
     }));
