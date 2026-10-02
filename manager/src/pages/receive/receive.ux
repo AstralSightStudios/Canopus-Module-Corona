@@ -13,18 +13,12 @@
     <img if="{{phase == 'success'}}" class="hero-small" src="/common/images/succ.png" />
 
     <text class="phase-title">{{phaseTitle}}</text>
-    <text class="message">{{message}}</text>
+    <text if="{{phase != 'receiving'}}" class="message">{{message}}</text>
 
     <div if="{{phase == 'receiving'}}" class="transfer-info">
       <text class="progress">{{percent}}%</text>
-      <text class="filename">{{fileName}}</text>
-      <text class="detail">文件 {{fileIndex}} / {{fileCount}}</text>
-      <text class="detail">{{receivedLabel}}</text>
     </div>
-    <div if="{{phase == 'success'}}" class="transfer-info">
-      <text class="detail">主题：{{themeId}}</text>
-      <text class="detail">{{fileCount}} 个文件 · {{receivedLabel}}</text>
-    </div>
+
 
   </div>
 </template>
