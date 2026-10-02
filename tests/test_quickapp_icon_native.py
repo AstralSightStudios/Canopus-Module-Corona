@@ -62,7 +62,7 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
             lib.rh_platform_quickapp_icon_path.restype = C.c_int
             cls.libs[version] = lib
 
-    def machine(self, version, path=Ellipsis, identity=PACKAGE):
+    def machine(self, version, path=Ellipsis, identity=PACKAGE, memory_base=0x3c710000):
         self.version, self.lib = version, self.libs[version]
         self.target = TARGETS[version]
         self.prefix = self.target['root'] + PACKAGE + b'/'
@@ -70,7 +70,7 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
         if path is Ellipsis:
             path = self.path
         self.memory, self.calls, self.reads, self.invalid_reads = {}, [], [], []
-        self.next_memory = 0x3c710000
+        self.next_memory = memory_base
         self.return_record, self.mutate = 0, None
         def read(a, n):
             self.reads.append((a, n))
@@ -235,10 +235,34 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
                     self.assertEqual(self.call(), -1)
                     self.assertEqual(self.calls, [(self.target['lookup'], PACKAGE)])
 
+    def test_1043_upper_user_heap_registry_records_and_strings(self):
+        for base in (0x3d000000, 0x3d100000, 0x3dfbf000):
+            for version in TARGETS:
+                with self.subTest(version=version, base=hex(base)):
+                    self.machine(version, memory_base=base)
+                    self.node()
+                    self.assertEqual(self.call(), 1 if version == '1043' else -1)
+        # Reject structures whose required extent crosses the exclusive limit.
+        for field, pointer in (('map', 0x3dfbfffc),
+                               ('node', 0x3dfbfff0), ('app', 0x3dfbfff8)):
+            with self.subTest(field=field):
+                self.machine('1043')
+                self.node()
+                self.data(pointer, bytes(32))
+                if field == 'map':
+                    self.word(pointer, 16)
+                    self.word(self.target['registry_slot'], pointer)
+                elif field == 'node':
+                    self.word(self.bucket(), pointer)
+                else:
+                    self.return_record = pointer
+                self.assertEqual(self.call(), -1)
+
     def test_string_pointer_regions_and_exact_flash_upper_bounds(self):
         for version in TARGETS:
             for high in (TARGETS[version]['flash_high'],
-                         TARGETS[version]['flash_high'] + 0x20000000, 0x20160000, 0x3d000000):
+                         TARGETS[version]['flash_high'] + 0x20000000, 0x20160000,
+                         0x3dfc0000 if version == '1043' else 0x3d000000):
                 with self.subTest(version=version, high=hex(high)):
                     self.machine(version)
                     p = high - len(self.path) - 1
@@ -276,7 +300,8 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
                     else:
                         p = {'icon-null': 0, 'icon-invalid': 0xdead0000,
                              'icon-long': self.text(b'/' + b'x' * 255),
-                             'icon-boundary': 0x3cffffff}[fault]
+                             'icon-boundary': (0x3dfbffff if version == '1043'
+                                               else 0x3cffffff)}[fault]
                         self.word(self.app + self.target['icon_offset'], p)
                         if fault == 'icon-boundary':
                             self.data(p, b'/')

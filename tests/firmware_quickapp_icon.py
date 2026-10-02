@@ -91,7 +91,8 @@ class QuickAppIconNative(unittest.TestCase):
             if digest != target['sha256']:
                 raise RuntimeError(f'{version}: firmware fingerprint mismatch: {digest}')
 
-    def machine(self, version, path=Ellipsis, identity=PACKAGE, package=PACKAGE):
+    def machine(self, version, path=Ellipsis, identity=PACKAGE, package=PACKAGE,
+                memory_base=0x3c710000):
         self.version = version
         self.target = TARGETS[version]
         self.path = self.target['root'] + PACKAGE + '/images/icon.bin'
@@ -100,7 +101,7 @@ class QuickAppIconNative(unittest.TestCase):
         self.u = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
         self.u.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M33)
         for address, size in ((0xc000000, 0xe00000), (0x2c000000, 0xe00000),
-                              (0x20000000, 0x160000), (0x3c000000, 0x1000000),
+                              (0x20000000, 0x160000), (0x3c000000, 0x2000000),
                               (0x1c700000, 0x40000)):
             self.u.mem_map(address, size)
         for base in (0xc0c0000, 0x2c0c0000):
@@ -108,7 +109,7 @@ class QuickAppIconNative(unittest.TestCase):
         segments, self.entry = self.images[version]
         for address, data in segments:
             self.u.mem_write(address, data)
-        self.next_memory = 0x3c710000
+        self.next_memory = memory_base
         self.package = self.text(package)
         self.output = self.mem(256)
         self.executed, self.writes, self.reads, self.comparisons = set(), [], [], []
@@ -392,10 +393,31 @@ class QuickAppIconNative(unittest.TestCase):
                     self.assertEqual(changed, [True])
                     self.assertTrue(self.native_called())
 
+    def test_1043_upper_user_heap_registry_records_and_strings(self):
+        for base in (0x3d000000, 0x3d100000, 0x3dfbf000):
+            for version in TARGETS:
+                with self.subTest(version=version, base=hex(base)):
+                    self.machine(version, memory_base=base)
+                    self.assertEqual(self.call(), 1 if version == '1043' else -1)
+        for field, pointer in (('map', 0x3dfbfffc),
+                               ('node', 0x3dfbfff0), ('app', 0x3dfbfff8)):
+            with self.subTest(field=field):
+                self.machine('1043')
+                self.u.mem_write(pointer, bytes(32))
+                if field == 'map':
+                    self.word(pointer, 16)
+                    self.word(self.target['registry_slot'], pointer)
+                elif field == 'node':
+                    self.word(self.bucket(), pointer)
+                else:
+                    self.word(self.node + 12, pointer)
+                self.assertEqual(self.call(), -1)
+
     def test_pointer_regions_and_exact_flash_upper_bounds(self):
         for version in TARGETS:
             for high in (TARGETS[version]['flash_high'],
-                         TARGETS[version]['flash_high'] + 0x20000000, 0x20160000, 0x3d000000):
+                         TARGETS[version]['flash_high'] + 0x20000000, 0x20160000,
+                         0x3dfc0000 if version == '1043' else 0x3d000000):
                 with self.subTest(version=version, high=hex(high)):
                     self.machine(version)
                     p = high - len(self.path) - 1

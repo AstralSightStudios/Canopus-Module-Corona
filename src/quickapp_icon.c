@@ -47,7 +47,14 @@ static int region(uint32_t p, uint32_t n, uint32_t lo, uint32_t hi) {
 }
 static int ram(uint32_t p, uint32_t n) {
     return region(p, n, 0x20000000u, 0x20160000u) ||
-           region(p, n, 0x3c000000u, 0x3d000000u);
+           region(p, n, 0x3c000000u, 0x3d000000u)
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+           /* .043 initializes Umem at 0x3c271400 with size 0x01d4ec00
+            * (AP 0x0c19d4fc, consumed at 0x0c202f38). Registry nodes,
+            * records and strings may occupy the upper part of this heap. */
+           || region(p, n, 0x3c271400u, 0x3dfc0000u)
+#endif
+           ;
 }
 static int readable(uint32_t p) {
     return ram(p, 1) || region(p, 1, 0x0c0c0000u, QA_FLASH_END) ||

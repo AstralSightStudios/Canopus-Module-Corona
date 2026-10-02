@@ -100,6 +100,30 @@ the existing POSIX Hook, exact cache retirement and same-pointer native image
 refresh. No special launcher, generator or speculative ROM call is added.
 Preserve icon dimensions; the generic refresh does not recompute launcher scale.
 
+## User-heap pointer bounds
+
+The `.043` user heap extends beyond the Band 11 PSRAM guard:
+`0x0c19d4fc` returns base `0x3c271400` and size `0x01d4ec00`;
+startup calls it at `0x0c202f30` and passes the returned pair to the Umem
+initializer at `0x0c202f38`. The exclusive end is `0x3dfc0000`.
+Registry nodes, copied keys, app records and icon strings use this user heap.
+The QuickApp adapter therefore accepts the additional `.043` heap extent,
+while still checking complete structure extents and every string byte.
+This is a region check, not proof of allocation liveness.
+
+Band 11 `.139` and `.155` were checked separately: at `0x0c35804a` /
+`0x0c358050`, startup loads base/end literals from `0x0c358250` /
+`0x0c358254`, subtracts them, and calls `mm_initialize` at `0x0c35805a`.
+Both binaries contain `[0x3c356b40, 0x3cfefe00)`, stored in the Umem slot
+`0x200b2590`. Their heap fits the existing exclusive `0x3d000000` guard;
+no Band 11 region expansion is justified by this evidence.
+
+Host and ARM/AP regression tests place the registry, nodes, records and strings
+above `0x3d000000`: `.043` succeeds, both Band 11 adapters reject them.
+Tests also reject truncated structures and strings at the `.043` exclusive
+heap end. These reproduce a guard defect, not the reporting device's actual
+pointer values; physical-device confirmation remains outstanding.
+
 ## Complete evidence-window fingerprints
 
 These are bounded AP evidence windows, **not new callable permissions/ranges**.
