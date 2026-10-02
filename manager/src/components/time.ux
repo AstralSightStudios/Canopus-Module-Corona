@@ -1,14 +1,15 @@
 <template>
   <div class="time-banner" onclick="handleActivate">
     <div class="time-content">
-      <text class="time" style="left:60.9px;top:3.8px;transform: rotate(-21deg)">{{time[0]}}</text>
-      <text class="time" style="left:79px;top:-1px;transform: rotate(-9deg)">{{time[1]}}</text>
-      <text class="time" style="left:93.5px;top:-5px">:</text>
-      <text class="time" style="left:108px;top:-1px;transform: rotate(9deg)">{{time[2]}}</text>
-      <text class="time" style="left:126.1px;top:3.8px;transform: rotate(21deg)">{{time[3]}}</text>
+      <text if="{{flat}}" class="flat-time">{{clock}}</text>
+      <text if="{{!flat}}" class="time" style="left:60.9px;top:3.8px;transform: rotate(-21deg)">{{time[0]}}</text>
+      <text if="{{!flat}}" class="time" style="left:79px;top:-1px;transform: rotate(-9deg)">{{time[1]}}</text>
+      <text if="{{!flat}}" class="time" style="left:93.5px;top:-5px">:</text>
+      <text if="{{!flat}}" class="time" style="left:108px;top:-1px;transform: rotate(9deg)">{{time[2]}}</text>
+      <text if="{{!flat}}" class="time" style="left:126.1px;top:3.8px;transform: rotate(21deg)">{{time[3]}}</text>
       <text class="pagetitle">{{title}}</text>
     </div>
-    <div class="wide-bar">
+    <div class="wide-bar {{flat ? 'wide-bar-flat' : ''}}">
       <text class="wide-bar__text">{{title}}</text>
       <text class="wide-bar__time">{{clock}}</text>
     </div>
@@ -43,6 +44,19 @@
   letter-spacing: normal;
   color: rgba(255, 255, 255, 0.6);
   transform-origin: 12.5px 16.5px;
+}
+
+.flat-time {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 212px;
+  height: 30px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 30px;
+  text-align: center;
+  color: #ffffff;
 }
 
 .pagetitle {
@@ -88,6 +102,11 @@
     padding-left: 14px;
   }
 
+  .wide-bar-flat {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
   .wide-bar__text {
     height: 32px;
     font-size: 32px;
@@ -107,7 +126,7 @@
 
 <script>
 export default {
-  props: ["title", "clickable"],
+  props: ["title", "clickable", "flat"],
 
   private: {
     time: "0000",

@@ -164,11 +164,13 @@ RESOURCE_HOOK_FIRMWARE=build/firmware-analysis/vela_ap_4.100.139.bin \
 旧 page/restart 固件测试保留为生命周期反例，不代表激活路径仍会重建页面或重启
 miwear。
 
-当前 Manager 提供按 [Interconnect 协议](interconnect_proto.md)接收 CRPack v1 资源包的页面；`corona.json` 描述元数据和映射（旧输入与已安装主题兼容 `canora.json`，两者共存时拒绝）；新导出统一使用 `corona.json`，接收时派生每包 `mappings.tsv` 并记录资源文件清单。资源管理页按顶部优先排序，包含可拖动的“系统样式”分界；分界上方参与覆盖，下方不生效。每次放下后，完整顺序保存到 `resource-order.json`；新接收包插入顶部。混搭微调页按实际源文件路径展示所有已安装包的注册项，可逐文件选择默认、系统原资源或指定包，保存在 `resource-overrides.json`；删除所选包时该项回退默认。排序和选择本身不修改模块活动配置，首页重载时先按资源顺序生成常规结果，再应用逐文件选择，最后生成 `mappings.tsv` 并发送 `reload.request`。跨包重叠源路径按包顺序静态合并，低优先级资源填补高层缺项；同一包内重叠源规则仍由模块最长前缀决定。生成失败不发送信号。Manager 不展示模块 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，但未覆盖 GPU 故障恢复或框架重启。
+当前 Manager 提供按 [Interconnect 协议](interconnect_proto.md)接收 CRPack v1 资源包的页面；`corona.json` 描述元数据和映射（旧输入与已安装主题兼容 `canora.json`，两者共存时拒绝）；新导出统一使用 `corona.json`，接收时派生每包 `mappings.tsv` 并记录资源文件清单。资源管理页按顶部优先排序，包含可拖动的“系统样式”分界；分界上方参与覆盖，下方不生效。每次放下后，完整顺序保存到 `resource-order.json`；新接收包插入顶部。混搭微调页按实际源文件路径展示所有已安装包的注册项，可逐文件选择默认、系统原资源或指定包，保存在 `resource-overrides.json`；删除所选包时该项回退默认。排序和选择本身不修改模块活动配置，首页重载时先按资源顺序生成常规结果，再应用逐文件选择，最后生成 `mappings.tsv` 并通过 `control.request` 发送 reload v2 请求。跨包重叠源路径按包顺序静态合并，低优先级资源填补高层缺项；同一包内重叠源规则仍由模块最长前缀决定。生成失败不发送信号。Manager 首页状态卡片显示模块实际生效规则数及配置状态，不展示开发者 RHQ1 计数器；设置图标与实验字体测试 UI 已移除。固件侧字体替换/重载已有[用户报告的实机通过](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)，但未覆盖 GPU 故障恢复或框架重启。
+**兼容性：Manager 与支持 reload v2 的模块需配套更新。** 旧 `reload.request` / `reload.result` 文件不再读取。Manager 在同一应用会话首次进入首页时发送一次状态查询，返回首页复用结果；重载从 RHRS2 回执更新状态和生效规则数，不增加周期或重载后状态查询。传输和解析失败不等于配置错误；“未检测到模块”仅指没有收到有效的对应响应，不证明模块已卸载。协议见 [MODULE_CONTROL.md](MODULE_CONTROL.md)。
+
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
-配置文件或父目录不存在（ENOENT），以及配置为空/仅含注释时，激活成功并安装零规则 pass-through hook 与轮询器：资源仍使用原始 driver，不重定向、不刷新 UI；之后写入有效映射并更新 reload 信号即可加载主题。超长、非法内容、权限或 I/O 错误、配置内存分配失败同样降级为零规则启动，错误只记录在启动日志中，不改写配置，不因配置问题阻断 Canopus 启动其他模块。可在 Manager 修复配置并重载；driver/slot 安全校验与定时器创建失败仍会返回激活错误。运行后热更新也允许 0 条规则以清除映射。替代文件不存在/无法打开时退回原资源。
+配置文件或父目录不存在（ENOENT），以及配置为空/仅含注释时，激活成功并安装零规则 pass-through hook 与轮询器：资源仍使用原始 driver，不重定向、不刷新 UI；之后写入有效映射并更新 reload 信号即可加载主题。超长、非法内容、权限或 I/O 错误、配置内存分配失败同样降级为零规则启动，真实配置错误记录在启动日志和内存状态中，不改写配置，不因配置问题阻断 Canopus 启动其他模块。可由兼容控制客户端修复配置并重载；driver/slot 安全校验与定时器创建失败仍会返回激活错误。运行后热更新也允许 0 条规则以清除映射。替代文件不存在/无法打开时退回原资源。
 成功打开但格式错误的资源**不会**自动退回；打开成功不等于解码成功。
 
 ## 先在电脑上检查配置
@@ -221,9 +223,9 @@ printf '/resource/icons/\tthemes/my-theme/icons/\n' > mappings.tsv
   位置的符号链接。配置、主题文件及其父目录只应允许可信主体修改。
 
 首次激活读取 `/data/quickapp/files/ng.lst.corona/mappings.tsv`；缺配置、空配置、仅注释配置或配置读取/校验/分配失败会以零规则安装透明 hook，并启动轮询，资源仍透传到原始 driver。若安装 hook 前曾成功 prepare，后续失败的 prepare 保留这份有效快照。有效规则配置同样安装 hook；激活后每秒由 UI-owner timer 检查
-`/data/quickapp/files/ng.lst.corona/reload.request`。Manager 使用 `internal://files/`；Vela 按
-当前 app ID 和设备固件将其映射到对应 native 文件根（11：`/data/quickapp/files/ng.lst.corona/`；10 Pro：`/data/files/ng.lst.corona/`）。只有信号内容变化时才读取同目录
-`mappings.tsv`；接受的格式为 `resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`。
+`/data/quickapp/files/ng.lst.corona/control.request`。兼容快应用控制客户端使用 `internal://files/`；Vela 按
+当前 app ID 和设备固件将其映射到对应 native 文件根（11：`/data/quickapp/files/ng.lst.corona/`；10 Pro：`/data/files/ng.lst.corona/`）。只有新的重载信号才读取同目录
+`mappings.tsv`；重载格式仍为 `resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`。`resource-hook-status-v1` 请求只读取内存，不读取/校验配置、不刷新资源；回复共用预创建的 `control.response`，完整协议见 [MODULE_CONTROL.md](MODULE_CONTROL.md)。
 新配置必须完整读取并通过校验；运行时允许 0 条规则以清除全部映射。零规则配置会保持透明 hook 和轮询器常驻。读取失败或非法配置会保留 last-known-good，并在后续轮询重试。更新原子发布紧凑索引快照，并在定向刷新中同时
 考虑旧、新规则，因此删除映射也会刷新回原始资源。快照按实际 TSV 字节数和有效规则数
 分配；刷新按需保留旧快照引用，引用释放后回收，不为第二份最大容量规则表永久预留额外
@@ -236,7 +238,9 @@ stop/deactivate 仍需完整重启卸载，不支持热卸载。
 
 ## 状态与错误
 
-query 返回 40 字节，小端序的十个 uint32：
+文件通道状态返回 RHST1：正常为 `running`，真实配置错误为 `config_error`；缺失/空/仅注释的启动配置健康。配置错误保持到成功的显式配置发布，后台快应用解析错误独立恢复。刷新待完成时仍可查询，超时只能表示无响应，不能证明模块已停止。详见 [MODULE_CONTROL.md](MODULE_CONTROL.md)。
+
+原有描述符 query 的 RHQ1 v5/v6 ABI 不变；默认构建返回 40 字节，小端序的十个 uint32：
 
 | 偏移 | 字段 |
 |---|---|
@@ -260,9 +264,9 @@ query 需要至少 40 字节可写剩余空间，成功后发布 writer。状态
 | 返回值 | 含义 |
 |---|---|
 | -2004 | 已安装，不能重新 prepare |
-| -2005 | 仅 `config.fallback` 日志：配置文件打开失败（不含 ENOENT）；不作为启动返回值 |
-| -2006 | 仅 `config.fallback` 日志：配置读取/快照展开内存不可用；不作为启动返回值 |
-| -2007 | 仅 `config.fallback` 日志：配置读取/解析/校验失败；不作为启动返回值 |
+| -2005 | `config.fallback` 日志及 RHST1 configError：配置文件打开失败（不含 ENOENT）；不作为启动返回值 |
+| -2006 | `config.fallback` 日志及 RHST1 configError：配置读取/快照展开内存不可用；不作为启动返回值 |
+| -2007 | `config.fallback` 日志及 RHST1 configError：配置读取/解析/校验失败；不作为启动返回值 |
 | -2008 | driver 标识/布局不符；即使零规则也必须通过此安全检查 |
 | -2009 | 原始 callback slot 未知，不覆盖 |
 | -2010 | 重绑定状态不一致 |

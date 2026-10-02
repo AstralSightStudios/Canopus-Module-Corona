@@ -16,12 +16,13 @@ static struct temp_allocation temp_allocations[4096];
 static uint32_t live_bytes, peak_bytes;
 static unsigned alloc_attempts, fail_alloc_at;
 static int reenter_read, nested_reload, activate_during_read;
+static int reenter_signal_read, reenter_result_open, reenter_result_write;
 static void fire_timers(uint32_t);
 extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
 static int watcher_scheduled;
 static char result_record[256];
 static unsigned result_position, result_writes;
-static int fail_result_write;
+static int fail_result_write, fail_result_open, fail_result_after;
 static char startup_record[2049];
 static unsigned startup_position, startup_writes, startup_opens;
 static int fail_startup_open, fail_startup_write, clobber_startup_errno;
@@ -146,11 +147,19 @@ int rh_platform_open(const char *path, int mode) {
         if (fault && !strcmp(fault, "fd-zero")) registration_fd = 0;
         return registration_fd;
     }
-    if (!strcmp(path, RH_RELOAD_RESULT_PATH)) {
-        assert(mode == 2); result_position=0; return 14;
+    if (!strcmp(path, RH_CONTROL_RESPONSE_PATH)) {
+        assert(mode == 2);
+        if (fail_result_open) return -1;
+        if (reenter_result_open) {
+            unsigned signals = signal_opens, draws = redraws;
+            reenter_result_open = 0;
+            fire_timers(50u); fire_timers(1000u);
+            assert(signal_opens == signals && redraws == draws);
+        }
+        result_position=0; return 14;
     }
     assert(mode == 1);
-    if (!strcmp(path, RH_RELOAD_SIGNAL_PATH)) {
+    if (!strcmp(path, RH_CONTROL_REQUEST_PATH)) {
         signal_opens++;
         signal_position = 0;
         if (!control_signal) { open_errno = RH_ENOENT; return -1; }
@@ -178,6 +187,12 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     unsigned remaining;
     assert(!locked);
     if (fail_read) return -1;
+    if (fd == 12 && reenter_signal_read) {
+        unsigned signals = signal_opens;
+        reenter_signal_read = 0;
+        fire_timers(1000u);
+        assert(signal_opens == signals);
+    }
     if (fd == 13 && reenter_read) {
         unsigned opened = control_opens;
         reenter_read = 0;
@@ -214,7 +229,13 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
     }
     if(fd==14) {
         assert(!locked);
-        if(fail_result_write) return -1;
+        if (reenter_result_write) {
+            unsigned signals = signal_opens, writes = result_writes, draws = redraws;
+            reenter_result_write = 0;
+            fire_timers(50u); fire_timers(1000u);
+            assert(signal_opens == signals && result_writes == writes && redraws == draws);
+        }
+        if(fail_result_write || (fail_result_after && result_position >= 7u)) return -1;
         if(size>7) size=7; /* Exercise short-write completion. */
         assert(result_position+size<=sizeof(result_record));
         memcpy(result_record+result_position,data,size);
@@ -387,6 +408,393 @@ int rh_platform_request_full_redraw(void) {
 
 static uint32_t u32(const unsigned char *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+static void assert_result(const char *signal, const char *row) {
+    uint32_t hash = 2166136261u;
+    unsigned i, n = (unsigned)(strlen(signal) + strlen(row));
+    char *end;
+    assert(n + 12u <= sizeof(result_record));
+    assert(result_position == sizeof(result_record));
+    assert(!memcmp(result_record, signal, strlen(signal)));
+    assert(!memcmp(result_record + strlen(signal), row, strlen(row)));
+    for (i = 0; i < n; i++) hash = (hash ^ (unsigned char)result_record[i]) * 16777619u;
+    assert(strtoul(result_record + n, &end, 10) == hash && *end++ == '\n');
+    for (; end < result_record + sizeof(result_record); end++) assert(!*end);
+}
+static void assert_status(int error, unsigned count, unsigned pending) {
+    char row[80];
+    snprintf(row, sizeof(row), "RHST1\t1\t%s\t%d\t%u\t%u\n",
+             error ? "config_error" : "running", error, count, pending);
+    assert_result(control_signal, row);
+}
+static void query_status(const char *signal, int error, unsigned count, unsigned pending) {
+    unsigned opens = control_opens, allocs = allocations, lookups = quickapp_lookups;
+    control_signal = signal;
+    fire_timers(1000u);
+    assert_status(error, count, pending);
+    assert(control_opens == opens && allocations == allocs && quickapp_lookups == lookups);
+}
+static int test_control_status(const char *startup) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned writes, opens, allocs, timers, draws;
+    char bad[160], longest[160], saved[256];
+    const char *invalid[] = {
+        "resource-hook-status-v2\tng.lst.corona\tq\n",
+        "resource-hook-status-v1\tother.package\tq\n",
+        "resource-hook-status-v1\tq\n",
+        "resource-hook-status-v1\tng.lst.corona\t\n",
+        "resource-hook-status-v1\tng.lst.corona\tq/unsafe\n",
+        "resource-hook-status-v1\tng.lst.corona\tq\textra\n",
+        "resource-hook-status-v1\tng.lst.corona\tq",
+        "resource-hook-status-v1\tng.lst.corona\tq\nextra\n"
+    };
+    unsigned i, count = !strcmp(startup, "valid");
+    if (!strcmp(startup, "missing")) { fail_open = 1; open_errno = RH_ENOENT; }
+    else if (!strcmp(startup, "empty")) input = "";
+    else if (!strcmp(startup, "comments")) input = "# no active themes\n";
+    else assert(count);
+    assert(!active_timers(1000u) && !result_writes);
+    assert(d->activate(NULL) == 0);
+    fail_open = 0;
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    font_rc = -2090; /* A font-refresh rejection is not a config error. */
+#endif
+    fire_timers(50u);
+    timers = timers_created; draws = redraws;
+    query_status("resource-hook-status-v1\tng.lst.corona\tfirst._-0\n", 0, count, 0);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    font_rc = 0;
+#endif
+    assert(timers_created == timers && redraws == draws && active_timers(1000u) == 1);
+    writes = result_writes;
+    fire_timers(1000u);
+    assert(result_writes == writes); /* Unchanged observations do not wear flash. */
+    memcpy(saved, result_record, sizeof(saved));
+    opens = control_opens; allocs = allocations;
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        control_signal = invalid[i];
+        fire_timers(1000u);
+        assert(result_writes == writes && !memcmp(saved, result_record, sizeof(saved)));
+    }
+    strcpy(longest, "resource-hook-status-v1\tng.lst.corona\t");
+    i = (unsigned)strlen(longest);
+    memset(longest + i, 'x', 64u); strcpy(longest + i + 64u, "\n");
+    query_status(longest, 0, count, 0);
+    strcpy(bad, longest); bad[i + 64u] = 'x'; strcpy(bad + i + 65u, "\n");
+    control_signal = bad; writes = result_writes;
+    fire_timers(1000u);
+    assert(result_writes == writes && control_opens == opens && allocations == allocs);
+    /* Failed open, failed write and partial write retry without reloading. */
+    for (i = 0; i < 3u; i++) {
+        snprintf(bad, sizeof(bad), "resource-hook-status-v1\tng.lst.corona\tretry-%u\n", i);
+        control_signal = bad;
+        fail_result_open = i == 0; fail_result_write = i == 1; fail_result_after = i == 2;
+        fire_timers(1000u);
+        fail_result_open = fail_result_write = fail_result_after = 0;
+        fire_timers(1000u);
+        assert_status(0, count, 0);
+        assert(control_opens == opens && allocations == allocs);
+    }
+    /* Reload failures preserve the map and remain visible to later queries. */
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tmissing-runtime\n";
+    control_config = NULL;
+    fire_timers(1000u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tmissing-config\n", -2102, count, 0);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tinvalid-runtime\n";
+    control_config = "/resource/\t/outside/\n";
+    fire_timers(1000u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tinvalid-config\n", -2103, count, 0);
+    fail_alloc = 1;
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\toom-runtime\n";
+    control_config = config;
+    fire_timers(1000u); fail_alloc = 0;
+    query_status("resource-hook-status-v1\tng.lst.corona\toom-config\n", -2101, count, 0);
+    /* A published good config clears errors before its UI refresh completes. */
+    redraw_ready = 0;
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\trepair\n";
+    control_config = "/resource/\tthemes/repaired/\n";
+    fire_timers(1000u);
+    assert(active_timers(50u) == 1);
+    /* Even with a ready UI, a fresh query must not execute refresh work. */
+    redraw_ready = 1;
+    reenter_signal_read = reenter_result_open = reenter_result_write = 1;
+    draws = redraws;
+    query_status("resource-hook-status-v1\tng.lst.corona\tpending\n", 0, 1, 1);
+    assert(!reenter_signal_read && !reenter_result_open && !reenter_result_write);
+    assert(redraws == draws && active_timers(50u) == 1);
+    redraw_ready = 0;
+    /* Also guard a response flush initiated outside the watch reservation. */
+    control_signal = "resource-hook-status-v1\tng.lst.corona\tpending-retry\n";
+    fail_result_write = 1; fire_timers(1000u); fail_result_write = 0;
+    reenter_result_open = reenter_result_write = 1;
+    fire_timers(50u);
+    assert(!reenter_result_open && !reenter_result_write);
+    assert_status(0, 1, 1);
+    memcpy(saved, result_record, sizeof(saved));
+    fire_timers(50u);
+    assert(!memcmp(saved, result_record, sizeof(saved)));
+    redraw_ready = 1;
+    fire_timers(50u);
+    assert_status(0, 1, 0); /* Late reload completion cannot overwrite RHST1. */
+    backend_expected = (RH_THEME_ROOT "repaired/icon.bin") + 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\trepair\n";
+    allocs = allocations; draws = redraws;
+    fire_timers(1000u);
+    assert(!memcmp(result_record, control_signal, strlen(control_signal)));
+    memcpy(saved, result_record, sizeof(saved));
+    query_status("resource-hook-status-v1\tng.lst.corona\tbetween-retries\n", 0, 1, 0);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\trepair\n";
+    fire_timers(1000u);
+    assert(!memcmp(saved, result_record, sizeof(saved)));
+    assert(allocations == allocs && redraws == draws); /* Receipt retry, no reload. */
+    /* A newer reload also owns the slot while the old refresh is pending. */
+    redraw_ready = 0;
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\told-pending\n";
+    control_config = "/resource/\tthemes/old/\n";
+    fire_timers(1000u); memcpy(saved, result_record, sizeof(saved));
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tnew-pending\n";
+    control_config = "";
+    fire_timers(1000u);
+    assert(!memcmp(saved, result_record, sizeof(saved)));
+    redraw_ready = 1; fire_timers(50u);
+    assert(!memcmp(saved, result_record, sizeof(saved)));
+    fire_timers(1000u); fire_timers(50u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tcleared\n", 0, 0, 0);
+    assert(!persistent_allocs && allocations == frees && !locked);
+    assert(active_timers(1000u) == 1 && !active_timers(50u));
+    printf("control status (%s), validation, retry, LKG and shared-slot ownership passed\n", startup);
+    return 0;
+}
+static void assert_reload_status(int result, unsigned pending, unsigned changed,
+                                 int error, unsigned count) {
+    char row[96];
+    snprintf(row, sizeof(row), "RHRS2\t1\t%d\t%u\t%u\t%s\t%d\t%u\n",
+             result, pending, changed, error ? "config_error" : "running", error, count);
+    assert_result(control_signal, row);
+}
+static int test_control_reload_status(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned writes, opens, allocs, draws, i;
+    char longest[160], bad[160], saved[256];
+    const char *invalid[] = {
+        "resource-hook-reload-v3\tng.lst.corona\tid\n",
+        "resource-hook-reload-v2\tid\n",
+        "resource-hook-reload-v2\tother.package\tid\n",
+        "resource-hook-reload-v2\tng.lst.corona\t\n",
+        "resource-hook-reload-v2\tng.lst.corona\tid/unsafe\n",
+        "resource-hook-reload-v2\tng.lst.corona\tid\textra\n",
+        "resource-hook-reload-v2\tng.lst.corona\tid\r\n",
+        "resource-hook-reload-v2\tng.lst.corona\tid",
+        "resource-hook-reload-v2\tng.lst.corona\tid\nextra\n",
+        "resource-hook-reload-v2\tng.lst.corona\t\200\n"
+    };
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    const int pending_result = 1;
+#else
+    const int pending_result = 0;
+#endif
+    assert(d->activate(NULL) == 0);
+    fire_timers(50u);
+    control_config = config;
+    opens = control_opens; allocs = allocations; writes = result_writes;
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        control_signal = invalid[i]; fire_timers(1000u);
+        assert(control_opens == opens && allocations == allocs && result_writes == writes);
+    }
+    strcpy(longest, "resource-hook-reload-v2\tng.lst.corona\t");
+    i = (unsigned)strlen(longest);
+    memset(longest + i, 'x', 64u); strcpy(longest + i + 64u, "\n");
+    control_signal = longest; fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    opens = control_opens; allocs = allocations; writes = result_writes;
+    fire_timers(1000u);
+    assert(control_opens == opens && allocations == allocs && result_writes == writes);
+    strcpy(bad, longest); bad[i + 64u] = 'x'; strcpy(bad + i + 65u, "\n");
+    control_signal = bad; fire_timers(1000u);
+    assert(control_opens == opens && allocations == allocs && result_writes == writes);
+    /* The legacy maximum is still 128 bytes; framing always stays in bounds. */
+    strcpy(longest, "resource-hook-reload-v1\t"); i = (unsigned)strlen(longest);
+    memset(longest + i, 'y', 127u - i); strcpy(longest + 127u, "\n");
+    control_signal = longest; fire_timers(1000u);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    assert_result(longest, "RHRS1\t6\t0\t0\t0\n");
+#else
+    assert_result(longest, "RHRS1\t5\t0\t0\t0\n");
+#endif
+    writes = result_writes; longest[127] = 'y'; strcpy(longest + 128u, "\n");
+    fire_timers(1000u); assert(result_writes == writes);
+
+    /* Snapshot counts the newly published map, even before refresh finishes. */
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tpending\n";
+    control_config = "/resource/a.bin\tthemes/new/a.bin\n"
+                     "/resource/b.bin\tthemes/new/b.bin\n";
+    redraw_ready = 0;
+    reenter_signal_read = reenter_read = reenter_result_open = reenter_result_write = 1;
+    fire_timers(1000u);
+    assert(!reenter_signal_read && !reenter_read && !reenter_result_open && !reenter_result_write);
+    assert_reload_status(pending_result, 1, 0, 0, 2);
+    opens = control_opens; writes = result_writes;
+    fire_timers(1000u);
+    assert(control_opens == opens && result_writes == writes);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    font_rc = -2090;
+#endif
+    redraw_ready = 1; fire_timers(50u);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    assert_reload_status(-2090, 0, 0, 0, 2); /* Font failure is still running. */
+    font_rc = 0;
+#else
+    assert_reload_status(0, 0, 0, 0, 2);
+#endif
+    /* Failed config keeps the active count; no status round trip is needed. */
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbad-config\n";
+    control_config = "/resource/\t/outside/\n";
+    fire_timers(1000u); assert_reload_status(-2103, 0, 0, -2103, 2);
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tmissing-config\n";
+    control_config = NULL;
+    fire_timers(1000u); assert_reload_status(-2102, 0, 0, -2102, 2);
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\toom-config\n";
+    control_config = config; fail_alloc = 1;
+    fire_timers(1000u); fail_alloc = 0;
+    assert_reload_status(-2101, 0, 0, -2101, 2);
+
+    /* Shared slot ownership in both directions; neither version cancels work. */
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tv2-old\n";
+    control_config = config; redraw_ready = 0; fire_timers(1000u);
+    assert_reload_status(pending_result, 1, 0, 0, 1);
+    memcpy(saved, result_record, sizeof(saved));
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tv1-new\n";
+    control_config = ""; fire_timers(1000u);
+    redraw_ready = 1; fire_timers(50u);
+    assert(!memcmp(saved, result_record, sizeof(saved)));
+    fire_timers(1000u); fire_timers(50u);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    assert_result(control_signal, "RHRS1\t6\t0\t0\t0\n");
+#else
+    assert_result(control_signal, "RHRS1\t5\t0\t0\t0\n");
+#endif
+    opens = control_opens; allocs = allocations; draws = redraws; writes = result_writes;
+    fire_timers(1000u);
+    assert(control_opens == opens && allocations == allocs && redraws == draws && result_writes == writes);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tv1-old\n";
+    control_config = config; redraw_ready = 0; fire_timers(1000u);
+    memcpy(saved, result_record, sizeof(saved));
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tv2-new\n";
+    control_config = ""; fire_timers(1000u);
+    redraw_ready = 1; fire_timers(50u);
+    assert(!memcmp(saved, result_record, sizeof(saved)));
+    fire_timers(1000u); fire_timers(50u);
+    assert_reload_status(0, 0, 0, 0, 0);
+    opens = control_opens; allocs = allocations; draws = redraws;
+    query_status("resource-hook-status-v1\tng.lst.corona\tbetween-v2\n", 0, 0, 0);
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tv2-new\n";
+    fire_timers(1000u); assert_reload_status(0, 0, 0, 0, 0);
+    assert(control_opens == opens && allocations == allocs && redraws == draws);
+    /* Write/open/partial retries use cached responses, not another reload. */
+    for (i = 0; i < 3u; i++) {
+        snprintf(bad, sizeof(bad), "resource-hook-reload-v2\tng.lst.corona\tretry-%u\n", i);
+        control_signal = bad;
+        fail_result_open = i == 0; fail_result_write = i == 1; fail_result_after = i == 2;
+        fire_timers(1000u); opens = control_opens; allocs = allocations;
+        fail_result_open = fail_result_write = fail_result_after = 0;
+        reenter_result_open = reenter_result_write = 1;
+        fire_timers(1000u); assert_reload_status(0, 0, 0, 0, 0);
+        assert(control_opens == opens && allocations == allocs);
+    }
+    /* Identical IDs across versions are distinct revisions; each version
+     * deduplicates its own exact completed request. */
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tsame-id\n";
+    fire_timers(1000u); opens = control_opens;
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tsame-id\n";
+    fire_timers(1000u); assert_reload_status(0, 0, 0, 0, 0);
+    assert(control_opens == opens + 1u);
+    opens = control_opens; writes = result_writes;
+    fire_timers(1000u);
+    assert(control_opens == opens && result_writes == writes);
+    /* Status takes ownership while v2 work is pending, including completion. */
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tstatus-owner\n";
+    control_config = config; redraw_ready = 0; fire_timers(1000u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tnew-owner\n", 0, 1, 1);
+    redraw_ready = 1; fire_timers(50u); assert_status(0, 1, 0);
+
+    /* Autonomous QuickApp failures use memory status, with sticky config priority. */
+    quickapp_mode = 1; quickapp_result = 1;
+    control_config = "/resource/\tthemes/current/\n"
+                     QUICKAPP_KEY "\tthemes/current/icon.bin\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tquickapp\n";
+    fire_timers(1000u); fire_timers(50u); assert_reload_status(0, 0, 0, 0, 2);
+    quickapp_result = -1; fire_timers(1000u);
+    assert_reload_status(-2104, 0, 0, -2104, 2);
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tsticky\n";
+    control_config = "/resource/\t/outside/\n";
+    fire_timers(1000u); assert_reload_status(-2103, 0, 0, -2103, 2);
+    /* Return ownership to the last completed reload: autonomous error differs
+     * from config error, which remains latched and takes priority. */
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tquickapp\n";
+    fire_timers(1000u); assert_reload_status(-2104, 0, 0, -2103, 2);
+    quickapp_result = 1; fire_timers(1000u);
+    assert_reload_status(0, 0, 0, -2103, 2);
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tclear\n";
+    control_config = ""; fire_timers(1000u); fire_timers(50u);
+    assert_reload_status(0, 0, 0, 0, 0);
+#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
+    /* Exercise maximum-width numeric serialization with the longest v2 ID. */
+    strcpy(longest, "resource-hook-reload-v2\tng.lst.corona\t");
+    i = (unsigned)strlen(longest);
+    memset(longest + i, 'z', 64u); strcpy(longest + i + 64u, "\n");
+    control_signal = longest; control_config = config; redraw_ready = 0;
+    font_changes = UINT32_MAX;
+    fire_timers(1000u); assert_reload_status(1, 1, 0, 0, 1);
+    redraw_ready = 1; fire_timers(50u);
+    assert_reload_status(0, 0, UINT32_MAX, 0, 1);
+    longest[i] = 'w'; control_config = ""; font_rc = INT32_MIN;
+    fire_timers(1000u); fire_timers(50u);
+    assert_reload_status(INT32_MIN, 0, 0, 0, 0);
+#endif
+    assert(!persistent_allocs && allocations == frees && !locked);
+    assert(active_timers(1000u) == 1 && !active_timers(50u));
+    puts("control reload v2 snapshots, validation, v1 compatibility, retries and ownership passed");
+    return 0;
+}
+static int test_control_quickapp_status(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    quickapp_mode = 1; quickapp_result = 1;
+    input = "/resource/\tthemes/current/\n"
+            QUICKAPP_KEY "\tthemes/current/icon.bin\n";
+    assert(d->activate(NULL) == 0);
+    fire_timers(50u); fire_timers(1000u); fire_timers(50u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tquickapp-initial\n", 0, 2, 0);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tbad-quickapp-config\n";
+    control_config = "/resource/\t/outside/\n";
+    fire_timers(1000u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tsticky-error\n", -2103, 2, 0);
+    fire_timers(1000u);
+    assert_status(-2103, 2, 0); /* Background success cannot clear config failure. */
+    quickapp_result = -1; fire_timers(1000u);
+    assert_status(-2103, 2, 0); /* Explicit config error wins over lookup error. */
+    quickapp_result = 1; fire_timers(1000u);
+    assert_status(-2103, 2, 0);
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\trepair-quickapp-config\n";
+    control_config = input;
+    fire_timers(1000u); fire_timers(50u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tquickapp-repaired\n", 0, 2, 0);
+    quickapp_result = -1; fire_timers(1000u);
+    assert_status(-2104, 2, 0);
+    quickapp_result = -2; fire_timers(1000u);
+    assert_status(-2105, 2, 0);
+    quickapp_result = 1; fire_timers(1000u);
+    assert_status(0, 2, 0);
+    fail_alloc = 1; fire_timers(1000u); fail_alloc = 0;
+    assert_status(-2101, 2, 0);
+    fire_timers(1000u);
+    assert_status(0, 2, 0);
+    quickapp_result = 0; fire_timers(1000u); fire_timers(50u);
+    assert_status(0, 1, 0); /* Absent package is not a config error. */
+    assert(quickapp_restores && allocations == frees + persistent_allocs && !locked);
+    assert(active_timers(1000u) == 1 && !active_timers(50u));
+    puts("status query keeps QuickApp watcher alive and config errors independently sticky");
+    return 0;
 }
 static int test_startup_diagnostics(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
@@ -632,6 +1040,8 @@ static int test_startup_fallback_then_reload(const char *fault) {
      * It remains retryable under the same signal once Manager repairs it. */
     fail_open = fail_read = 0;
     fail_alloc_at = 0;
+    query_status("resource-hook-status-v1\tng.lst.corona\tstartup-error\n",
+                 (int)strtol(strchr(fallback, '=') + 1, NULL, 10), 0, 0);
     control_signal = "resource-hook-reload-v1\tng.lst.corona\trepair-startup\n";
     control_config = "/resource/\t/outside/\n";
     before = control_opens;
@@ -649,6 +1059,7 @@ static int test_startup_fallback_then_reload(const char *fault) {
     assert(!d->query(&w) && u32(status + 8) == 1 && u32(status + 12) == 1);
     assert(strstr(result_record, "\t0\t0\t0\n"));
     assert(allocations == frees + persistent_allocs && persistent_allocs == 1);
+    query_status("resource-hook-status-v1\tng.lst.corona\tstartup-repaired\n", 0, 1, 0);
 
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tinvalid-after-repair\n";
     control_config = "/resource/\t/outside/\n";
@@ -669,14 +1080,6 @@ static void font_status(int32_t result, uint32_t pending, uint32_t changed) {
     assert(u32(status + 36) == changed);
     assert(!canopus_status_writer_init(&w, status, 47));
     assert(canopus_module_descriptor.query(&w) == -1 && !w.used);
-}
-static void assert_result(const char *signal, const char *row) {
-    uint32_t hash=2166136261u; unsigned i,n=(unsigned)(strlen(signal)+strlen(row));
-    assert(result_position==sizeof(result_record));
-    assert(!memcmp(result_record,signal,strlen(signal)));
-    assert(!memcmp(result_record+strlen(signal),row,strlen(row)));
-    for(i=0;i<n;i++) hash=(hash^(unsigned char)result_record[i])*16777619u;
-    assert(strtoul(result_record+n,NULL,10)==hash);
 }
 static int test_experimental_font_integration(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
@@ -1099,6 +1502,12 @@ static int test_quickapp_integration(void) {
 }
 int main(int argc, char **argv) {
     test_relative_config();
+    if (argc == 2 && !strcmp(argv[1], "--control-reload-status"))
+        return test_control_reload_status();
+    if (argc == 2 && !strcmp(argv[1], "--control-quickapp-status"))
+        return test_control_quickapp_status();
+    if (argc == 3 && !strcmp(argv[1], "--control-status"))
+        return test_control_status(argv[2]);
     if (argc == 2 && !strcmp(argv[1], "--quickapp"))
         return test_quickapp_integration();
     if (argc > 1 && !strcmp(argv[1], "--calendar"))
@@ -1129,8 +1538,8 @@ int main(int argc, char **argv) {
 #endif
     assert(!strcmp(RH_APP_FILES_ROOT, EXPECTED_FILES_ROOT));
     assert(!strcmp(RH_CONFIG_PATH, EXPECTED_FILES_ROOT "mappings.tsv"));
-    assert(!strcmp(RH_RELOAD_SIGNAL_PATH, EXPECTED_FILES_ROOT "reload.request"));
-    assert(!strcmp(RH_RELOAD_RESULT_PATH, EXPECTED_FILES_ROOT "reload.result"));
+    assert(!strcmp(RH_CONTROL_REQUEST_PATH, EXPECTED_FILES_ROOT "control.request"));
+    assert(!strcmp(RH_CONTROL_RESPONSE_PATH, EXPECTED_FILES_ROOT "control.response"));
     assert(!strcmp(RH_THEME_ROOT, EXPECTED_FILES_ROOT "themes/"));
     {
         const struct rh_rule native = {

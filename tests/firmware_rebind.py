@@ -450,8 +450,8 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.restore(), (5, 0))
         self.assertEqual(m.word(0x200bd3c4), resident_hook)
         self.assertEqual(self.status_words()[3], 0)
-        m.disk[APP_ROOT + 'reload.request'] = b'resource-hook-reload-v1\tng.lst.corona\tmissing-1\n'
-        m.disk[APP_ROOT + 'reload.result'] = bytes(256)
+        m.disk[APP_ROOT + 'control.request'] = b'resource-hook-reload-v1\tng.lst.corona\tmissing-1\n'
+        m.disk[APP_ROOT + 'control.response'] = bytes(256)
         self.graphics()
         self.tick(1000)
         self.assertEqual(m.word(0x200bd3c4), resident_hook)

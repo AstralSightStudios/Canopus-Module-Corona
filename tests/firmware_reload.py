@@ -627,8 +627,8 @@ class ModuleControl(Harness):
     instruction_budget = 20000000
     app_root = '/data/quickapp/files/ng.lst.corona/'
     config_path = app_root + 'mappings.tsv'
-    request_path = app_root + 'reload.request'
-    result_path = app_root + 'reload.result'
+    request_path = app_root + 'control.request'
+    result_path = app_root + 'control.response'
     theme_root = app_root + 'themes/'
 
     def setUp(self):
@@ -801,11 +801,20 @@ class ModuleControl(Harness):
         self.assertGreater(handle, 0)
         return self.files[handle - 1][2]
 
-    def revision(self, name, config):
-        signal = f'resource-hook-reload-v1\tng.lst.corona\t{name}\n'.encode()
+    def revision(self, name, config, version=1):
+        signal = f'resource-hook-reload-v{version}\tng.lst.corona\t{name}\n'.encode()
         self.disk[self.config_path] = config
         self.disk[self.request_path] = signal
         self.tick()
+        return self.control_response(signal)
+
+    def query_module_status(self, name):
+        signal = f'resource-hook-status-v1\tng.lst.corona\t{name}\n'.encode()
+        self.disk[self.request_path] = signal
+        self.tick()
+        return self.control_response(signal)
+
+    def control_response(self, signal):
         result = self.disk[self.result_path]
         self.assertEqual(len(result), 256)
         lines = result.rstrip(b'\0').splitlines(keepends=True)
@@ -820,6 +829,80 @@ class ModuleControl(Harness):
     def config(self, count=RULE_CAPACITY, pack='current'):
         return ''.join(f'/resource/icon{index:03d}.bin\tthemes/{pack}/icon{index:03d}.bin\n'
                        for index in range(count)).encode()
+
+    def test_reload_v2_reports_native_count_and_preserves_v1(self):
+        self.assertEqual(self.call('activate', 0), 0)
+        self.assertEqual(self.revision('v2-load', self.config(), version=2),
+                         ['RHRS2', '1', '0', '0', '0', 'running', '0', '256'])
+        before = self.live_allocations()
+        self.assertEqual(self.revision('v2-invalid', b'invalid config', version=2),
+                         ['RHRS2', '1', '-2103', '0', '0', 'config_error', '-2103', '256'])
+        self.assertEqual(self.live_allocations(), before)
+        self.word(self.display + 56, (1 << 8) | (2 << 16))
+        self.assertEqual(self.revision('v2-pending', self.config(pack='next'), version=2),
+                         ['RHRS2', '1', '0', '1', '0', 'running', '0', '256'])
+        signal = self.disk[self.request_path]
+        self.word(self.display + 56, 1 << 8)
+        self.tick(50)
+        self.assertEqual(self.control_response(signal),
+                         ['RHRS2', '1', '0', '0', '0', 'running', '0', '256'])
+        self.assertEqual(self.query_module_status('intervening-query'),
+                         ['RHST1', '1', 'running', '0', '256', '0'])
+        before = self.live_allocations()
+        self.assertEqual(self.revision('v2-pending', self.config(pack='next'), version=2),
+                         ['RHRS2', '1', '0', '0', '0', 'running', '0', '256'])
+        self.assertEqual(self.live_allocations(), before)
+        self.assertEqual(self.revision('v1-compatible', self.config(pack='next')),
+                         ['RHRS1', '5', '0', '0', '0'])
+        self.assertEqual(self.revision('v2-clear', b'', version=2),
+                         ['RHRS2', '1', '0', '0', '0', 'running', '0', '0'])
+        self.assertEqual(self.live_allocations(), {})
+
+    def test_memory_status_does_not_load_config_or_allocate(self):
+        self.assertEqual(self.call('activate', 0), 0)
+        before = self.live_allocations()
+        timers = dict(self.timers)
+        self.disk[self.config_path] = self.config()
+        self.assertEqual(self.query_module_status('first'),
+                         ['RHST1', '1', 'running', '0', '0', '0'])
+        self.assertEqual(self.live_allocations(), before)
+        self.assertEqual(self.timers, timers)
+        self.assertEqual(self.status()[2:4], (1, 0))
+        self.assertEqual(self.files, {})
+
+    def test_config_error_status_retains_last_good_and_recovers(self):
+        self.disk[self.config_path] = b'invalid config'
+        self.assertEqual(self.call('activate', 0), 0)
+        self.assertEqual(self.query_module_status('startup-error'),
+                         ['RHST1', '1', 'config_error', '-2007', '0', '0'])
+        self.assertEqual(self.revision('repair', self.config()), ['RHRS1', '5', '0', '0', '0'])
+        before = self.live_allocations()
+        self.assertEqual(self.query_module_status('repaired'),
+                         ['RHST1', '1', 'running', '0', '256', '0'])
+        self.assertLess(int(self.revision('invalid', b'invalid config')[2]), 0)
+        self.assertEqual(self.query_module_status('runtime-error'),
+                         ['RHST1', '1', 'config_error', '-2103', '256', '0'])
+        self.assertEqual(self.live_allocations(), before)
+        self.assertEqual(self.revision('clear', b''), ['RHRS1', '5', '0', '0', '0'])
+        self.assertEqual(self.query_module_status('cleared'),
+                         ['RHST1', '1', 'running', '0', '0', '0'])
+
+    def test_status_owns_response_during_pending_native_refresh(self):
+        self.disk[self.config_path] = self.config()
+        self.assertEqual(self.call('activate', 0), 0)
+        self.word(self.display + 56, (1 << 8) | (2 << 16))
+        self.assertEqual(self.revision('pending', self.config(pack='next')),
+                         ['RHRS1', '5', '0', '1', '0'])
+        before = self.live_allocations()
+        self.assertEqual(self.query_module_status('busy'),
+                         ['RHST1', '1', 'running', '0', '256', '1'])
+        self.assertEqual(self.live_allocations(), before)
+        self.word(self.display + 56, 1 << 8)
+        self.tick(50)
+        signal = self.disk[self.request_path]
+        self.assertEqual(self.control_response(signal),
+                         ['RHST1', '1', 'running', '0', '256', '0'])
+        self.assertEqual([period for period, _ in self.timers.values()], [1000])
 
     def test_256_rule_start_reload_identical_and_empty_snapshots(self):
         self.disk[self.config_path] = self.config()

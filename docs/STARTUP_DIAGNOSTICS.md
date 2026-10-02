@@ -61,12 +61,18 @@ activate.end rc=0 errno=0 detail=0x...
   file opens. ENOENT (2) is an empty pass-through startup, not an activation error.
 - `config.fallback`: `-2005` non-ENOENT config open; `-2006` input scratch,
   compact snapshot or QuickApp materialization allocation; `-2007` config
-  read/parse/validation or materialization failure. These are diagnostic codes
-  only: `prepare.end` returns zero and activation continues with an allocation-free
+  read/parse/validation or materialization failure. These raw codes are retained
+  in the in-memory configuration status as well as the log, but are not startup
+  return values: `prepare.end` returns zero and activation continues with an allocation-free
   empty map on first startup, or a previously prepared good map on a failed
   re-prepare. No partial rules are published and the config file is never rewritten.
-  Manager can repair the file and send a reload revision without rebooting.
-  Runtime reload failures still report an error receipt and preserve the good map.
+  A compatible controller can repair the file and send a reload revision without
+  rebooting. Configuration errors stay sticky until successful explicit configuration
+  publication; background QuickApp resolution errors are tracked separately and
+  recover independently. Runtime reload failures still report an error receipt and
+  preserve the good map. Missing, empty or comment-only startup configuration is
+  healthy. See [MODULE_CONTROL.md](MODULE_CONTROL.md) for status requests; the
+  unchanged Manager still uses the old channel and requires a separate upgrade.
 - `prepare.end`: `-2004` already installed; otherwise zero, including config
   fallback. The former fixed-bank `-2013` allocation path is no longer used.
   `config.alloc` and `snapshot.alloc` detail identify the actual-sized snapshot

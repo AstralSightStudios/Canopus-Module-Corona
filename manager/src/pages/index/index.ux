@@ -3,15 +3,27 @@
 <template>
   <div class="page">
     <div class="time-section">
-      <time-banner title="Corona" />
+      <time-banner title="Corona" flat="true" />
     </div>
 
     <list class="card-list">
+      <list-item type="module-status" class="status-item">
+        <div class="module-status {{moduleState}}">
+          <div if="{{moduleIcon}}" class="module-status-icon-wrap">
+            <img class="module-status-icon" src="{{moduleIcon}}" />
+          </div>
+          <div class="module-status-copy">
+            <text class="module-status-title">{{moduleTitle}}</text>
+            <text class="module-status-description {{moduleState}}-description">{{moduleDescription}}</text>
+          </div>
+        </div>
+      </list-item>
       <list-item type="item" class="item" onclick="openResources">
         <text class="itemtext">资源管理</text>
         <img class="enter" src="/common/images/enter.png" />
       </list-item>
-      <list-item type="item" class="item" onclick="openMixMatch">
+      <!-- Different outer spacing requires an independent list-item template. -->
+      <list-item type="item-last" class="item item-last" onclick="openMixMatch">
         <text class="itemtext">混搭微调</text>
         <img class="enter" src="/common/images/enter.png" />
       </list-item>
@@ -29,7 +41,9 @@
 import prompt from "@system.prompt"
 import * as file from "../../ts/file"
 import router from "@system.router"
-import { sendReloadSignal, waitForReloadOutcome } from "../../ts/reload-signal"
+import {
+  getInitialModuleStatus, sendReloadSignal, waitForReloadOutcome, withModuleControlOperation
+} from "../../ts/module-control"
 import { cleanupInactiveGenerations, regenerateActiveMappings } from "../../ts/resource-activation"
 import { loadResourceOrder } from "../../ts/resource-order"
 import { getResourceCatalog, getResourceFileApi, reconcileResourceOverrides, withResourceOperation } from "../../ts/resource-overrides"
@@ -37,7 +51,76 @@ import { getResourceCatalog, getResourceFileApi, reconcileResourceOverrides, wit
 export default {
   private: {
     sendingReload: false,
-    reloadRevision: 0
+    reloadRevision: 0,
+    pageActive: true,
+    statusReadRevision: 0,
+    moduleState: "checking",
+    moduleTitle: "正在检测",
+    moduleDescription: "请稍候",
+    moduleIcon: ""
+  },
+
+  onInit() {
+    this.pageActive = true
+    return this.loadModuleStatus()
+  },
+
+  onShow() {
+    this.pageActive = true
+    // The app-session cache reuses the first query and any newer reload snapshot.
+    return this.loadModuleStatus()
+  },
+
+  onHide() {
+    this.pageActive = false
+    this.statusReadRevision++
+  },
+
+  onDestroy() {
+    this.pageActive = false
+    this.statusReadRevision++
+  },
+
+  async loadModuleStatus() {
+    const revision = ++this.statusReadRevision
+    try {
+      const outcome = await getInitialModuleStatus(getResourceFileApi(file))
+      if (this.pageActive && revision === this.statusReadRevision)
+        this.applyModuleOutcome(outcome)
+    } catch (_error) {
+      if (this.pageActive && revision === this.statusReadRevision)
+        this.applyModuleOutcome({ status: null, reason: "read_error" })
+    }
+  },
+
+  applyModuleOutcome(outcome) {
+    if (!this.pageActive || !outcome) return
+    const status = outcome.status
+    if (status) {
+      if (status.state === "config_error") {
+        this.moduleState = "config_error"
+        this.moduleTitle = "配置错误"
+        this.moduleDescription = "模块已安装"
+        this.moduleIcon = "/common/images/status-config-error.png"
+      } else {
+        this.moduleState = "running"
+        this.moduleTitle = "正在工作"
+        this.moduleDescription = `已加载${status.activeRuleCount}条规则`
+        this.moduleIcon = "/common/images/status-running.png"
+      }
+    } else if (outcome.reason === "timeout") {
+      this.moduleState = "unresponsive"
+      this.moduleTitle = "模块异常"
+      this.moduleDescription = "未检测到模块"
+      this.moduleIcon = "/common/images/status-unresponsive.png"
+    } else if (outcome.reason !== "cancelled" &&
+               (this.moduleState === "checking" || this.moduleState === "unavailable")) {
+      // File I/O failure cannot prove the resident module is absent.
+      this.moduleState = "unavailable"
+      this.moduleTitle = "检测失败"
+      this.moduleDescription = "请稍后重载"
+      this.moduleIcon = ""
+    }
   },
 
   openResources() {
@@ -71,10 +154,14 @@ export default {
       const overrides = await reconcileResourceOverrides(snapshot.paths, reloadFile)
       const plan = await regenerateActiveMappings(order, revision, reloadFile, overrides, snapshot)
       mappingsGenerated = true
-      await sendReloadSignal(revision, reloadFile)
-      signalSent = true
-      const outcome = await waitForReloadOutcome(revision, reloadFile)
-      prompt.showToast({ message: outcome.message })
+      const outcome = await withModuleControlOperation(async () => {
+        await sendReloadSignal(revision, reloadFile)
+        signalSent = true
+        return waitForReloadOutcome(revision, reloadFile)
+      })
+      this.statusReadRevision++
+      this.applyModuleOutcome(outcome)
+      if (this.pageActive) prompt.showToast({ message: outcome.message })
       if (outcome.successful) {
         try { await cleanupInactiveGenerations(plan.generation, reloadFile, plan.mappings); }
         catch (_cleanupError) { /* Keep unused generations rather than risk the active one. */ }
@@ -84,7 +171,7 @@ export default {
       if (!mappingsGenerated) message = String(error && error.message || "资源映射生成失败")
       else if (!signalSent) message = "重载信号发送失败"
       else message = "等待模块响应失败"
-      prompt.showToast({ message })
+      if (this.pageActive) prompt.showToast({ message })
     }
   },
 
@@ -102,31 +189,123 @@ export default {
 .time-section {
   position: absolute;
   left: 0;
-  top: 12px;
+  top: 0px;
   width: 100%;
   height: 77px;
   flex-direction: column;
   align-items: center;
 }
 
+.status-item {
+  height: 100px;
+  margin-bottom: 10px;
+}
+
+.module-status {
+  position: relative;
+  width: 100%;
+  height: 100px;
+  border-radius: 22px;
+  overflow: hidden;
+  background-color: #262626;
+}
+
+.running {
+  background-color: #1da362;
+}
+
+.config_error {
+  background-color: #df9725;
+}
+
+.unresponsive {
+  background-color: #da593c;
+}
+
+.module-status-copy {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  width: 134px;
+  height: 72px;
+  flex-direction: column;
+}
+
+.module-status-title {
+  width: 134px;
+  height: 40px;
+  line-height: 40px;
+  font-size: 30px;
+  font-weight: 600;
+  color: #ffffff;
+  lines: 1;
+}
+
+.module-status-description {
+  width: 134px;
+  height: 32px;
+  line-height: 32px;
+  font-size: 24px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  lines: 1;
+}
+
+/* Approved copy is longer than the four-character Figma examples. */
+.running-description {
+  font-size: 17px;
+}
+
+.unresponsive-description {
+  font-size: 21px;
+}
+
+.module-status-icon-wrap {
+  position: absolute;
+  right: -18px;
+  bottom: 7px;
+  width: 86px;
+  height: 86px;
+  overflow: visible;
+}
+
+/* The supplied 138x145 PNGs include transparent padding and baked shadows.
+ * These offsets align the visible artwork with Figma's 86px icon frame. */
+.module-status-icon {
+  position: absolute;
+  right: -3px;
+  bottom: -5px;
+  width: 92px;
+  height: 97px;
+  object-fit: contain;
+}
+
 .card-list {
   position: absolute;
   left: 0;
-  top: 93px;
+  top: 86px;
   width: 100%;
-  height: 427px;
+  /* Use the full space above the action, not an exact content-height fit.
+   * Spare pixels absorb native layout rounding without changing row positions. */
+  height: 294px;
+  padding-left: 3px;
+  padding-right: 3px;
 }
 
 .item {
-  height: 102px;
-  margin-bottom: 9px;
+  height: 83px;
+  margin-bottom: 10px;
   background-color: #262626;
   border-radius: 30px;
   align-items: center;
 }
 
+.item-last {
+  margin-bottom: 0px;
+}
+
 .itemtext {
-  width: 155px;
+  width: 151px;
   margin-left: 12px;
   color: #FFFFFF;
   font-size: 35px;
@@ -162,7 +341,59 @@ export default {
   height: 80px;
 }
 
+@media (aspect-ratio: 53/130) {
+  .card-list {
+    height: 346px;
+  }
+
+  .item {
+    height: 102px;
+  }
+}
+
 @media (width: 160) {
+  .module-status-copy {
+    top: 12px;
+    width: 183px;
+    height: 76px;
+  }
+
+  .module-status-title {
+    width: 183px;
+    height: 42px;
+    line-height: 42px;
+    font-size: 32px;
+  }
+
+  .module-status-description {
+    width: 183px;
+    height: 34px;
+    line-height: 34px;
+    font-size: 26px;
+  }
+
+  .running-description {
+    font-size: 24px;
+  }
+
+  .unresponsive-description {
+    font-size: 26px;
+  }
+
+  .module-status-icon-wrap {
+    right: 6px;
+    bottom: -30px;
+    width: 128px;
+    height: 128px;
+  }
+
+  .module-status-icon {
+    right: -6px;
+    bottom: -8px;
+    width: 138px;
+    height: 145px;
+  }
+
   .reload-action-wrap {
     height: 80px;
   }
@@ -188,11 +419,12 @@ export default {
   }
 
   .card-list {
-    top: 60px;
-    height: 460px;
+    top: 68px;
+    height: 322px;
   }
 
   .item {
+    height: 96px;
     padding-left: 12px;
     padding-right: 12px;
   }

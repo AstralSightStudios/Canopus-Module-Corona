@@ -56,6 +56,11 @@ for target in 139 155 1043; do
             "$ROOT/build/test_module_${target}_${mode}" --empty-startup
         fi
         "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
+        "$ROOT/build/test_module_${target}_${mode}" --control-quickapp-status
+        "$ROOT/build/test_module_${target}_${mode}" --control-reload-status
+        for startup in missing empty comments valid; do
+            "$ROOT/build/test_module_${target}_${mode}" --control-status "$startup"
+        done
         for fault in eacces open-io unknown-errno scratch-oom snapshot-oom \
                      materialize-oom materialized-map-oom read-io malformed outside duplicate oversized; do
             "$ROOT/build/test_module_${target}_${mode}" --startup-fallback "$fault"

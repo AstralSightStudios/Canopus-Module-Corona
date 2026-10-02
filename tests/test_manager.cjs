@@ -7,7 +7,7 @@ const tests = [
   'test_interconnect.cjs',
   'test_manifest_filenames.cjs',
   'test_resource_storage.cjs',
-  'test_reload_signal.cjs',
+  'test_module_control.cjs',
   'test_resource_order.cjs',
   'test_resource_overrides.cjs',
   'test_resource_catalog_async.cjs',

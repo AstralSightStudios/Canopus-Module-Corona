@@ -38,6 +38,8 @@ function page(name, dependencies = {}) {
     getResourceCatalog: async () => catalog(),
     getResourceFileApi: file => file,
     withResourceOperation: operation => operation(),
+    withModuleControlOperation: operation => operation(),
+    getInitialModuleStatus: async () => ({ status: null, reason: 'timeout' }),
     isResourceCatalogCurrent: () => true,
     loadResourceOverrides: async () => ({}),
     validSourcePath: value => typeof value === 'string' && !value.endsWith('/') &&
@@ -372,6 +374,84 @@ async function testReload() {
   assert.equal(opacity(queued), 1, 'queue rejection also releases the busy state');
 }
 
+async function testHomepageStatus() {
+  const running = count => ({ state: 'running', configError: 0,
+    activeRuleCount: count, refreshPending: false });
+  const configError = { state: 'config_error', configError: -2103,
+    activeRuleCount: 2, refreshPending: false };
+  const home = page('index', {
+    getInitialModuleStatus: async () => ({ status: running(0), reason: 'response' })
+  });
+  assert.equal(home.moduleState, 'checking', 'do not announce absence before querying');
+  await home.onInit();
+  assert.equal(home.moduleTitle, '正在工作');
+  assert.equal(home.moduleDescription, '已加载0条规则');
+  assert.equal(home.moduleIcon, '/common/images/status-running.png');
+  home.applyModuleOutcome({ status: running(256), reason: 'response' });
+  assert.equal(home.moduleDescription, '已加载256条规则');
+  home.applyModuleOutcome({ status: configError, reason: 'response' });
+  assert.equal(home.moduleTitle, '配置错误');
+  assert.equal(home.moduleDescription, '模块已安装');
+  assert.equal(home.moduleIcon, '/common/images/status-config-error.png');
+  home.applyModuleOutcome({ status: null, reason: 'read_error' });
+  assert.equal(home.moduleState, 'config_error', 'I/O failure must retain confirmed status');
+  home.applyModuleOutcome({ status: { ...running(4), refreshPending: true }, reason: 'pending' });
+  assert.equal(home.moduleState, 'running', 'pending refresh is still an online module');
+  home.applyModuleOutcome({ status: running(4), reason: 'rejected' });
+  assert.equal(home.moduleState, 'running', 'font/refresh rejection is not a config error');
+  home.applyModuleOutcome({ status: null, reason: 'timeout' });
+  assert.equal(home.moduleTitle, '模块异常');
+  assert.equal(home.moduleDescription, '未检测到模块');
+  assert.equal(home.moduleIcon, '/common/images/status-unresponsive.png');
+  const unavailable = page('index', {
+    getInitialModuleStatus: async () => ({ status: null, reason: 'write_error' })
+  });
+  await unavailable.onInit();
+  assert.equal(unavailable.moduleState, 'unavailable');
+  assert.equal(unavailable.moduleIcon, '', 'file failures cannot infer a missing module');
+
+  for (const hook of ['onHide', 'onDestroy']) {
+    const waiting = deferred();
+    const hidden = page('index', { getInitialModuleStatus: () => waiting.promise });
+    const initial = hidden.onInit();
+    hidden[hook]();
+    waiting.resolve({ status: running(9), reason: 'response' });
+    await initial;
+    assert.equal(hidden.moduleState, 'checking', `${hook} prevents stale UI callbacks`);
+    if (hook === 'onHide') {
+      await hidden.onShow();
+      assert.equal(hidden.moduleDescription, '已加载9条规则', 'returning consumes session cache');
+    }
+  }
+
+  const oldQuery = deferred();
+  let queries = 0, cleanups = 0, controlReservations = 0;
+  const reloading = page('index', {
+    getInitialModuleStatus() { queries++; return oldQuery.promise; },
+    loadResourceOrder: async () => ['base', '@system'],
+    reconcileResourceOverrides: async () => ({}),
+    regenerateActiveMappings: async () => ({ generation: 'current', mappings: 'ignored' }),
+    withModuleControlOperation(operation) { controlReservations++; return operation(); },
+    sendReloadSignal: async () => {},
+    waitForReloadOutcome: async () => ({ successful: true, message: 'done', status: running(6) }),
+    cleanupInactiveGenerations: async () => { cleanups++; }
+  });
+  const initial = reloading.onInit();
+  await reloading.requestReload();
+  assert.equal(reloading.moduleDescription, '已加载6条规则', 'use receipt count, not generated mappings');
+  assert.equal(controlReservations, 1, 'send and wait share a single control reservation');
+  assert.equal(queries, 1, 'reload must not issue another status query');
+  assert.equal(cleanups, 1);
+  oldQuery.resolve({ status: configError, reason: 'response' });
+  await initial;
+  assert.equal(reloading.moduleDescription, '已加载6条规则', 'old initial result cannot overwrite reload');
+  const app = fs.readFileSync(path.join(root, 'manager/src/app.ux'), 'utf8');
+  assert.match(app, /initializeModuleControlSession\(\)/);
+  assert.match(app, /destroyModuleControlSession\(\)/);
+  const source = fs.readFileSync(path.join(root, 'manager/src/pages/index/index.ux'), 'utf8');
+  assert.doesNotMatch(source, /setInterval\s*\(/, 'homepage has no periodic status polling');
+}
+
 const idle = deferred();
 const failOnIdle = () => idle.reject(new Error('Page test stalled waiting for an expected callback'));
 process.once('beforeExit', failOnIdle);
@@ -379,6 +459,7 @@ Promise.race([(async () => {
   await testList();
   await testSelection();
   await testReload();
+  await testHomepageStatus();
   console.log('Mix-match parallel loading, retained rows, lifecycle and reload sequencing tests passed.');
 })(), idle.promise]).finally(() => {
   process.removeListener('beforeExit', failOnIdle);

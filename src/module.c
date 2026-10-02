@@ -13,9 +13,10 @@
 #define RH_VERSION "0.3.0"
 /* Resolve app-scoped control paths using the selected firmware target. */
 #define RH_CONTROL_CONFIG RH_CONFIG_PATH
-#define RH_CONTROL_SIGNAL RH_RELOAD_SIGNAL_PATH
 #define RH_RELOAD_PREFIX "resource-hook-reload-v1\t"
-#define RH_RELOAD_SIGNAL_MAX 128u
+#define RH_RELOAD_V2_PREFIX "resource-hook-reload-v2\tng.lst.corona\t"
+#define RH_STATUS_PREFIX "resource-hook-status-v1\tng.lst.corona\t"
+#define RH_CONTROL_REQUEST_MAX 128u
 #define RH_RELOAD_POLL_MS 1000u
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 #define RH_TARGET_ID "xiaomi-band-10-pro-3.101.043"
@@ -32,6 +33,9 @@ static const char rh_artifact_target[48] = RH_TARGET_ID;
 #endif
 static struct rh_state S;
 static int configured;
+/* Explicit config failures stay latched until a successful publication.
+ * Autonomous QuickApp resolution has an independently recoverable error. */
+static int32_t config_error, quickapp_error;
 static uint32_t images_dropped;
 static uint32_t redraws;
 /* Reserved RHQ1 v5 field: no forced page rebuilds in the reload path. */
@@ -47,11 +51,16 @@ static struct rh_snapshot *active_snapshot, *refresh_previous_snapshot;
 /* Semantic declarations survive absent packages and app upgrades. Only the
  * materialized file snapshot is visible to the open hook. */
 static struct rh_snapshot *quickapp_declarations;
-static unsigned quickapp_poll_failed;
-static unsigned control_busy;
-static char last_reload_signal[RH_RELOAD_SIGNAL_MAX];
+static unsigned control_busy, result_busy;
+static char last_reload_signal[RH_CONTROL_REQUEST_MAX];
 static uint32_t last_reload_signal_size;
 static unsigned last_reload_signal_valid;
+/* Only the latest observed valid request owns the shared response slot. */
+#define RH_REQUEST_RELOAD 1u
+#define RH_REQUEST_STATUS 2u
+static char response_signal[RH_CONTROL_REQUEST_MAX];
+static uint32_t response_signal_size;
+static unsigned response_kind;
 static unsigned refresh_pending, cache_dropped, images_done, fonts_done, calendar_done, refreshing;
 static void publish_current_result(void);
 static char *result_number(char *, uint32_t);
@@ -238,6 +247,9 @@ static void refresh_timer_step(void *timer) {
         if (timer) rh_platform_timer_delete(timer);
         return;
     }
+    /* Reentrant firmware I/O must not run a second publisher or mutate the
+     * response buffer while the watcher/result writer owns its transaction. */
+    if (control_busy || result_busy) return;
     refresh_step(timer, 1u);
     publish_current_result();
 }
@@ -311,7 +323,7 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
 static int valid_reload_signal(const char *signal, uint32_t size) {
     static const char package[] = "ng.lst.corona\t";
     uint32_t i, start = (uint32_t)(sizeof(RH_RELOAD_PREFIX) - 1u);
-    if (!signal || size <= start + 1u || size > RH_RELOAD_SIGNAL_MAX ||
+    if (!signal || size <= start + 1u || size > RH_CONTROL_REQUEST_MAX ||
         signal[size - 1u] != '\n') return 0;
     for (i = 0; i < start; i++) if (signal[i] != RH_RELOAD_PREFIX[i]) return 0;
     /* Accept the original v1 marker and the package-qualified form. */
@@ -329,6 +341,39 @@ static int valid_reload_signal(const char *signal, uint32_t size) {
     }
     return 1;
 }
+static int valid_qualified_signal(const char *signal, uint32_t size,
+                                  const char *prefix, uint32_t start) {
+    uint32_t i;
+    if (!signal || size <= start + 1u || size > start + 65u ||
+        size > RH_CONTROL_REQUEST_MAX || signal[size - 1u] != '\n') return 0;
+    for (i = 0; i < start; i++) if (signal[i] != prefix[i]) return 0;
+    for (i = start; i < size - 1u; i++) {
+        char c = signal[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) return 0;
+    }
+    return 1;
+}
+static int valid_status_signal(const char *signal, uint32_t size) {
+    return valid_qualified_signal(signal, size, RH_STATUS_PREFIX,
+                                  sizeof(RH_STATUS_PREFIX) - 1u);
+}
+static int valid_reload_v2_signal(const char *signal, uint32_t size) {
+    return valid_qualified_signal(signal, size, RH_RELOAD_V2_PREFIX,
+                                  sizeof(RH_RELOAD_V2_PREFIX) - 1u);
+}
+static int response_matches(const char *signal, uint32_t size) {
+    uint32_t i;
+    if (!response_kind || size != response_signal_size) return 0;
+    for (i = 0; i < size; i++) if (signal[i] != response_signal[i]) return 0;
+    return 1;
+}
+static void remember_response_signal(const char *signal, uint32_t size, unsigned kind) {
+    uint32_t i;
+    for (i = 0; i < size; i++) response_signal[i] = signal[i];
+    response_signal_size = size;
+    response_kind = kind;
+}
 static void remember_reload_signal(const char *signal, uint32_t size) {
     uint32_t i;
     for (i = 0; i < size; i++) last_reload_signal[i] = signal[i];
@@ -344,15 +389,20 @@ static int reload_signal_seen(const char *signal, uint32_t size) {
 /* Manager creates this app-scoped file before sending a revision. Use only
  * O_WRONLY (2): no guessed create/truncate flags or vararg permissions.
  * A fixed-size, checksummed record lets readers reject partial/torn writes. */
-#define RH_CONTROL_RESULT RH_RELOAD_RESULT_PATH
 #define RH_RESULT_BYTES 256u
+/* Worst RHRS2 row: 69 bytes (INT32_MIN/UINT32_MAX), checksum <=11.
+ * Reserve 80 for all rows, including a full 128-byte legacy request. */
+_Static_assert(RH_CONTROL_REQUEST_MAX + 80u + 11u <= RH_RESULT_BYTES,
+               "control response must fit the maximum request and fields");
 static char last_result[RH_RESULT_BYTES];
 static unsigned last_result_valid, result_written;
 static void flush_result(void) {
     uint32_t used=0; int fd,n;
-    if(!last_result_valid || result_written) return;
-    fd=rh_platform_open(RH_CONTROL_RESULT,2);
-    if(fd<0) return;
+    if(result_busy || !last_result_valid || result_written || !response_kind ||
+       !response_matches(last_result,response_signal_size)) return;
+    result_busy=1;
+    fd=rh_platform_open(RH_CONTROL_RESPONSE_PATH,2);
+    if(fd<0) { result_busy=0; return; }
     while(used<RH_RESULT_BYTES) {
         n=rh_platform_write(fd,last_result+used,RH_RESULT_BYTES-used);
         if(n<=0 || (uint32_t)n>RH_RESULT_BYTES-used) break;
@@ -360,6 +410,7 @@ static void flush_result(void) {
     }
     rh_platform_close(fd);
     result_written=used==RH_RESULT_BYTES;
+    result_busy=0;
 }
 static char *result_number(char *out, uint32_t n) {
     char digits[10]; uint32_t count=0;
@@ -367,20 +418,9 @@ static char *result_number(char *out, uint32_t n) {
     while(count) *out++=digits[--count];
     return out;
 }
-static void publish_result(const char *signal, uint32_t size, int32_t result,
-                           uint32_t pending, uint32_t changed) {
-    static const char prefix[]="RHRS1\t";
-    char buffer[RH_RESULT_BYTES], *p=buffer;
+static void commit_result(char buffer[RH_RESULT_BYTES], char *p) {
     uint32_t i, hash=2166136261u;
-    if(!size || size>RH_RELOAD_SIGNAL_MAX) return;
-    for(i=0;i<RH_RESULT_BYTES;i++) ((volatile char *)buffer)[i]=0;
-    for(i=0;i<size;i++) *p++=signal[i];
-    for(i=0;i<sizeof(prefix)-1u;i++) *p++=prefix[i];
-    p=result_number(p,RH_FONT_EXPERIMENT ? 6u : 5u); *p++='\t';
-    if(result<0) *p++='-';
-    p=result_number(p,result<0 ? 0u-(uint32_t)result : (uint32_t)result); *p++='\t';
-    p=result_number(p,pending); *p++='\t';
-    p=result_number(p,changed); *p++='\n';
+    if(result_busy) return;
     for(i=0;i<(uint32_t)(p-buffer);i++) hash=(hash^(unsigned char)buffer[i])*16777619u;
     p=result_number(p,hash); *p++='\n';
     if(last_result_valid) {
@@ -391,7 +431,68 @@ static void publish_result(const char *signal, uint32_t size, int32_t result,
     last_result_valid=1; result_written=0;
     flush_result();
 }
+struct control_status_snapshot { int32_t error; uint32_t count, pending; };
+static struct control_status_snapshot control_status_snapshot(void) {
+    struct control_status_snapshot status;
+    uint32_t irq = rh_platform_lock();
+    status.error = config_error ? config_error : quickapp_error;
+    status.count = S.count;
+    status.pending = refresh_pending;
+    rh_platform_unlock(irq);
+    return status;
+}
+static void publish_result(const char *signal, uint32_t size, int32_t result,
+                           uint32_t pending, uint32_t changed) {
+    char buffer[RH_RESULT_BYTES], *p=buffer;
+    uint32_t i;
+    unsigned v2;
+    struct control_status_snapshot status;
+    if(response_kind != RH_REQUEST_RELOAD || !response_matches(signal,size)) return;
+    v2 = valid_reload_v2_signal(signal,size);
+    if(v2) {
+        status = control_status_snapshot();
+        pending = status.pending;
+    }
+    for(i=0;i<RH_RESULT_BYTES;i++) ((volatile char *)buffer)[i]=0;
+    for(i=0;i<size;i++) *p++=signal[i];
+    p=log_text(p,v2 ? "RHRS2\t" : "RHRS1\t");
+    p=result_number(p,v2 ? 1u : (RH_FONT_EXPERIMENT ? 6u : 5u)); *p++='\t';
+    if(result<0) *p++='-';
+    p=result_number(p,result<0 ? 0u-(uint32_t)result : (uint32_t)result); *p++='\t';
+    p=result_number(p,pending); *p++='\t';
+    p=result_number(p,changed);
+    if(v2) {
+        p=log_text(p,status.error ? "\tconfig_error\t" : "\trunning\t");
+        if(status.error<0) *p++='-';
+        p=result_number(p,status.error<0 ? 0u-(uint32_t)status.error :
+                                         (uint32_t)status.error); *p++='\t';
+        p=result_number(p,status.count);
+    }
+    *p++='\n';
+    commit_result(buffer,p);
+}
+static void publish_status_result(void) {
+    char buffer[RH_RESULT_BYTES], *p=buffer;
+    uint32_t i, count, pending;
+    int32_t error;
+    struct control_status_snapshot status;
+    if(response_kind != RH_REQUEST_STATUS) return;
+    status = control_status_snapshot();
+    error=status.error; count=status.count; pending=status.pending;
+    for(i=0;i<RH_RESULT_BYTES;i++) ((volatile char *)buffer)[i]=0;
+    for(i=0;i<response_signal_size;i++) *p++=response_signal[i];
+    p=log_text(p,error ? "RHST1\t1\tconfig_error\t" : "RHST1\t1\trunning\t");
+    if(error<0) *p++='-';
+    p=result_number(p,error<0 ? 0u-(uint32_t)error : (uint32_t)error); *p++='\t';
+    p=result_number(p,count); *p++='\t';
+    p=result_number(p,pending); *p++='\n';
+    commit_result(buffer,p);
+}
 static void publish_current_result(void) {
+    if(response_kind == RH_REQUEST_STATUS) {
+        publish_status_result();
+        return;
+    }
     if(!last_reload_signal_valid) return;
 #if RH_FONT_EXPERIMENT
     publish_result(last_reload_signal,last_reload_signal_size,font_result,
@@ -404,27 +505,25 @@ static int resolve_quickapp(void *cookie, const char *package, char path[RH_PATH
     (void)cookie;
     return rh_platform_quickapp_icon_path(package, path);
 }
-static void poll_control_file(void) {
-    char signal[RH_RELOAD_SIGNAL_MAX];
-    uint32_t signal_size = 0, irq;
+/* Called with the watcher's control reservation already held. */
+static void poll_control_file(const char *signal, uint32_t signal_size,
+                              unsigned reload_request) {
+    uint32_t irq;
     struct rh_snapshot *captured = 0, *candidate = 0, *declarations = 0;
     struct rh_snapshot *new_declarations = 0, *old_declarations = 0;
     struct rh_mapping_view captured_view;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
 
-    /* Reserve the complete transaction before any reentrant firmware I/O.
-     * Active maps may be empty; NULL is the transparent zero-rule snapshot. */
+    /* Active maps may be empty; NULL is the transparent zero-rule snapshot. */
     irq = rh_platform_lock();
-    if (control_busy || refresh_pending || refreshing || !S.installed) {
+    if (refresh_pending || refreshing || !S.installed) {
         rh_platform_unlock(irq);
         return;
     }
-    control_busy = 1;
     captured = active_snapshot;
     declarations = quickapp_declarations;
     if ((declarations && declarations->references == UINT32_MAX) ||
         (captured && captured->references == UINT32_MAX)) {
-        control_busy = 0;
         rh_platform_unlock(irq);
         return;
     }
@@ -432,12 +531,11 @@ static void poll_control_file(void) {
     if (declarations) declarations->references++;
     rh_platform_unlock(irq);
 
-    rc = read_bounded_file(RH_CONTROL_SIGNAL, signal, sizeof(signal), &signal_size);
-    revision = !rc && valid_reload_signal(signal, signal_size) &&
-               !reload_signal_seen(signal, signal_size);
+    revision = reload_request && !reload_signal_seen(signal, signal_size);
     if (revision) {
         fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
         if (fd < 0) {
+            config_error = -2102;
             publish_result(signal, signal_size, -2102, 0, 0);
             goto done;
         }
@@ -452,29 +550,35 @@ static void poll_control_file(void) {
     } else {
         /* Installation/reinstallation can change a file key without a manager
          * revision. This timer is the serialized UI owner; never query in open. */
-        if (!declarations) goto done;
+        if (!declarations) {
+            /* A completed revision may retake the slot after a status query. */
+            publish_current_result();
+            goto done;
+        }
         rc = rh_materialize_snapshot(declarations, resolve_quickapp, 0,
                                      &snapshot_allocator, &candidate);
     }
     if (rc) {
         int error = rc == -7 ? -2101 : (rc == -9 ? -2105 :
                     (rc == -8 ? -2104 : -2103));
-        if (revision) publish_result(signal, signal_size, error, 0, 0);
-        else if (last_reload_signal_valid) {
-            quickapp_poll_failed = 1;
-            publish_result(last_reload_signal, last_reload_signal_size, error, 0, 0);
+        if (revision) {
+            config_error = error;
+            publish_result(signal, signal_size, error, 0, 0);
+        } else {
+            quickapp_error = error;
+            if (last_reload_signal_valid)
+                publish_result(last_reload_signal, last_reload_signal_size, error, 0, 0);
+            publish_status_result();
         }
         goto done;
     }
 
+    quickapp_error = 0;
     identical = rh_snapshot_equal(captured, candidate);
     if (identical && !revision) {
-        /* A transient lookup/OOM failure may have replaced the last receipt.
-         * Restore completion once, even when recovery needs no map change. */
-        if (quickapp_poll_failed) {
-            quickapp_poll_failed = 0;
-            publish_current_result();
-        }
+        /* Recover an error receipt or reclaim the slot after a status query.
+         * The response cache deduplicates unchanged completions. */
+        publish_current_result();
         goto done;
     }
     captured_view = rh_snapshot_view(captured);
@@ -490,6 +594,7 @@ static void poll_control_file(void) {
         goto done;
     }
     if (revision) {
+        config_error = 0;
         old_declarations = quickapp_declarations;
         quickapp_declarations = new_declarations;
         new_declarations = 0;
@@ -542,7 +647,6 @@ static void poll_control_file(void) {
     }
     rh_platform_unlock(irq);
     if (revision) remember_reload_signal(signal, signal_size);
-    quickapp_poll_failed = 0;
     if (refresh_pending) {
         refresh_step(0, 1u);
         (void)ensure_refresh_timer();
@@ -554,23 +658,52 @@ done:
     snapshot_release(old_declarations);
     snapshot_release(declarations);
     snapshot_release(captured);
-    irq = rh_platform_lock();
-    control_busy = 0;
-    rh_platform_unlock(irq);
 }
 static void watch_step(void *timer) {
+    char signal[RH_CONTROL_REQUEST_MAX];
+    uint32_t signal_size = 0, irq;
+    unsigned kind = 0, new_status = 0;
+    int rc;
     if (timer != watch_timer) {
         if (timer) rh_platform_timer_delete(timer);
         return;
     }
+    /* Reserve request observation as well as config I/O against nested timers.
+     * Read status before the pending-refresh branch, without reading mappings. */
+    irq = rh_platform_lock();
+    if (control_busy || result_busy || refreshing || !S.installed) {
+        rh_platform_unlock(irq);
+        return;
+    }
+    control_busy = 1;
+    rh_platform_unlock(irq);
+    rc = read_bounded_file(RH_CONTROL_REQUEST_PATH, signal, sizeof(signal), &signal_size);
+    if (!rc) {
+        if (valid_status_signal(signal, signal_size)) kind = RH_REQUEST_STATUS;
+        else if (valid_reload_signal(signal, signal_size) ||
+                 valid_reload_v2_signal(signal, signal_size)) kind = RH_REQUEST_RELOAD;
+    }
+    if (kind) {
+        new_status = kind == RH_REQUEST_STATUS && !response_matches(signal,signal_size);
+        remember_response_signal(signal,signal_size,kind);
+    } else {
+        /* Invalid/absent input must not let a delayed old receipt own the slot. */
+        response_kind = 0;
+    }
     flush_result();
-    if (refresh_pending) {
+    if (kind == RH_REQUEST_STATUS) publish_status_result();
+    if (refresh_pending && !new_status) {
         refresh_step(0, 1u);
         (void)ensure_refresh_timer();
         publish_current_result();
-        return;
+    } else if (!new_status) {
+        /* A fresh query performs no config/lookup work. On later ticks the
+         * existing autonomous QuickApp watcher continues even if it stays. */
+        poll_control_file(signal,signal_size,kind == RH_REQUEST_RELOAD);
     }
-    poll_control_file();
+    irq = rh_platform_lock();
+    control_busy = 0;
+    rh_platform_unlock(irq);
 }
 static int schedule_watch_timer(void) {
     void *next = rh_platform_timer_create(RH_RELOAD_POLL_MS, watch_step);
@@ -617,6 +750,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         declarations = 0;
         active_snapshot = candidate;
         S.count = candidate ? candidate->count : 0u;
+        config_error = quickapp_error = 0;
         configured = 1;
         rh_platform_unlock(irq);
         startup_record("snapshot.alloc", 0, 0, (uintptr_t)candidate);
@@ -628,6 +762,8 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
          * snapshot on first startup. Never publish partial rules or rewrite
          * the bad file: Manager can repair it through the normal watcher. */
         irq = rh_platform_lock();
+        config_error = rc;
+        quickapp_error = 0;
         configured = 1;
         rh_platform_unlock(irq);
         startup_record("config.fallback", rc, error, S.count);

@@ -3,10 +3,12 @@ import router from "@system.router"
 import { InterconnectThemeReceiver } from "./ts/interconnect"
 import * as file from "./ts/file"
 import { initializeResourceCatalogSession, destroyResourceCatalogSession } from "./ts/resource-overrides"
+import { initializeModuleControlSession, destroyModuleControlSession } from "./ts/module-control"
 
 export default {
   onCreate() {
     initializeResourceCatalogSession(file)
+    initializeModuleControlSession()
     globalThis.receivePageVisible = false
     const receiver = new InterconnectThemeReceiver(() => {
       if (!globalThis.receivePageVisible) router.push({ uri: "pages/receive" })
@@ -19,6 +21,7 @@ export default {
       globalThis.themeReceiver.stop()
       globalThis.themeReceiver = null
     }
+    destroyModuleControlSession()
     destroyResourceCatalogSession()
   }
 }

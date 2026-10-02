@@ -122,11 +122,11 @@ The exact `.155` native manager factory (`0x0c494380`, including `0x0c4946a4`) a
 | `-2941` | Borrowed stock entry has invalid ownership/layout, no prior positive owner, or a saturated reference count |
 | `-2942` | Borrowed stock face differs from the canonical interned pathname or style/mode key |
 
-The numeric errors are available in the module's `reload.result` record for external diagnostics. Before publication, failures retain the currently displayed replacement font and preserve external ownership. Host tests inject every native allocation failure during both fresh and borrowed-stock restoration, plus pixel-size, wrapper-snapshot and precommit-validation failures. They verify unchanged external descriptors/cache identities, balanced references, busy child-cache retry, repeated replace/restore cycles and successful retry after each injected failure. No native constructor, forced cache eviction or GPU recovery was added.
+The numeric errors are available in the module's `control.response` reload receipt for external diagnostics. Before publication, failures retain the currently displayed replacement font and preserve external ownership. Host tests inject every native allocation failure during both fresh and borrowed-stock restoration, plus pixel-size, wrapper-snapshot and precommit-validation failures. They verify unchanged external descriptors/cache identities, balanced references, busy child-cache retry, repeated replace/restore cycles and successful retry after each injected failure. No native constructor, forced cache eviction or GPU recovery was added.
 
 ## Optional client acknowledgement protocol
 
-A controller may write a nonempty `pending<TAB><revision><LF>` placeholder to `internal://files/reload.result` before sending a new request. Vela rejects an empty `writeText` argument with code 202. If preparing this optional acknowledgement file fails, a controller can still send the original reload signal; diagnostics must not block module processing. The module opens the existing native file with NuttX write-only flag `2`; it does not create files or guess creation permissions. The response is a 256-byte NUL-padded record:
+A compatible controller must precreate `internal://files/control.response` to receive replies, and send reload signals through `internal://files/control.request`. A nonempty `pending<TAB><revision><LF>` placeholder avoids Vela's empty `writeText` rejection (code 202). Reload processing does not depend on successful receipt-file preparation, but a missing response is not success. The module opens the existing native file with NuttX write-only flag `2`, without create or truncate. The response is a 256-byte NUL-padded record:
 
 ```text
 resource-hook-reload-v1<TAB>ng.lst.corona<TAB><revision><LF>
@@ -134,7 +134,9 @@ RHRS1<TAB><5-or-6><TAB><signed-result><TAB><refresh-pending><TAB><families-chang
 <unsigned-decimal-FNV1a-of-the-first-two-lines-including-LFs><LF>
 ```
 
-The checksum detects torn/partial writes, not malicious changes. The module retries failed/short writes without rerunning a completed font transaction, and avoids rewriting unchanged results. Configuration failures use `-2101` (allocation), `-2102` (open), `-2103` (parse/read). A polling client should ignore wrong revisions, invalid checksums and unsupported schemas, and must not report success if no valid result arrives. A negative result with nonzero changed count means publication occurred but refresh failed.
+The checksum detects torn/partial writes, not malicious changes. The module retries failed/short writes without rerunning a completed font transaction, and avoids rewriting unchanged results. Configuration failures use `-2101` (allocation), `-2102` (open), `-2103` (parse/read), and QuickApp materialization errors `-2104` / `-2105`. A polling client should ignore wrong revisions, invalid checksums and unsupported schemas, and must not report success if no valid result arrives. A negative result with nonzero changed count means publication occurred but refresh failed.
+
+The legacy v1 reload request and RHRS1 v5/v6 receipt schema remain unchanged on the control paths. Manager now sends reload v2 and reads RHRS2 snapshots containing active rule count and configuration state without a follow-up query; negative font results do not imply configuration failure. Its initial RHST1 status query is memory-only and does not execute font transactions. Manager and the module must be upgraded together; see [MODULE_CONTROL.md](MODULE_CONTROL.md).
 
 ## Verification
 

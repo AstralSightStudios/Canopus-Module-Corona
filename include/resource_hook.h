@@ -10,8 +10,11 @@
 #define RH_APP_FILES_ROOT "/data/quickapp/files/ng.lst.corona/"
 #endif
 #define RH_CONFIG_PATH RH_APP_FILES_ROOT "mappings.tsv"
-#define RH_RELOAD_SIGNAL_PATH RH_APP_FILES_ROOT "reload.request"
-#define RH_RELOAD_RESULT_PATH RH_APP_FILES_ROOT "reload.result"
+/* Shared status-v1 / reload-v1 / optional reload-v2 channel. Reload v2 adds
+ * memory status to the receipt; legacy RHRS1 and descriptor ABI stay unchanged.
+ * Wire framing and ownership are documented in docs/MODULE_CONTROL.md. */
+#define RH_CONTROL_REQUEST_PATH RH_APP_FILES_ROOT "control.request"
+#define RH_CONTROL_RESPONSE_PATH RH_APP_FILES_ROOT "control.response"
 #define RH_THEME_ROOT RH_APP_FILES_ROOT "themes/"
 #define RH_SYSTEM_DESTINATION "@system"
 #define RH_QUICKAPP_ICON_PREFIX "@quickapp-icon/"
