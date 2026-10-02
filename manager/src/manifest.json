@@ -8,6 +8,9 @@
   "deviceTypeList": ["watch"],
   "features": [
     {
+      "name": "system.app"
+    },
+    {
       "name": "system.router"
     },
     {

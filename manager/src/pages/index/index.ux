@@ -1,7 +1,7 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <div class="page">
+  <div class="page" ontouchstart="preserveForUser">
     <div class="time-section">
       <time-banner title="Corona" flat="true" />
     </div>
@@ -49,6 +49,10 @@ import { loadResourceOrder } from "../../ts/resource-order"
 import { getResourceCatalog, getResourceFileApi, reconcileResourceOverrides, withResourceOperation } from "../../ts/resource-overrides"
 
 export default {
+  // HAP query parameters are injected into public properties, not private state.
+  public: {
+    astroboxCheckToken: ""
+  },
   private: {
     sendingReload: false,
     reloadRevision: 0,
@@ -61,6 +65,8 @@ export default {
   },
 
   onInit() {
+    // onInit can run on re-entry too; only the app-owned one-shot gate may bind.
+    if (globalThis.themeReceiver) globalThis.themeReceiver.captureLaunchContext(this.astroboxCheckToken)
     this.pageActive = true
     return this.loadModuleStatus()
   },
@@ -69,6 +75,10 @@ export default {
     this.pageActive = true
     // The app-session cache reuses the first query and any newer reload snapshot.
     return this.loadModuleStatus()
+  },
+
+  onRefresh() {
+    this.preserveForUser()
   },
 
   onHide() {
@@ -123,15 +133,22 @@ export default {
     }
   },
 
+  preserveForUser() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.preserveForUser()
+  },
+
   openResources() {
+    this.preserveForUser()
     router.push({ uri: "pages/resources" })
   },
 
   openMixMatch() {
+    this.preserveForUser()
     router.push({ uri: "pages/mix-match" })
   },
 
   async requestReload() {
+    this.preserveForUser()
     if (this.sendingReload) return
     this.sendingReload = true
     this.reloadRevision = Math.max(Date.now(), this.reloadRevision + 1)

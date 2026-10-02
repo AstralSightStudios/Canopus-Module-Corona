@@ -52,6 +52,7 @@ export interface ResourcePackManifest {
   themeId: string;
   name: string;
   version?: string;
+  versionCode?: number;
   author?: string;
   description?: string;
   targets?: string[];
@@ -78,7 +79,7 @@ function utf8Length(value: string): number {
 }
 
 function validThemeId(value: unknown): value is string {
-  return typeof value === "string" && /^[a-z0-9_-]{1,12}$/.test(value);
+  return typeof value === "string" && /^[a-z0-9_-]{1,64}$/.test(value);
 }
 
 function requiredText(value: unknown, label: string, maxBytes: number): string {
@@ -160,6 +161,10 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
 
   const name = requiredText(value.name, "name", 128);
   const version = optionalText(value.version, "version", 64);
+  const versionCode = value.versionCode;
+  if (versionCode !== undefined &&
+      (typeof versionCode !== "number" || !Number.isSafeInteger(versionCode) || versionCode < 0))
+    throw new Error("versionCode 必须是非负安全整数");
   const author = optionalText(value.author, "author", 128);
   const description = optionalText(value.description, "description", 1024);
   let targets: string[] | undefined;
@@ -180,6 +185,7 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     themeId: value.themeId,
     name,
     ...(version === undefined ? {} : { version }),
+    ...(versionCode === undefined ? {} : { versionCode: versionCode as number }),
     ...(author === undefined ? {} : { author }),
     ...(description === undefined ? {} : { description }),
     ...(targets === undefined ? {} : { targets }),

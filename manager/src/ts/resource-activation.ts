@@ -97,7 +97,7 @@ function parseGenerationIndex(text: string | null): StoredGenerationIndex {
   const index = value as StoredGenerationIndex;
   if (index.protectedThemes !== undefined &&
       (!Array.isArray(index.protectedThemes) || index.protectedThemes.some(themeId =>
-        typeof themeId !== "string" || !/^[a-z0-9_-]{1,12}$/.test(themeId)) ||
+        typeof themeId !== "string" || !/^[a-z0-9_-]{1,64}$/.test(themeId)) ||
         new Set(index.protectedThemes).size !== index.protectedThemes.length))
     throw new Error("活动资源包保护索引格式无效");
   return index;
@@ -109,7 +109,7 @@ function directlyMappedThemes(mappings: string): string[] {
     if (!line || line[0] === "#") continue;
     const separator = line.indexOf("\t");
     if (separator <= 0) continue;
-    const match = /^themes\/([a-z0-9_-]{1,12})\//.exec(line.slice(separator + 1));
+    const match = /^themes\/([a-z0-9_-]{1,64})\//.exec(line.slice(separator + 1));
     if (match) themes.add(match[1]);
   }
   return Array.from(themes).sort();

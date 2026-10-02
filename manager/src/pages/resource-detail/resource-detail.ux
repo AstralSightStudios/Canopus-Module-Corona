@@ -1,7 +1,7 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <div class="page">
+  <div class="page" ontouchstart="preserveForUser">
     <div class="header">
       <time-banner title="< 资源详情" clickable="true" onactivate="goBack" />
     </div>
@@ -49,7 +49,7 @@ import { readResourcePackManifest } from "../../ts/resource-pack"
 import { removeInstalledTheme } from "../../ts/resource-storage"
 
 const THEME_ROOT_URI = "internal://files/themes/"
-const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
+const VALID_THEME_ID = /^[a-z0-9_-]{1,64}$/
 
 export default {
   private: {
@@ -66,7 +66,12 @@ export default {
   },
 
   onInit() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.captureLaunchContext()
     this.loadManifest()
+  },
+
+  preserveForUser() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.preserveForUser()
   },
 
   async loadManifest() {

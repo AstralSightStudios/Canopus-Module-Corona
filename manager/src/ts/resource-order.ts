@@ -6,7 +6,7 @@ export const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json";
 export const RESOURCE_ORDER_URI = "internal://files/resource-order.json";
 export const RESOURCE_FILES_URI = "internal://files/resource-files.json";
 
-const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/;
+const VALID_THEME_ID = /^[a-z0-9_-]{1,64}$/;
 // Installed inventories are storage-bounded, independent of transfer file-index width.
 const MAX_FILE_INDEX_BYTES = 2 * 1024 * 1024;
 

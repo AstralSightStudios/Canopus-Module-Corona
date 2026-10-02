@@ -1,5 +1,5 @@
 import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination } from "./resource-path";
-import { interconnect } from "./import";
+import { app, interconnect } from "./import";
 import * as file from "./file";
 import type { FileOperationError } from "./file";
 import { isResourcePackManifestFilename, isReservedResourcePackPath, parseResourcePackManifest, readResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
@@ -133,7 +133,12 @@ function integer(value: unknown, min: number, max: number): value is number {
 }
 
 function validThemeId(value: unknown): value is string {
-  return typeof value === "string" && /^[a-z0-9_-]{1,12}$/.test(value);
+  return typeof value === "string" && /^[a-z0-9_-]{1,64}$/.test(value);
+}
+
+function validControlId(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 64 &&
+    !/[^A-Za-z0-9_-]/.test(value);
 }
 
 /** Validate without rewriting: the returned path is the exact transmitted spelling. */
@@ -265,6 +270,14 @@ export class InterconnectThemeReceiver {
   private handshakeSent = false;
   private peerMaxTextChars = MAX_TEXT_CHARS;
   private transferPageOpened = false;
+  // Live upload activity only; durable resumable state must not prevent idle cleanup.
+  private transferActive = false;
+  private connectionGeneration = 0;
+  private started = false;
+  private launchContextCaptured = false;
+  // Immutable cold-launch identity; retained only to classify matching live Q as busy.
+  private launchToken: string | undefined;
+  private cleanupAllowed = false;
   private readonly listeners = new Set<(snapshot: ReceiverSnapshot) => void>();
 
   constructor(private readonly onTransferPage?: () => void) {}
@@ -286,9 +299,33 @@ export class InterconnectThemeReceiver {
     return () => this.listeners.delete(listener);
   }
 
+  /** Only the first page of a cold app launch may supply cleanup ownership. */
+  captureLaunchContext(token?: unknown): void {
+    if (this.launchContextCaptured) {
+      // A new/reinitialized page can be a manual foreground launch before any touch.
+      this.preserveForUser();
+      return;
+    }
+    this.launchContextCaptured = true;
+    if (validControlId(token)) {
+      this.launchToken = token;
+      this.cleanupAllowed = true;
+    }
+  }
+
+  /** User takeover or an uncertain lifecycle permanently revokes this launch. */
+  preserveForUser(): void {
+    this.launchContextCaptured = true;
+    this.cleanupAllowed = false;
+  }
+
   start(): void {
     if (this.link) return;
+    if (this.started) this.preserveForUser();
+    this.started = true;
     this.stopped = false;
+    this.connectionGeneration++;
+    this.transferActive = false;
     this.handshakeSent = false;
     const api = interconnect as unknown as InterconnectModule;
     const link = api.instance() as InterconnectLink;
@@ -300,6 +337,7 @@ export class InterconnectThemeReceiver {
     };
     const opened = (event: InterconnectEvent = {}) => {
       if (this.stopped) return;
+      if (event.isReconnected) this.preserveForUser();
       this.handshakeSent = false;
       this.setPhase("ready", event.isReconnected ? "互联已重连，正在恢复接收状态…" : "互联已连接，正在握手…");
       void this.sendHandshake().catch(error => {
@@ -308,6 +346,9 @@ export class InterconnectThemeReceiver {
     };
     link.onopen = opened;
     link.onclose = event => {
+      this.connectionGeneration++;
+      this.transferActive = false;
+      this.preserveForUser();
       if (!this.stopped) {
         const interrupted = this.snapshot.phase === "receiving";
         this.setPhase(interrupted ? "error" : "waiting",
@@ -315,6 +356,9 @@ export class InterconnectThemeReceiver {
       }
     };
     link.onerror = event => {
+      this.connectionGeneration++;
+      this.transferActive = false;
+      this.preserveForUser();
       if (this.stopped || this.snapshot.phase === "success" || this.snapshot.phase === "error") return;
       if (this.snapshot.phase === "receiving") {
         const reason = String(event.data || event.code || "未知错误");
@@ -339,6 +383,9 @@ export class InterconnectThemeReceiver {
 
   stop(): void {
     this.stopped = true;
+    this.connectionGeneration++;
+    this.transferActive = false;
+    this.preserveForUser();
     if (this.link) {
       this.link.onmessage = null;
       this.link.onopen = null;
@@ -387,16 +434,34 @@ export class InterconnectThemeReceiver {
     });
   }
 
+  private isCurrentConnection(generation: number): boolean {
+    return !this.stopped && generation === this.connectionGeneration;
+  }
+
+  private activateTransfer(generation: number): void {
+    // A pre-disconnect handler may finish durable work after a native await,
+    // but it must not resurrect activity in the new connection/session.
+    if (this.isCurrentConnection(generation)) {
+      this.transferActive = true;
+      // A query must not close an upload or its success screen, even after finish.
+      this.preserveForUser();
+    }
+  }
+
   private enqueue(packet: string): void {
+    const generation = this.connectionGeneration;
     this.queue = this.queue.then(async () => {
-      if (this.stopped) return;
+      if (!this.isCurrentConnection(generation)) return;
       // List snapshots take the resource lock only while reading, not while sending.
       if (packet[0] === "L") await this.handleList(packet);
+      else if (packet[0] === "Q") await withResourceOperation(async () => {
+        if (this.isCurrentConnection(generation)) await this.handleQuit(packet, generation);
+      });
       else await withResourceOperation(async () => {
-        if (!this.stopped) await this.handleMessage(packet);
+        if (this.isCurrentConnection(generation)) await this.handleMessage(packet, generation);
       });
     }).catch(async error => {
-      if (this.stopped) return;
+      if (!this.isCurrentConnection(generation)) return;
       const code = errorCode(error, "write-failed");
       this.setPhase("error", `接收错误（${code}）：${String((error as Error).message || error)}`);
       try {
@@ -425,6 +490,7 @@ export class InterconnectThemeReceiver {
           catch (_error) { /* Keep installed entries visible when metadata is unavailable. */ }
           entries.push(manifest ? {
             themeId, name: manifest.name, version: manifest.version, author: manifest.author,
+            ...(manifest.versionCode === undefined ? {} : { versionCode: manifest.versionCode }),
             metadataStatus: "ok"
           } : { themeId, name: themeId, metadataStatus: "unavailable" });
         }
@@ -469,6 +535,45 @@ export class InterconnectThemeReceiver {
         await this.sendObject(page);
       }
     } catch (_sendError) { /* Query failures must not change upload state. */ }
+  }
+
+  /** Called under the resource lock; do not release it between checking and exiting. */
+  private async handleQuit(packet: string, generation: number): Promise<void> {
+    let replyTo: string | undefined;
+    let launchToken: string | undefined;
+    let rejection: string | undefined;
+    try {
+      const request = parseJsonPacket(packet, "Q");
+      if (validControlId(request.requestId)) replyTo = request.requestId;
+      if (!replyTo || !validControlId(request.launchToken) || packet.length > MAX_TEXT_CHARS)
+        throw protocolError("invalid-request", "无效的退出请求");
+      launchToken = request.launchToken;
+    } catch (_error) {
+      rejection = "invalid-request";
+    }
+    if (!rejection && launchToken !== this.launchToken) rejection = "not-owner";
+    // The queue and resource lock already wait for in-flight writes. Do not load
+    // durable state: interrupted/corrupt uploads must not block owned idle cleanup.
+    if (!rejection && this.transferActive) rejection = "busy";
+    if (!rejection && !this.cleanupAllowed) rejection = "not-owner";
+    try {
+      if (rejection) {
+        await this.sendJson("Q", { replyTo, status: "reject", errorCode: rejection });
+        return;
+      }
+      await this.sendJson("Q", { replyTo, status: "ready" });
+    } catch (_sendError) {
+      return; // Never exit without a successfully sent ready reply.
+    }
+    // User interaction can revoke ownership while the native send is pending,
+    // even without changing the connection generation.
+    if (!this.isCurrentConnection(generation) || !this.cleanupAllowed ||
+        !launchToken || launchToken !== this.launchToken) return;
+    // Queued packets must not start after the ready reply. Platform termination
+    // is synchronous; send success is not proof the peer received the reply.
+    this.stop();
+    try { app.terminate(); }
+    catch (_error) { /* A ready reply cannot be retracted; do not send a second status. */ }
   }
 
   private async ensureStateLoaded(): Promise<void> {
@@ -528,7 +633,7 @@ export class InterconnectThemeReceiver {
     this.state = next;
   }
 
-  private async handleMessage(packet: string): Promise<void> {
+  private async handleMessage(packet: string, generation: number): Promise<void> {
     if (!packet) throw protocolError("invalid-manifest", "收到空互联消息");
     if (packet.length > MAX_TEXT_CHARS)
       throw protocolError("invalid-manifest", "互联消息超过本地 18,000 字符上限");
@@ -536,8 +641,8 @@ export class InterconnectThemeReceiver {
     try {
       switch (packet[0]) {
         case "H": await this.handleHandshake(packet); return;
-        case "T": await this.handleTransfer(packet); return;
-        case "P": await this.handlePrepare(packet); return;
+        case "T": await this.handleTransfer(packet, generation); return;
+        case "P": await this.handlePrepare(packet, generation); return;
         case "F": await this.handleFileChunk(packet); return;
         case "C": await this.handleFileComplete(packet); return;
         case "E": {
@@ -549,6 +654,7 @@ export class InterconnectThemeReceiver {
         default: throw protocolError("invalid-manifest", "未知互联包类型");
       }
     } catch (error) {
+      if (!this.isCurrentConnection(generation)) return;
       const themeId = this.state?.themeId;
       const operation = packet[0] === "T" ? this.safeOperation(packet) : "";
       const code = errorCode(error, "write-failed");
@@ -588,7 +694,8 @@ export class InterconnectThemeReceiver {
           throw protocolError("invalid-manifest", "无效的握手 requestId");
         await this.sendJson("H", {
           version: VERSION, type: "response", replyTo: message.requestId,
-          maxTextChars: MAX_TEXT_CHARS, maxWindow: MAX_WINDOW
+          maxTextChars: MAX_TEXT_CHARS, maxWindow: MAX_WINDOW,
+          ...(this.cleanupAllowed && this.launchToken !== undefined ? { launchToken: this.launchToken } : {})
         });
         return;
       case "response":
@@ -615,11 +722,11 @@ export class InterconnectThemeReceiver {
     }
   }
 
-  private async handleTransfer(packet: string): Promise<void> {
+  private async handleTransfer(packet: string, generation: number): Promise<void> {
     const message = parseJsonPacket(packet, "T");
     const operation = message.operation;
     if (operation === "begin") {
-      await this.beginTransfer(message);
+      await this.beginTransfer(message, generation);
       return;
     }
     if (operation === "file") {
@@ -637,7 +744,7 @@ export class InterconnectThemeReceiver {
     throw protocolError("invalid-manifest", "不支持的主题清单操作");
   }
 
-  private async beginTransfer(message: { [key: string]: unknown }): Promise<void> {
+  private async beginTransfer(message: { [key: string]: unknown }, generation: number): Promise<void> {
     const themeId = message.themeId;
     const mode = message.mode;
     const fileCount = message.fileCount;
@@ -652,10 +759,12 @@ export class InterconnectThemeReceiver {
       if (!current || !sameHeader(current, themeId, fileCount, totalBytes) || !current.manifestComplete)
         throw protocolError("invalid-manifest", "没有可匹配的续传状态；请以 replace 重新传输");
       if (current.mode === "resume" && current.manifestReceiving) {
+        this.activateTransfer(generation);
         await this.sendTransferAck(themeId, "begin");
         return;
       }
       const next = { ...current, mode: "resume" as const, manifestReceiving: true, manifestSeen: 0 };
+      this.activateTransfer(generation);
       await this.persist(next);
       if (current.finished) this.transferPageOpened = false;
       await this.sendTransferAck(themeId, "begin");
@@ -667,6 +776,7 @@ export class InterconnectThemeReceiver {
     const duplicateBegin = current && !current.finished && current.mode === "replace" &&
       current.manifestReceiving && sameHeader(current, themeId, fileCount, totalBytes);
     if (duplicateBegin) {
+      this.activateTransfer(generation);
       await this.sendTransferAck(themeId, "begin");
       return;
     }
@@ -675,6 +785,7 @@ export class InterconnectThemeReceiver {
     if (await this.isThemeActive(themeId))
       throw protocolError("active-theme", `主题 ${themeId} 正在使用；请先切换到其他主题`);
 
+    this.activateTransfer(generation);
     invalidateResourceCatalog();
     try {
       await this.removeThemeDirectory(themeId);
@@ -781,7 +892,7 @@ export class InterconnectThemeReceiver {
       bytesReceived: 0, totalBytes: state.totalBytes, percent: 0 });
   }
 
-  private async handlePrepare(packet: string): Promise<void> {
+  private async handlePrepare(packet: string, generation: number): Promise<void> {
     const message = parseJsonPacket(packet, "P");
     await this.ensureStateLoaded();
     const state = this.state;
@@ -810,6 +921,8 @@ export class InterconnectThemeReceiver {
         (stored.chunkSizeBytes !== chunkSize || stored.chunkCount !== chunkCount) &&
         receivedCount(stored.receivedBitmap, stored.chunkCount || 0) > 0)
       throw protocolError("invalid-manifest", "已接收分片的大小发生变化；请使用 replace");
+    // Reconnects may resume directly with P rather than replaying T begin.
+    this.activateTransfer(generation);
     if (stored.chunkSizeBytes !== chunkSize || stored.chunkCount !== chunkCount ||
         (!stored.complete && !stored.receivedBitmap)) {
       const files = state.files.slice();
@@ -916,6 +1029,7 @@ export class InterconnectThemeReceiver {
       await writeThemeFileInventory(state.themeId, state.files, file);
       if (!state.finished) await this.persist({ ...state, finished: true });
       await this.registerTheme(state.themeId);
+      this.transferActive = false;
     } finally {
       invalidateResourceCatalog();
     }

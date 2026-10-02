@@ -1,7 +1,7 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <div class="page">
+  <div class="page" ontouchstart="preserveForUser">
     <div class="time-section">
       <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
     </div>
@@ -48,6 +48,7 @@ export default {
 
   onInit() {
     const receiver = globalThis.themeReceiver
+    if (receiver) receiver.captureLaunchContext()
     if (!receiver) {
       this.phase = "error"
       this.phaseTitle = "接收服务未启动"
@@ -68,6 +69,10 @@ export default {
       this.receivedLabel = `${this.formatBytes(snapshot.bytesReceived)} / ${this.formatBytes(snapshot.totalBytes)}`
       this.syncScreenOn()
     })
+  },
+
+  preserveForUser() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.preserveForUser()
   },
 
   onShow() {

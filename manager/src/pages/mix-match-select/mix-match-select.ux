@@ -1,7 +1,7 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <div class="page">
+  <div class="page" ontouchstart="preserveForUser">
     <div class="header">
       <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
     </div>
@@ -54,6 +54,14 @@ export default {
     selectedChoice: DEFAULT_RESOURCE_CHOICE,
     visible: false,
     loadVersion: 0
+  },
+
+  onInit() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.captureLaunchContext()
+  },
+
+  preserveForUser() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.preserveForUser()
   },
 
   onShow() {

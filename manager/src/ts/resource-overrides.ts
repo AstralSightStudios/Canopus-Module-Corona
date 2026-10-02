@@ -17,7 +17,7 @@ export const SYSTEM_RESOURCE_CHOICE = "@system";
 const THEME_ROOT_URI = "internal://files/themes/";
 const MAX_OVERRIDE_BYTES = 64 * 1024;
 const MAX_CATALOG_PATHS = 8192;
-const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/;
+const VALID_THEME_ID = /^[a-z0-9_-]{1,64}$/;
 
 export interface ResourcePackOption {
   themeId: string;

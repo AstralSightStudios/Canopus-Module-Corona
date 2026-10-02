@@ -17,7 +17,7 @@ export interface ResourceStorageError extends Error {
 const INSTALLED_THEMES_URI = "internal://files/interconnect-themes.json";
 const MAPPINGS_URI = "internal://files/mappings.tsv";
 const THEME_ROOT_URI = "internal://files/themes/";
-const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/;
+const VALID_THEME_ID = /^[a-z0-9_-]{1,64}$/;
 
 function storageError(
   reason: ResourceStorageError["resourceStorageReason"],

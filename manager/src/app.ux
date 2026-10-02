@@ -10,11 +10,15 @@ export default {
     initializeResourceCatalogSession(file)
     initializeModuleControlSession()
     globalThis.receivePageVisible = false
+    // One receiver/gate per cold app boot; pages consume its launch context once.
     const receiver = new InterconnectThemeReceiver(() => {
       if (!globalThis.receivePageVisible) router.push({ uri: "pages/receive" })
     })
     globalThis.themeReceiver = receiver
     receiver.start()
+  },
+  onHide() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.preserveForUser()
   },
   onDestroy() {
     if (globalThis.themeReceiver) {

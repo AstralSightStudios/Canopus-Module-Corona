@@ -1,7 +1,7 @@
 <import name="time-banner" src="../../components/time"></import>
 
 <template>
-  <div class="page" ontouchend="handleTouchEnd" ontouchcancel="cancelGesture">
+  <div class="page" ontouchstart="preserveForUser" ontouchend="handleTouchEnd" ontouchcancel="cancelGesture">
     <div class="header">
       <time-banner title="{{headerTitle}}" clickable="true" onactivate="goBack" />
     </div>
@@ -42,7 +42,7 @@ import {
 } from "../../ts/resource-order"
 
 const THEME_ROOT_URI = "internal://files/themes/"
-const VALID_THEME_ID = /^[a-z0-9_-]{1,12}$/
+const VALID_THEME_ID = /^[a-z0-9_-]{1,64}$/
 const VIEW_TOP = 96
 // Keep drag edges inside the safe area. On the 212x520 rounded screen,
 // the 424px viewport minus its 52px trailing spacer is still 372px.
@@ -100,6 +100,14 @@ export default {
     scrollPending: false,
     suppressClick: false,
     suppressClickTimer: null
+  },
+
+  onInit() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.captureLaunchContext()
+  },
+
+  preserveForUser() {
+    if (globalThis.themeReceiver) globalThis.themeReceiver.preserveForUser()
   },
 
   onShow() {
@@ -238,6 +246,7 @@ export default {
   },
 
   handleTouchStart(orderId, event) {
+    this.preserveForUser()
     if (this.touching || !this.visible || this.loadError) {
       if (this.touching) this.cancelGesture()
       return

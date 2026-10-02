@@ -6,7 +6,7 @@ interconnect 的应用层载荷使用文本。当前目标设备上实测单条�
 
 - 传输协议不传 ZIP：分享用 `.crpack` 解包后，链路上是一棵 `corona.json` 与资源文件组成的目录树，按本协议逐文件传输。
 - Interconnect 传输层只枚举和传输文件，不解释或改写 `corona.json`，也不重排或改名任何资源相对路径。分享包校验属于发送端的导入层。
-- 不设 `packageId` 或版本代次。`themeId` 是短的包目录名；更新时先删除旧包再完整重传。
+- 不设 `packageId` 或传输版本代次。资源的官方 ID 始终等于 `themeId`，它也是短的包目录名；可选 `versionCode` 仅为包元数据，不改变传输/续传身份；更新时先删除旧包再完整重传。
 - 一次只允许一个主题上传、一个文件传输；文件内部使用窗口分片。数据包头只带文件序号和分片序号。
 - 手环不回读、不计算整文件哈希；只逐片解码和写入。完成表示所有声明分片均写入成功，不是端到端内容校验。
 - 更新当前正在使用的主题前，必须先切换到其他主题或默认资源；活动主题目录不可直接删除。中断后可按同一份文件清单续传；重新更新则显式删除并重传。
@@ -43,6 +43,7 @@ dark.crpack  (ZIP)
   "themeId": "dark",
   "name": "Dark",
   "version": "1.0.0",
+  "versionCode": 1,
   "author": "Example author",
   "description": "Example resource pack",
   "targets": ["xiaomi-band-11-4.100.139"],
@@ -55,7 +56,7 @@ dark.crpack  (ZIP)
 }
 ```
 
-`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 展示，不参与传输续传或设备兼容性判定。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：`themeId` 直接作为协议 `themeId` 和设备主题目录名。`mappings` 与下述可选 `quickappIcons` 是规范的映射声明来源，合计最多 256 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径或有效的 `@quickapp-icon/<package>` 精确图标 key，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。普通路径的目录/文件结尾斜杠类型须相同；快应用语义 key 始终是精确文件规则，包名末尾斜杠不表示目录。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 ASCII 控制字节（含 NUL、TAB、CR、LF）或 DEL。允许 `mappings` 为空；只有它与 `quickappIcons` 均为空时，该主题才不产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 256、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
+`format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`versionCode`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 读取元数据，不参与传输续传或设备兼容性判定。`versionCode` 若存在，必须为 JSON number 类型的非负安全整数（0–9007199254740991）；不接受字符串、null、负数、小数或超出安全整数范围的值。省略时不默认补 0，旧包继续有效。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：资源官方 ID 始终等于 `themeId`，直接作为协议 `themeId` 和设备主题目录名，不另设 ID 字段。`mappings` 与下述可选 `quickappIcons` 是规范的映射声明来源，合计最多 256 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径或有效的 `@quickapp-icon/<package>` 精确图标 key，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。普通路径的目录/文件结尾斜杠类型须相同；快应用语义 key 始终是精确文件规则，包名末尾斜杠不表示目录。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 ASCII 控制字节（含 NUL、TAB、CR、LF）或 DEL。允许 `mappings` 为空；只有它与 `quickappIcons` 均为空时，该主题才不产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 256、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
 
 ### 可选快应用图标声明
 
@@ -119,7 +120,7 @@ themes/dark/app/settings/launcher.bin
 themes/dark/icons/confirm.bin
 ```
 
-CRPack v1 的 `themeId` 取自 `corona.json`，限定为 1–12 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`corona.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
+CRPack v1 的 `themeId` 取自 `corona.json`，限定为 1–64 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`corona.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
 
 Manager 接收 CRPack v1 时解析 `corona.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级解析，配置预算内直接映射到包文件，超预算才合并到不可变活动代次；低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块要求最多 256 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数；CRPack 容器及已安装主题文件清单不设文件数量上限，文件清单仍受既有索引存储预算约束；Interconnect 单次传输受文件序号编码限制，最多 65,536 个文件（含 `corona.json`）；manifest 仍最多 64 KiB。旧版 Manager 的 128 文件限制已移除，超过 128 个文件的包需更新接收端 Manager。发送端导入检查文件路径安全和总大小，并在传输前检查文件数是否可由协议编码；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
 
@@ -145,11 +146,27 @@ H{"version":2,"type":"response","replyTo":"peer_42","maxTextChars":18000,"maxWin
 
 只支持协议版本 2，不进行 v1 fallback。`maxTextChars` 为本端最大完整消息字符数；双方取较小值。`maxWindow` 为最大分片窗口（当前为 4）。Manager 不提供 `freeBytes`。
 
-握手完整时序如下：Manager 在应用启动时探测到链路已打开，或收到连接打开事件（包括重连）时主动发送 `announce`；若链路未打开，则等 `onopen` 后发送。AstroBox 在订阅互联事件并 launch 后发送 `request`，`requestId` 必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Manager 收到每个合法 `request`，无论此前是否已发送 `announce`，都必须回复 `response`，并以 `replyTo` 原样匹配请求 ID；重复请求可重复回复同一响应，处理具幂等性。收到 `announce` 或 `response` 不回复，避免握手回环。典型顺序为：
+`response` 可带可选 `launchToken`，只用于下述自动退出所有权，不改变握手是否有效。普通启动、普通资源安装（仍使用空 launch URI）、旧 Manager 或没有所有权标记的响应都继续是合法握手。Manager **绝不从 H 请求复制或绑定 token**；`announce` 不授予所有权。只有本应用冷启动的首个页面恰为 index、通过公开属性收到合法查询参数且退出权限尚未撤销时，响应才带该冷启动上下文的 token：
+
+```text
+H{"version":2,"type":"response","replyTo":"peer_42","maxTextChars":18000,"maxWindow":4,"launchToken":"check_42"}
+```
+
+AstroBox 查询已安装列表时，先订阅互联并进行最长 1,500 ms 的 H 探测，**不 launch**。探测得到正常关联响应后直接查询 L，无论响应有无 token，都不 launch、不发 Q，保留已打开的 Manager。只有探测超时才尝试 launch；协议错误、断线等非超时失败不据此重启应用。超时后的查询 launch 使用官方 HAP 页面 URI：
+
+```text
+hap://app/ng.lst.corona/pages/index?astroboxCheckToken=<nonce>
+```
+
+`<nonce>` 是本次查询独有的 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Vela 页面查询参数通过 index 的 `public.astroboxCheckToken` 接收，不能放在 `private`。应用 `onCreate` 建立一次冷启动接收器和一次性上下文 gate；六个可作为首屏的路由均在 `onInit` 开始、任何异步工作之前同步消费 gate：index 提供公开参数，其他路由明确记录无 token。首屏缺参/非法参数也消费 gate；之后任一页面再次调用上下文捕获（`onInit`，包括无参或带同一/另一 token 的 index 重进/重新 launch）都会直接撤销退出权限，不能绑定或替换 token。首页 `onRefresh` 和应用 `onHide` 也撤权，避免用户未触摸 Manager 就手动重新打开/切回时被迟到 Q 关闭。`onShow` 不授予权限，接收器 stop/start 不重开 gate。若 H 早于首屏捕获，不附带标记，不推测所有权。无需未文档化的 `getSource`、`onRequest` 或应用生命周期参数。HAP URI 语法及公开属性注入规则来自平台文档；目标固件的实际 launch/query 注入行为仍需实机验证。未响应的已有应用可能被 timeout fallback 导航，但这不能证明是新启动，token gate 保证不据此取得退出权限。
+
+launch 后 AstroBox 仍须完成正常的关联 H：只有 `response.replyTo` 正确、握手字段有效，且 `response.launchToken` **精确等于本次 nonce** 才确认自动清理所有权。握手失败/超时、旧版或无标记响应、token 不符均不得发 Q，必须保留 Manager；握手本身不因缺少所有权标记而失败。已确认所有权后才可在列表成功或失败时尝试 Q。
+
+握手完整时序如下：Manager 在应用启动时探测到链路已打开，或收到连接打开事件（包括重连）时主动发送 `announce`；若链路未打开，则等 `onopen` 后发送。AstroBox 在订阅互联事件后发送 `request`（普通安装与上述超时 fallback 会先 launch），`requestId` 必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Manager 收到每个合法 `request`，无论此前是否已发送 `announce`，都必须回复 `response`，并以 `replyTo` 原样匹配请求 ID；重复请求可重复回复同一响应，处理具幂等性。收到 `announce` 或 `response` 不回复，避免握手回环。典型顺序为：
 
 ```text
 Manager -> AstroBox: announce（链路打开时）
-AstroBox -> Manager: request（订阅/launch 后）
+AstroBox -> Manager: request（订阅后；需要 launch 的流程在 launch 后）
 Manager -> AstroBox: response（replyTo 匹配 requestId）
 ```
 
@@ -163,7 +180,7 @@ Manager -> AstroBox: response（replyTo 匹配 requestId）
 L{"requestId":"list_42"}
 ```
 
-`requestId` 必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Manager **直接发送结构化对象**，以 `msg: "L"` 标记列表响应；列表 JSON 不再序列化成字符串嵌入 `msg`。这是一种新增响应格式，现有 `H/T/P/F/A/C/E` 响应仍使用 `{msg: packet}`。
+`requestId` 必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Manager **直接发送结构化对象**，以 `msg: "L"` 标记列表响应；列表 JSON 不再序列化成字符串嵌入 `msg`。这是一种新增响应格式，现有 `H/T/P/F/A/C/E` 及新增 `Q` 响应仍使用 `{msg: packet}`。
 
 ```json
 {
@@ -177,6 +194,7 @@ L{"requestId":"list_42"}
       "themeId": "dark",
       "name": "Dark",
       "version": "1.0.0",
+      "versionCode": 1,
       "author": "Example",
       "metadataStatus": "ok"
     }
@@ -187,7 +205,7 @@ L{"requestId":"list_42"}
 Vela API 调用为 `connect.send({data: responseObject, ...})`；固件负责对象的链路序列化。发送端解析外层 JSON 后，先判断 `msg === "L"` 并直接读取同层字段；其他 `msg` 继续交给现有文本包解析器，不能把单独的 `"L"` 再当作内层 JSON 包解析。
 
 - 列表以 `interconnect-themes.json` 的已安装索引为准，按 `themeId` 的 ASCII 顺序返回；不扫描目录、不包含未登记的上传包，也不包含“系统样式”项。
-- 每项只包含 `themeId`、`name`、可选的 `version` / `author` 和 `metadataStatus`。元数据正常时状态为 `ok`；缺失、损坏、歧义或不可读取时为 `unavailable`，名称回退到 `themeId`，省略版本和作者。沿用 `corona.json` / `canora.json` 兼容规则，不返回映射、文件清单或实际生效状态。
+- 每项只包含 `themeId`（也是资源官方 ID）、`name`、可选的 `version` / `versionCode` / `author` 和 `metadataStatus`。元数据正常时状态为 `ok`；`versionCode` 保留 JSON 数值类型，manifest 未声明时省略，不补 0。缺失、损坏、歧义或不可读取时为 `unavailable`，名称回退到 `themeId`，省略版本、版本代码和作者。沿用 `corona.json` / `canora.json` 兼容规则，不返回映射、文件清单或实际生效状态。
 - 每个请求在资源操作锁内构建一份只读快照，不写索引、顺序或迁移结果。发送响应页时不持有资源操作锁。查询不打开上传页面、不更改上传进度；查询错误也不把上传接收状态切成错误。
 - 对结构化响应，`maxTextChars` 约束完整对象的紧凑 JSON 长度，且不得超过 Manager 本地 18,000 字符上限。Manager 按实际序列化长度拆页，不使用固定条数；页内每项不可拆分。
 - `pageIndex` 从 0 连续递增，`total` 为本次快照总条数，最后一页 `done:true`，其余页为 `false`。空列表也返回第 0 页，`total:0`、`items:[]`、`done:true`。单个条目无法装入协商长度时返回 `response-too-large`，不截断元数据。
@@ -200,6 +218,26 @@ Vela API 调用为 `connect.send({data: responseObject, ...})`；固件负责对
 ```
 
 错误码为 `invalid-request`（JSON、请求 ID 或请求长度无效）、`list-failed`（已安装索引损坏或读取失败）、`response-too-large`（响应无法装入协商长度）。无效请求中只有合法的 `requestId` 才会被复制为 `replyTo`，否则省略 `replyTo`。索引缺失表示空列表，索引损坏不能伪装成空列表。错误响应没有 `items` / 分页字段；接收错误后发送端应丢弃本次已收集的页。发送失败时停止该次响应并等待发送端重新查询，不改变上传状态。
+
+### `Q` — 仅请求退出本次查询拥有的 Manager
+
+AstroBox 只在上述正常关联 H 确认本次 nonce 所有权后发送 Q；握手失败或没有/不匹配标记不得用 Q 清理。列表成功或失败不改变已确认的所有权。Manager 接收侧独立验证冷启动 token 与当前权限，不要求先记录一次 H；知道 requestId 或把 token 放进 H 并不能取得权限。退出不卸载资源包、不改变活动映射，也不取消上传：
+
+```text
+Q{"requestId":"quit_42","launchToken":"check_42"}
+Q{"replyTo":"quit_42","status":"ready"}
+Q{"replyTo":"quit_42","status":"reject","errorCode":"not-owner"}
+Q{"replyTo":"quit_42","status":"reject","errorCode":"busy"}
+```
+
+- `requestId` 与 `L/H` 相同，必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符；`launchToken` **必填**，采用相同字符/长度限制，必须精确匹配本应用冷启动首屏捕获的 nonce。不需要 `type`、版本或强制退出参数。缺失/非法 token 为 `invalid-request`；合法但不匹配或从未绑定 token 为 `not-owner`，不退出。
+- 响应使用既有文本信封，例如 Vela `connect.send({data:{msg:'Q{"replyTo":"quit_42","status":"ready"}'},...})`；不是 `L` 的结构化格式。发送端按 `replyTo` 关联。
+- 请求在接收队列中排在此前消息之后，并在共享资源操作锁内检查及响应；等待先前文件写入、登记、删除或重载等资源操作完成，不在操作中途终止。匹配冷启动 token 时，`busy` 只取决于本次运行会话的上传活动标记：合法 `T begin`（包括重复 begin、续传清单重放）或用于直接续传的合法 `P` 激活标记；成功 `T finish`、链路 `onclose` / `onerror`、停止/重启接收器清除标记。活动上传中匹配 token 的 Q 回 `busy`，不同 token 仍回 `not-owner`；所有文件 `C` 不等于完成 `T finish`。
+- 自动退出权限独立于上传 busy 标记，保存在内存且不可恢复/持久化。任何页面根元素的 `touchstart`（包括滚动/手势）、后续页面上下文捕获（重进/重新初始化 `onInit`）、首页 `onRefresh`、应用 `onHide`、首页既有导航/重载操作、接受并激活合法 `T begin` / `P`、`onclose` / `onerror` / 重连、接收器 stop/restart 都永久撤销本次启动的退出权限，后续 H 不再带 `launchToken`。上传激活即撤权，`T finish` 清除 busy 后匹配旧 token 的 Q 也回 `not-owner`，避免迟到查询关闭上传成功页。首屏 gate 也不因重启接收器而重开。无效的上传请求本身不激活 busy 或夺取权限。
+- 每个入队消息捕获当前连接代次；`onclose` / `onerror` / 停止 / 启动使旧代次失效。旧代次尚未执行的消息（包括等待资源锁的消息）跳过，不在重连后激活上传。旧代次已开始的处理仍可按原有流程完成持久化，但异步等待恢复后不得重新激活本会话上传标记；新的 L 仍可读取，Q 不恢复已撤销的权限。
+- 只有匹配 token、退出权限仍有效且没有本会话活动上传时才发送 `ready`。磁盘保留未完成或损坏的续传状态不妨碍这样的拥有者退出；Q 不读取、验证、修改或删除持久化上传状态。等 Vela 发送成功回调后，**再次检查连接代次和退出所有权/权限**；期间若用户接管、断线或 stop/restart，保留 Manager，不据旧 ready 终止。确认仍有权限时才停止接收器并调用 `@system.app.terminate()`，此间不释放资源操作锁，ready 后已排队的新请求不会继续执行。发送失败不退出；成功回调不证明对端收到响应，ready 也不证明平台已完成退出。协议不增加对端 ACK、固定延迟或退出完成通知。
+- JSON、请求 ID、launchToken 或超过本地 18,000 字符的请求使用 `status:"reject",errorCode:"invalid-request"`；只有合法 ID 才复制为 `replyTo`，否则省略。Q 不使用 `exit-failed` 错误码，不发送上传 `E`，不打开接收页或修改接收进度/状态。接收端 token 校验是防误关的启动所有权关联，不是身份认证协议。
+- 无重复请求缓存：退出前的拒绝或发送失败可沿用同一 ID 重试并重新检查，但不能恢复撤销的权限；成功 ready 后不保证重复响应。不支持强制终止或通过 Q 丢弃未完成上传。若平台终止调用异常，已发送 ready 不可撤回，也不追加第二个状态。
 
 ### `T` — 文件清单与传输状态
 

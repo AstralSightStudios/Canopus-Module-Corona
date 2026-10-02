@@ -5,6 +5,7 @@ const { spawnSync } = require('node:child_process');
 const tests = [
   'test_file.cjs',
   'test_interconnect.cjs',
+  'test_manager_launch.cjs',
   'test_manifest_filenames.cjs',
   'test_resource_storage.cjs',
   'test_module_control.cjs',
@@ -302,6 +303,14 @@ async function testPortableDestinations() {
         ...pack, mappings: [{ source: source + 'x', destination: 'a.bin' }]
       } }], 'portable'), /路径无效/);
     }
+
+    const id64 = 'z'.repeat(64);
+    const id65 = 'z'.repeat(65);
+    const m64 = manifest(id64);
+    assert.equal(serialize(m64), `/resource/icons/\tthemes/${id64}/icons/\n`);
+    assert.equal(plan([{ themeId: id64, manifest: m64, files: null }], 'portable').mappings,
+      `/resource/icons/\tthemes/${id64}/icons/\n`);
+    assert.throws(() => manifest(id65), /themeId/);
 
     const packObject = mappings => ({
       format: 'canopus-resource-pack', formatVersion: 1, themeId: 'top', name: 'top', mappings

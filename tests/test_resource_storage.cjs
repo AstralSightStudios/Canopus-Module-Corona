@@ -123,7 +123,7 @@ async function main() {
     '{invalid', 'null',
     JSON.stringify({ version: 2, generations: [], protectedThemes: ['dark'] }),
     JSON.stringify({ version: 1, generations: 'bad', protectedThemes: ['dark'] }),
-    ...[null, 'dark', [42], [''], ['Dark'], ['too_long_theme'], ['../dark'], ['dark', 'dark']]
+    ...[null, 'dark', [42], [''], ['Dark'], ['x'.repeat(65)], ['../dark'], ['dark', 'dark']]
       .map(protectedThemes => JSON.stringify({ version: 1, generations: [], protectedThemes }))
   ];
   for (const registry of malformedRegistries) {
