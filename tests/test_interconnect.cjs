@@ -691,8 +691,92 @@ async function main() {
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
   assert.equal(native.binary.has('internal://files/themes/dark/icons/a.bin'), false);
 
+  // List replies are direct objects, not JSON strings nested in msg.
+  async function queryList(packet = 'L{"requestId":"list_42"}') {
+    const start = sent.length;
+    connection.onmessage({ data: packet });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return sent.slice(start).map(value => JSON.parse(JSON.stringify(value)));
+  }
+  const listState = states.at(-1);
+  const listPageRequests = transferPageRequests;
+  native.text.delete(installedUri);
+  let listReply = await queryList();
+  assert.deepEqual(listReply, [{ msg: 'L', replyTo: 'list_42', pageIndex: 0,
+    done: true, total: 0, items: [] }]);
+
+  native.text.set(installedUri, JSON.stringify(['legacy', 'dark', 'broken']));
+  for (const themeId of ['legacy', 'dark', 'broken']) {
+    native.binary.delete(`internal://files/themes/${themeId}/corona.json`);
+    native.binary.delete(`internal://files/themes/${themeId}/canora.json`);
+  }
+  native.text.set('internal://files/themes/dark/corona.json', coronaText);
+  native.text.delete('internal://files/themes/dark/canora.json');
+  native.text.delete('internal://files/themes/legacy/corona.json');
+  native.text.set('internal://files/themes/legacy/canora.json', JSON.stringify({
+    ...coronaObject, themeId: 'legacy', name: 'Legacy', version: undefined, author: undefined
+  }));
+  native.text.set('internal://files/themes/broken/corona.json', '{invalid');
+  const beforeList = nativeStorageSnapshot();
+  listReply = await queryList();
+  assert.deepEqual(listReply[0].items, [
+    { themeId: 'broken', name: 'broken', metadataStatus: 'unavailable' },
+    { themeId: 'dark', name: 'Dark', version: '1.0.0', author: 'Canopus', metadataStatus: 'ok' },
+    { themeId: 'legacy', name: 'Legacy', metadataStatus: 'ok' }
+  ]);
+  assert.equal(listReply[0].total, 3);
+  assert.deepEqual(await queryList(), listReply);
+  assert.deepEqual(nativeStorageSnapshot(), beforeList, 'listing must not migrate or write storage');
+  native.text.set('internal://files/themes/legacy/corona.json', '{}');
+  assert.equal((await queryList())[0].items[2].metadataStatus, 'unavailable');
+
+  for (const invalidIndex of ['{invalid', '["dark","dark"]', '["../escape"]']) {
+    native.text.set(installedUri, invalidIndex);
+    assert.deepEqual(await queryList(), [{ msg: 'L', replyTo: 'list_42', errorCode: 'list-failed' }]);
+  }
+  for (const invalidRequest of ['L{invalid', 'L{}', 'L{"requestId":"bad id"}', 'L[]'])
+    assert.deepEqual(await queryList(invalidRequest), [{ msg: 'L', errorCode: 'invalid-request' }]);
+  assert.deepEqual(await queryList('L' + JSON.stringify({ requestId: 'list_42', padding: 'x'.repeat(18000) })),
+    [{ msg: 'L', replyTo: 'list_42', errorCode: 'invalid-request' }]);
+
+  // A small negotiated budget forces multiple pages without nested escaping.
+  connection.onmessage({ data: 'H{"version":2,"type":"request","requestId":"budget","maxTextChars":256}' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  native.text.set(installedUri, JSON.stringify(['legacy', 'dark', 'broken']));
+  listReply = await queryList();
+  assert(listReply.length > 1);
+  assert.deepEqual(listReply.flatMap(page => page.items).map(item => item.themeId), ['broken', 'dark', 'legacy']);
+  listReply.forEach((page, index) => {
+    assert.equal(page.msg, 'L');
+    assert.equal(page.replyTo, 'list_42');
+    assert.equal(page.pageIndex, index);
+    assert.equal(page.total, 3);
+    assert.equal(page.done, index === listReply.length - 1);
+    assert(JSON.stringify(page).length <= 256);
+  });
+  native.text.set(installedUri, '["dark"]');
+  native.text.set('internal://files/themes/dark/corona.json', JSON.stringify({
+    ...coronaObject, name: '"'.repeat(128), author: '\\'.repeat(128)
+  }));
+  assert.deepEqual(await queryList(), [{ msg: 'L', replyTo: 'list_42', errorCode: 'response-too-large' }]);
+
+  // Native read/send failures stay local to the query, preserving upload state.
+  const originalReadText = native.readText;
+  native.readText = options => options.uri === installedUri
+    ? options.fail('unreadable', 500) : originalReadText(options);
+  assert.deepEqual(await queryList(), [{ msg: 'L', replyTo: 'list_42', errorCode: 'list-failed' }]);
+  native.readText = originalReadText;
+  native.text.delete(installedUri);
+  const originalSend = connection.send;
+  connection.send = options => options.fail('disconnected', 500);
+  assert.deepEqual(await queryList(), []);
+  connection.send = originalSend;
+  assert.equal((await queryList())[0].done, true, 'a send failure must not poison the receiver queue');
+  assert.deepEqual(states.at(-1), listState);
+  assert.equal(transferPageRequests, listPageRequests);
+
   receiver.stop();
-  console.log('Interconnect large transfers, four-hex wire bound, 256-rule manifests, path validation, Base91, resume, finish and durable protection tests passed.');
+  console.log('Interconnect transfer, durable protection and structured list query tests passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true });

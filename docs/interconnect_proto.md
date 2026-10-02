@@ -127,7 +127,7 @@ Manager 接收 CRPack v1 时解析 `corona.json`、校验规则及映射目标�
 
 ## 消息格式
 
-消息首字符是包类型。控制包使用完整字段名的 JSON；大块文件数据使用紧凑文本。AstroBox 发往 Manager 的包继续使用原始协议文本；Manager 发往 AstroBox 时，Vela `connect.send` 的 `data` 必须是对象，因此发送 `{msg: packet}`。固件会将该对象序列化后传回 AstroBox，接收端先解析 JSON 并取出 `msg`，再交给相同的内层包解析器；`tag` 不需要。`maxTextChars` 限制内层协议包，Manager 还须确保序列化后的 `{msg: packet}` 不超过本地 Vela 消息上限。一次 `interconnect.send` 是一条独立消息；平台发送成功回调不代表对端已写盘，必须等待应用层确认。
+消息首字符是包类型。控制包使用完整字段名的 JSON；大块文件数据使用紧凑文本。AstroBox 发往 Manager 的包继续使用原始协议文本；Manager 发往 AstroBox 时，Vela `connect.send` 的 `data` 必须是对象；现有文本包发送 `{msg: packet}`，新增列表响应直接发送 `{msg: "L", ...}`（见下方 `L`）。固件会将该对象序列化后传回 AstroBox，接收端先解析 JSON：若 `msg === "L"` 则直接读取列表字段，否则取出 `msg` 交给相同的内层包解析器；`tag` 不需要。文本包的 `maxTextChars` 限制内层协议包，Manager 还须确保序列化后的 `{msg: packet}` 不超过本地 Vela 消息上限；列表响应按完整对象的序列化长度限制。一次 `interconnect.send` 是一条独立消息；平台发送成功回调不代表对端已写盘，必须等待应用层确认。
 
 ```text
 AstroBox -> Manager: H{"version":2,"type":"request",...}
@@ -154,6 +154,52 @@ Manager -> AstroBox: response（replyTo 匹配 requestId）
 ```
 
 两端连接事件与订阅/launch 的先后可能不同；若 AstroBox 的 `request` 先于 Manager 的 `announce` 到达，Manager 仍须响应，之后照常按链路生命周期发送 `announce`。AstroBox 收到 `announce` 后会立即重发 `request`，并每 750 ms 重试一次，最多持续 8 秒；重试必须沿用同一个 `requestId`。响应只按 `replyTo` 与待处理请求的 `requestId` 匹配，不因先后顺序或重复请求而改变关联。
+
+### `L` — 已安装资源包列表查询
+
+发送端在 `H` 握手后发送文本请求，不需要额外的 `type` 字段：
+
+```text
+L{"requestId":"list_42"}
+```
+
+`requestId` 必须为 1–64 个 ASCII `[A-Za-z0-9_-]` 字符。Manager **直接发送结构化对象**，以 `msg: "L"` 标记列表响应；列表 JSON 不再序列化成字符串嵌入 `msg`。这是一种新增响应格式，现有 `H/T/P/F/A/C/E` 响应仍使用 `{msg: packet}`。
+
+```json
+{
+  "msg": "L",
+  "replyTo": "list_42",
+  "pageIndex": 0,
+  "done": true,
+  "total": 1,
+  "items": [
+    {
+      "themeId": "dark",
+      "name": "Dark",
+      "version": "1.0.0",
+      "author": "Example",
+      "metadataStatus": "ok"
+    }
+  ]
+}
+```
+
+Vela API 调用为 `connect.send({data: responseObject, ...})`；固件负责对象的链路序列化。发送端解析外层 JSON 后，先判断 `msg === "L"` 并直接读取同层字段；其他 `msg` 继续交给现有文本包解析器，不能把单独的 `"L"` 再当作内层 JSON 包解析。
+
+- 列表以 `interconnect-themes.json` 的已安装索引为准，按 `themeId` 的 ASCII 顺序返回；不扫描目录、不包含未登记的上传包，也不包含“系统样式”项。
+- 每项只包含 `themeId`、`name`、可选的 `version` / `author` 和 `metadataStatus`。元数据正常时状态为 `ok`；缺失、损坏、歧义或不可读取时为 `unavailable`，名称回退到 `themeId`，省略版本和作者。沿用 `corona.json` / `canora.json` 兼容规则，不返回映射、文件清单或实际生效状态。
+- 每个请求在资源操作锁内构建一份只读快照，不写索引、顺序或迁移结果。发送响应页时不持有资源操作锁。查询不打开上传页面、不更改上传进度；查询错误也不把上传接收状态切成错误。
+- 对结构化响应，`maxTextChars` 约束完整对象的紧凑 JSON 长度，且不得超过 Manager 本地 18,000 字符上限。Manager 按实际序列化长度拆页，不使用固定条数；页内每项不可拆分。
+- `pageIndex` 从 0 连续递增，`total` 为本次快照总条数，最后一页 `done:true`，其余页为 `false`。空列表也返回第 0 页，`total:0`、`items:[]`、`done:true`。单个条目无法装入协商长度时返回 `response-too-large`，不截断元数据。
+- 发送端按 `replyTo` 关联并按页序号去重；只有收到全部连续页和最后一页才替换本地列表。缺页、超时或断线后使用新的 `requestId` 整次重试，忽略旧请求的迟到响应；不增加列表 ACK、续传或持久化快照。重复请求重新读取当时的快照，发送端不要混合不同重试结果。
+
+查询错误同样直接发送对象，不使用上传流程的 `E`：
+
+```json
+{"msg":"L","replyTo":"list_42","errorCode":"list-failed"}
+```
+
+错误码为 `invalid-request`（JSON、请求 ID 或请求长度无效）、`list-failed`（已安装索引损坏或读取失败）、`response-too-large`（响应无法装入协商长度）。无效请求中只有合法的 `requestId` 才会被复制为 `replyTo`，否则省略 `replyTo`。索引缺失表示空列表，索引损坏不能伪装成空列表。错误响应没有 `items` / 分页字段；接收错误后发送端应丢弃本次已收集的页。发送失败时停止该次响应并等待发送端重新查询，不改变上传状态。
 
 ### `T` — 文件清单与传输状态
 

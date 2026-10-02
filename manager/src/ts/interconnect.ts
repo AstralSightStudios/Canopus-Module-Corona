@@ -2,10 +2,10 @@ import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination 
 import { interconnect } from "./import";
 import * as file from "./file";
 import type { FileOperationError } from "./file";
-import { isResourcePackManifestFilename, isReservedResourcePackPath, parseResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
+import { isResourcePackManifestFilename, isReservedResourcePackPath, parseResourcePackManifest, readResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
 import type { ResourcePackManifest } from "./resource-pack";
 import { validateResourcePackFiles } from "./resource-pack";
-import { registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
+import { readInstalledThemeIds, registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
 import { invalidateResourceCatalog, withResourceOperation } from "./resource-overrides";
 import { readProtectedThemeIds } from "./resource-activation";
 
@@ -85,7 +85,7 @@ export interface ReceiverSnapshot {
 interface InterconnectLink {
   getApkStatus?: () => unknown;
   send(options: {
-    data: { msg: string };
+    data: { msg: string; [key: string]: unknown };
     success?: () => void;
     fail?: (data: unknown, code: number) => void;
   }): void;
@@ -388,9 +388,14 @@ export class InterconnectThemeReceiver {
   }
 
   private enqueue(packet: string): void {
-    this.queue = this.queue.then(() => withResourceOperation(async () => {
-      if (!this.stopped) await this.handleMessage(packet);
-    })).catch(async error => {
+    this.queue = this.queue.then(async () => {
+      if (this.stopped) return;
+      // List snapshots take the resource lock only while reading, not while sending.
+      if (packet[0] === "L") await this.handleList(packet);
+      else await withResourceOperation(async () => {
+        if (!this.stopped) await this.handleMessage(packet);
+      });
+    }).catch(async error => {
       if (this.stopped) return;
       const code = errorCode(error, "write-failed");
       this.setPhase("error", `接收错误（${code}）：${String((error as Error).message || error)}`);
@@ -400,6 +405,70 @@ export class InterconnectThemeReceiver {
         // Keep the saved transfer state; the sender can retry after reconnecting.
       }
     });
+  }
+
+  private async handleList(packet: string): Promise<void> {
+    let replyTo: string | undefined;
+    let pages: Array<{ msg: string; [key: string]: unknown }>;
+    try {
+      const request = parseJsonPacket(packet, "L");
+      if (typeof request.requestId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(request.requestId))
+        replyTo = request.requestId;
+      if (!replyTo || packet.length > MAX_TEXT_CHARS)
+        throw protocolError("invalid-request", "无效的列表查询请求");
+      const items = await withResourceOperation(async () => {
+        const ids = (await readInstalledThemeIds(file)).sort();
+        const entries: Array<{ [key: string]: unknown }> = [];
+        for (const themeId of ids) {
+          let manifest: ResourcePackManifest | null = null;
+          try { manifest = await readResourcePackManifest(`${THEME_ROOT_URI}${themeId}/`, themeId, file); }
+          catch (_error) { /* Keep installed entries visible when metadata is unavailable. */ }
+          entries.push(manifest ? {
+            themeId, name: manifest.name, version: manifest.version, author: manifest.author,
+            metadataStatus: "ok"
+          } : { themeId, name: themeId, metadataStatus: "unavailable" });
+        }
+        return entries;
+      });
+      pages = [];
+      let pageItems: Array<{ [key: string]: unknown }> = [];
+      const page = (entries: Array<{ [key: string]: unknown }>, done: boolean) => ({
+        msg: "L", replyTo, pageIndex: pages.length, done, total: items.length, items: entries
+      });
+      for (const item of items) {
+        const candidate = [...pageItems, item];
+        // false is longer than true, so reserving it also fits the final page.
+        if (this.objectFits(page(candidate, false))) {
+          pageItems = candidate;
+        } else {
+          if (!pageItems.length)
+            throw protocolError("response-too-large", "列表条目超过协商长度");
+          pages.push(page(pageItems, false));
+          pageItems = [item];
+          if (!this.objectFits(page(pageItems, false)))
+            throw protocolError("response-too-large", "列表条目超过协商长度");
+        }
+      }
+      const last = page(pageItems, true);
+      if (!this.objectFits(last))
+        throw protocolError("response-too-large", "列表响应超过协商长度");
+      pages.push(last);
+    } catch (error) {
+      const code = replyTo
+        ? errorCode(error, "list-failed")
+        : "invalid-request";
+      // JSON parser errors are request errors, not upload manifest errors.
+      const response = { msg: "L", replyTo, errorCode: code === "invalid-manifest" ? "invalid-request" : code };
+      try { await this.sendObject(response); }
+      catch (_sendError) { /* The sender retries the whole query after timeout. */ }
+      return;
+    }
+    try {
+      for (const page of pages) {
+        if (this.stopped) return;
+        await this.sendObject(page);
+      }
+    } catch (_sendError) { /* Query failures must not change upload state. */ }
   }
 
   private async ensureStateLoaded(): Promise<void> {
@@ -906,10 +975,19 @@ export class InterconnectThemeReceiver {
 
   private async send(packet: string): Promise<void> {
     if (!this.link) throw new Error("interconnect 尚未连接");
-    const envelope = { msg: packet };
-    const serializedEnvelope = JSON.stringify(envelope);
     if (packet.length > Math.min(MAX_TEXT_CHARS, this.peerMaxTextChars) ||
-        serializedEnvelope.length > MAX_TEXT_CHARS)
+        JSON.stringify({ msg: packet }).length > MAX_TEXT_CHARS)
+      throw new Error("待发送互联消息超过协商长度");
+    await this.sendObject({ msg: packet }, false);
+  }
+
+  private objectFits(value: { msg: string; [key: string]: unknown }): boolean {
+    return JSON.stringify(value).length <= Math.min(MAX_TEXT_CHARS, this.peerMaxTextChars);
+  }
+
+  private async sendObject(envelope: { msg: string; [key: string]: unknown }, structured = true): Promise<void> {
+    if (!this.link) throw new Error("interconnect 尚未连接");
+    if (structured && !this.objectFits(envelope))
       throw new Error("待发送互联消息超过协商长度");
     const link = this.link;
     await new Promise<void>((resolve, reject) => {
