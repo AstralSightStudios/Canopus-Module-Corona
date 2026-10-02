@@ -168,7 +168,7 @@ miwear。
 下文的 query 是开发者描述符接口，不是现有 UI 能直接看到的统计页面。
 不能按“读取计数器”当作普通用户的操作步骤。
 
-配置文件或父目录不存在（ENOENT），以及配置为空/仅含注释时，激活成功并安装零规则 pass-through hook 与轮询器：资源仍使用原始 driver，不重定向、不刷新 UI；之后写入有效映射并更新 reload 信号即可加载主题。超长、非法内容以及权限或 I/O 错误仍使激活失败。运行后热更新也允许 0 条规则以清除映射。替代文件不存在/无法打开时退回原资源。
+配置文件或父目录不存在（ENOENT），以及配置为空/仅含注释时，激活成功并安装零规则 pass-through hook 与轮询器：资源仍使用原始 driver，不重定向、不刷新 UI；之后写入有效映射并更新 reload 信号即可加载主题。超长、非法内容、权限或 I/O 错误、配置内存分配失败同样降级为零规则启动，错误只记录在启动日志中，不改写配置，不因配置问题阻断 Canopus 启动其他模块。可在 Manager 修复配置并重载；driver/slot 安全校验与定时器创建失败仍会返回激活错误。运行后热更新也允许 0 条规则以清除映射。替代文件不存在/无法打开时退回原资源。
 成功打开但格式错误的资源**不会**自动退回；打开成功不等于解码成功。
 
 ## 先在电脑上检查配置
@@ -220,7 +220,7 @@ printf '/resource/icons/\tthemes/my-theme/icons/\n' > mappings.tsv
 - 路径约束是**词法约束**，不是文件系统沙箱；不要在主题树下放置指向其他
   位置的符号链接。配置、主题文件及其父目录只应允许可信主体修改。
 
-首次激活读取 `/data/quickapp/files/ng.lst.corona/mappings.tsv`；缺配置、空配置或仅注释配置会以零规则安装透明 hook，并启动轮询，资源仍透传到原始 driver。有效规则配置同样安装 hook；激活后每秒由 UI-owner timer 检查
+首次激活读取 `/data/quickapp/files/ng.lst.corona/mappings.tsv`；缺配置、空配置、仅注释配置或配置读取/校验/分配失败会以零规则安装透明 hook，并启动轮询，资源仍透传到原始 driver。若安装 hook 前曾成功 prepare，后续失败的 prepare 保留这份有效快照。有效规则配置同样安装 hook；激活后每秒由 UI-owner timer 检查
 `/data/quickapp/files/ng.lst.corona/reload.request`。Manager 使用 `internal://files/`；Vela 按
 当前 app ID 和设备固件将其映射到对应 native 文件根（11：`/data/quickapp/files/ng.lst.corona/`；10 Pro：`/data/files/ng.lst.corona/`）。只有信号内容变化时才读取同目录
 `mappings.tsv`；接受的格式为 `resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>`。
@@ -260,13 +260,14 @@ query 需要至少 40 字节可写剩余空间，成功后发布 writer。状态
 | 返回值 | 含义 |
 |---|---|
 | -2004 | 已安装，不能重新 prepare |
-| -2005 | 配置文件打开失败（不含 ENOENT；不存在时以零规则 pass-through 模式启动） |
-| -2006 | 临时内存不可用 |
-| -2007 | 配置读取/解析/校验失败 |
-| -2008 | driver 标识/布局不符；空规则以 pass-through 模式启动，不触发此错误 |
+| -2005 | 仅 `config.fallback` 日志：配置文件打开失败（不含 ENOENT）；不作为启动返回值 |
+| -2006 | 仅 `config.fallback` 日志：配置读取/快照展开内存不可用；不作为启动返回值 |
+| -2007 | 仅 `config.fallback` 日志：配置读取/解析/校验失败；不作为启动返回值 |
+| -2008 | driver 标识/布局不符；即使零规则也必须通过此安全检查 |
 | -2009 | 原始 callback slot 未知，不覆盖 |
 | -2010 | 重绑定状态不一致 |
 | -2011 | 刷新定时器分配失败（重定向已驻留，可再次激活重试） |
+| -2012 | 轮询定时器分配失败（hook 已驻留，可再次激活重试） |
 
 stop/deactivate 在安装后返回 SDK 的 `CANOPUS_RESULT_REBOOT_REQUIRED`。
 这表示**尚未停止**，并非已经拆除 Hook。installed 表示模块曾成功发布回调，

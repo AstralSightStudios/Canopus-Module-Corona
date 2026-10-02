@@ -592,12 +592,9 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     error = fd < 0 ? rh_platform_errno() : 0;
     startup_record("config.open", fd, error, 0);
     if (fd < 0) {
-        if (error != RH_ENOENT) {
-            startup_record("prepare.end", -2005, error, 0);
-            return -2005;
-        }
-        /* Missing configuration starts a resident pass-through without heap
-         * storage. A later revision can publish the first nonempty snapshot. */
+        if (error != RH_ENOENT) rc = -2005;
+        /* Missing or unreadable configuration must not block other modules.
+         * The resident pass-through can accept a later Manager revision. */
     } else {
         rc = rh_read_snapshot(config_read, &fd, &snapshot_allocator, &candidate);
         startup_record("config.alloc", rc == -7 ? -2006 : 0, 0, (uintptr_t)candidate);
@@ -608,6 +605,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
             candidate = 0;
             rc = rh_materialize_snapshot(declarations, 0, 0,
                                          &snapshot_allocator, &candidate);
+            startup_record("config.materialize", rc, 0, candidate ? candidate->count : 0u);
         }
         if (rc) rc = rc == -7 ? -2006 : -2007;
     }
@@ -626,10 +624,17 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         snapshot_release(old_declarations);
     } else {
         snapshot_release(candidate);
+        /* Keep a previously prepared good map, or the allocation-free NULL
+         * snapshot on first startup. Never publish partial rules or rewrite
+         * the bad file: Manager can repair it through the normal watcher. */
+        irq = rh_platform_lock();
+        configured = 1;
+        rh_platform_unlock(irq);
+        startup_record("config.fallback", rc, error, S.count);
     }
     snapshot_release(declarations);
-    startup_record("prepare.end", rc, 0, S.count);
-    return rc;
+    startup_record("prepare.end", 0, 0, S.count);
+    return 0;
 }
 /* Rebinding requires a caller-owned UI transaction. Installing this callback
  * does not restart miwear or tear down font wrappers already held by live

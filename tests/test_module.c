@@ -165,7 +165,7 @@ int rh_platform_open(const char *path, int mode) {
         }
         config_opens++;
         position = 0;
-        if (fail_open) { open_errno = open_errno ? open_errno : 5; return -1; }
+        if (fail_open) return -1;
         return 11;
     }
     assert(!"unexpected file path");
@@ -420,10 +420,12 @@ static int test_startup_diagnostics(void) {
 
     /* Diagnostic opens must not replace the errno belonging to config.open. */
     fail_open = 1; open_errno = 13; clobber_startup_errno = 1;
-    assert(d->activate(NULL) == -2005 && slot == backend);
+    driver_valid = 0; /* Config failure is soft; the driver check still fails. */
+    assert(d->activate(NULL) == -2008 && slot == backend);
     assert(strstr(startup_record, "config.open rc=-1 errno=13"));
-    assert(strstr(startup_record, "prepare.end rc=-2005 errno=13"));
-    assert(strstr(startup_record, "activate.end rc=-2005"));
+    assert(strstr(startup_record, "config.fallback rc=-2005 errno=13"));
+    assert(strstr(startup_record, "prepare.end rc=0"));
+    assert(strstr(startup_record, "activate.end rc=-2008"));
     clobber_startup_errno = 0;
 
     /* Log open/write failures are best-effort, never a new lifecycle failure. */
@@ -575,6 +577,85 @@ static int test_empty_startup_then_theme_reload(void) {
     assert(!d->query(&w) && u32(status + 8) == 1 && u32(status + 12) == 1);
     assert(allocations == frees + persistent_allocs && persistent_allocs == 1);
     puts("empty startup stays resident and applies a later theme reload");
+    return 0;
+}
+static int test_startup_fallback_then_reload(const char *fault) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    struct canopus_status_writer_v1 w;
+    unsigned char status[48];
+    char oversized[RH_CONFIG_BYTES + 2u];
+    const char *fallback;
+    unsigned before;
+
+    if (!strcmp(fault, "eacces") || !strcmp(fault, "open-io") ||
+        !strcmp(fault, "unknown-errno")) {
+        fail_open = 1;
+        open_errno = !strcmp(fault, "eacces") ? 13 :
+                     (!strcmp(fault, "open-io") ? 5 : 0);
+        fallback = "config.fallback rc=-2005";
+    } else if (!strcmp(fault, "scratch-oom") || !strcmp(fault, "snapshot-oom")) {
+        fail_alloc_at = !strcmp(fault, "scratch-oom") ? 1u : 2u;
+        fallback = "config.fallback rc=-2006";
+    } else if (!strcmp(fault, "materialize-oom") || !strcmp(fault, "materialized-map-oom")) {
+        input = "/resource/\tthemes/current/\n"
+                QUICKAPP_KEY "\tthemes/current/icon.bin\n";
+        fail_alloc_at = !strcmp(fault, "materialize-oom") ? 3u : 4u;
+        fallback = "config.fallback rc=-2006";
+    } else {
+        fallback = "config.fallback rc=-2007";
+        if (!strcmp(fault, "read-io")) fail_read = 1;
+        else if (!strcmp(fault, "malformed")) input = "/resource/ themes/current/\n";
+        else if (!strcmp(fault, "outside")) input = "/resource/\t/outside/\n";
+        else if (!strcmp(fault, "duplicate"))
+            input = "/resource/\tthemes/current/\n/resource/\tthemes/other/\n";
+        else {
+            assert(!strcmp(fault, "oversized"));
+            memset(oversized, '#', sizeof(oversized) - 1u);
+            oversized[sizeof(oversized) - 1u] = 0;
+            input = oversized;
+        }
+    }
+    assert(d->activate(NULL) == 0);
+    assert(strstr(startup_record, fallback));
+    assert(strstr(startup_record, "prepare.end rc=0"));
+    assert(strstr(startup_record, "activate.end rc=0"));
+    assert(slot != backend && active_timers(1000u) == 1 && !active_timers(50u));
+    assert(!persistent_allocs && !live_bytes && allocations == frees);
+    assert(closes == 1u + (fail_open ? 0u : 1u));
+    assert(!image_drops && !metadata_refreshes && !redraws && !retargets);
+    backend_expected = "resource/icon.bin";
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 8) == 1 && u32(status + 12) == 0);
+
+    /* A bad Manager revision still rejects the transaction, not the module.
+     * It remains retryable under the same signal once Manager repairs it. */
+    fail_open = fail_read = 0;
+    fail_alloc_at = 0;
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\trepair-startup\n";
+    control_config = "/resource/\t/outside/\n";
+    before = control_opens;
+    fire_timers(1000u);
+    assert(control_opens == before + 1 && !persistent_allocs && !redraws);
+    assert(result_position == sizeof(result_record) && strstr(result_record, "\t-2103\t0\t0\n"));
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    control_config = config;
+    fire_timers(1000u);
+    backend_expected = (RH_THEME_ROOT "current/icon.bin") + 1;
+    assert(control_opens == before + 2 && slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(image_drops == 1 && metadata_refreshes == 1 && redraws == 1);
+    assert(active_timers(1000u) == 1 && !active_timers(50u));
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 8) == 1 && u32(status + 12) == 1);
+    assert(strstr(result_record, "\t0\t0\t0\n"));
+    assert(allocations == frees + persistent_allocs && persistent_allocs == 1);
+
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\tinvalid-after-repair\n";
+    control_config = "/resource/\t/outside/\n";
+    fire_timers(1000u);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7 && redraws == 1);
+    assert(persistent_allocs == 1 && allocations == frees + persistent_allocs && !locked);
+    printf("startup fallback (%s), Manager repair and last-known-good passed\n", fault);
     return 0;
 }
 #if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
@@ -1032,6 +1113,8 @@ int main(int argc, char **argv) {
 #endif
     if (argc == 2 && !strcmp(argv[1], "--empty-startup"))
         return test_empty_startup_then_theme_reload();
+    if (argc == 3 && !strcmp(argv[1], "--startup-fallback"))
+        return test_startup_fallback_then_reload(argv[2]);
     assert(argc == 1);
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
@@ -1084,11 +1167,12 @@ int main(int argc, char **argv) {
 
     fail_open = 1;
     before = closes;
-    assert(d->activate(NULL) == -2005 && slot == backend && closes == before);
-    open_errno = 13;  /* EACCES is not optional absence. */
-    assert(d->activate(NULL) == -2005 && slot == backend);
-    open_errno = 0;  /* Unknown failure must not become success. */
-    assert(d->activate(NULL) == -2005);
+    assert(d->prepare(NULL) == 0 && slot == backend && closes == before);
+    assert(strstr(startup_record, "config.fallback rc=-2005"));
+    open_errno = 13;  /* EACCES degrades to a resident pass-through. */
+    assert(d->prepare(NULL) == 0 && slot == backend);
+    open_errno = 0;  /* Unknown config failure is also nonfatal. */
+    assert(d->prepare(NULL) == 0);
     open_errno = RH_ENOENT;
     driver_valid = 0;
     assert(d->prepare(NULL) == 0);  /* Missing mappings prepare an empty snapshot. */
@@ -1101,12 +1185,14 @@ int main(int argc, char **argv) {
 
     driver_valid = 1;
     fail_open = 0; fail_alloc = 1;
-    assert(d->prepare(NULL) == -2006 && slot == backend && closes == before + 1);
+    assert(d->prepare(NULL) == 0 && slot == backend && closes == before + 1);
+    assert(strstr(startup_record, "config.fallback rc=-2006"));
     fail_alloc = 0; fail_read = 1;
-    assert(d->prepare(NULL) == -2007 && allocations == frees + persistent_allocs);
+    assert(d->prepare(NULL) == 0 && allocations == frees && !persistent_allocs);
+    assert(strstr(startup_record, "config.fallback rc=-2007"));
     fail_read = 0; input = "/resource/\t/outside/\n";
-    assert(d->prepare(NULL) == -2007 && slot == backend &&
-           allocations == frees + persistent_allocs);
+    assert(d->prepare(NULL) == 0 && slot == backend && allocations == frees);
+    assert(strstr(startup_record, "config.fallback rc=-2007"));
     input = "# empty\n";
     driver_valid = 0;
     assert(d->prepare(NULL) == 0);
@@ -1116,9 +1202,15 @@ int main(int argc, char **argv) {
            !image_drops && !metadata_refreshes && !redraws && !timers_created);
     driver_valid = 1;
     input = config;
-    /* An empty file also leaves a prepared, but unpublished, zero-rule snapshot. */
+    /* A failed re-prepare preserves the previously prepared good snapshot. */
     assert(d->prepare(NULL) == 0);
-    fail_open = 1;
+    fail_open = 1; open_errno = 13;
+    assert(d->prepare(NULL) == 0);
+    assert(!canopus_status_writer_init(&w, status, sizeof(status)));
+    assert(!d->query(&w) && u32(status + 8) == 0 && u32(status + 12) == 1);
+    assert(persistent_allocs == 1 && allocations == frees + persistent_allocs);
+    /* Optional absence still explicitly prepares a zero-rule snapshot. */
+    open_errno = RH_ENOENT;
     assert(d->prepare(NULL) == 0);
     assert(slot == backend && !timers_created);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
