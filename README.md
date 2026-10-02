@@ -1,5 +1,9 @@
 # Canopus-Module-Resource-Hook
 
+## 许可证
+
+本项目采用 GNU Affero General Public License v3.0（`AGPL-3.0-only`），完整条款见 [LICENSE](LICENSE)。
+
 **0.3.0 · Xiaomi Band 11 / 4.100.139、4.100.155 · 资源路径重定向**
 
 两个目标使用独立 ELF、地址配置和签名收据，不能混用；`.139` 仍是默认构建目标。
