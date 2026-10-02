@@ -10,7 +10,7 @@ const inventoryUri = 'internal://files/resource-files.json';
 const overridesUri = 'internal://files/resource-overrides.json';
 const orderUri = 'internal://files/resource-order.json';
 const themeRoot = 'internal://files/themes/';
-const manifestUri = id => `${themeRoot}${id}/canora.json`;
+const manifestUri = id => `${themeRoot}${id}/corona.json`;
 
 function deferred() {
   let resolve, reject;
@@ -144,7 +144,7 @@ async function testSharedCatalog(api) {
   assert.deepEqual(snapshot.paths[0].themes.map(theme => theme.themeId), ids,
     'completion order must not change pack priority');
   assert.strictEqual(snapshot.byPath.get('/resource/shared.bin'), snapshot.paths[0]);
-  assert.equal(file.count('read'), ids.length + 2);
+  assert.equal(file.count('read'), ids.length * 2 + 2, 'both manifest names are checked for ambiguity');
   assert.equal(file.count('info') + file.count('list') + file.count('write'), 0);
   const before = file.calls.length;
   const warm = api.getResourceCatalog(file);
@@ -424,7 +424,7 @@ async function testPageReadBudget(api, order) {
   assert.equal(api.resolveResourceChoice(coldCatalog.paths[0], coldOverrides), 'pack0');
   const coldReads = file.count('read');
   const coldIndexes = file.count('read', inventoryUri);
-  assert.equal(coldReads, 13, 'cold list reads ten manifests, installed IDs, one inventory and overrides');
+  assert.equal(coldReads, 23, 'cold list checks both names for ten manifests, installed IDs, one inventory and overrides');
   assert.equal(coldIndexes, 1);
 
   const [selectionCatalog, selectionOverrides, orderText] = await Promise.all([

@@ -4,6 +4,36 @@ import {
   validQuickAppPackage
 } from "./resource-path";
 
+export const RESOURCE_PACK_MANIFEST_FILENAME = "corona.json";
+export const LEGACY_RESOURCE_PACK_MANIFEST_FILENAME = "canora.json";
+
+/** Only these exact root filenames are manifests. */
+export function isResourcePackManifestFilename(path: string): boolean {
+  return path === RESOURCE_PACK_MANIFEST_FILENAME || path === LEGACY_RESOURCE_PACK_MANIFEST_FILENAME;
+}
+
+/** Neither manifest filename may be used as an asset or an asset directory. */
+export function isReservedResourcePackPath(path: string): boolean {
+  return isResourcePackManifestFilename(path.split("/")[0]);
+}
+
+/** Preserve legacy installed packs, but never hide ambiguity or invalid canonical metadata. */
+export async function readResourcePackManifest(
+  rootUri: string,
+  themeId: string,
+  file: { readOptionalText(uri: string): Promise<string | null> },
+  checkCurrent: () => void = () => {},
+): Promise<ResourcePackManifest | null> {
+  const canonical = await file.readOptionalText(`${rootUri}${RESOURCE_PACK_MANIFEST_FILENAME}`);
+  checkCurrent();
+  const legacy = await file.readOptionalText(`${rootUri}${LEGACY_RESOURCE_PACK_MANIFEST_FILENAME}`);
+  checkCurrent();
+  if (canonical !== null && legacy !== null)
+    throw new Error("资源包不能同时包含 corona.json 和 canora.json");
+  const text = canonical === null ? legacy : canonical;
+  return text === null ? null : parseResourcePackManifest(text, themeId);
+}
+
 const RESOURCE_PACK_FORMAT = "canopus-resource-pack";
 const RESOURCE_PACK_VERSION = 1;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -86,6 +116,8 @@ function parseMappings(value: unknown, quickappIcons: unknown, themeId: string):
       `mappings[${index}].destination`, MAX_PATH_BYTES - 1);
     if (!safeResourceSource(source) || !safeRelativeResourcePath(destination))
       throw new Error(`mappings[${index}] source 必须为绝对路径或有效的 QuickApp 图标键，destination 必须为安全的包内相对路径`);
+    if (isReservedResourcePackPath(destination))
+      throw new Error(`mappings[${index}].destination 不能使用 corona.json 或 canora.json 清单路径`);
     if (isQuickAppIconSource(source) && !isBinFileDestination(destination))
       throw new Error(`mappings[${index}] QuickApp 图标目标必须为 BIN 文件`);
     const resolvedDestination = `${THEME_DESTINATION_ROOT}${themeId}/${destination}`;
@@ -110,15 +142,15 @@ function serializeMappings(mappings: ResourcePackMapping[], themeId: string): st
     `${rule.source}\t${destinationRoot}${rule.destination}\n`).join("");
 }
 
-/** Parse and validate the on-device canora.json before registering or displaying a pack. */
+/** Parse and validate the on-device corona.json (or legacy canora.json) before registering or displaying a pack. */
 export function parseResourcePackManifest(text: string, expectedThemeId?: string): ResourcePackManifest {
   if (typeof text !== "string" || text.charCodeAt(0) === 0xfeff ||
       utf8Length(text) > MAX_MANIFEST_BYTES)
-    throw new Error("canora.json 编码无效或超过 64 KiB");
+    throw new Error("corona.json 编码无效或超过 64 KiB");
 
   let value: unknown;
   try { value = JSON.parse(text); }
-  catch (_error) { throw new Error("canora.json JSON 格式无效"); }
+  catch (_error) { throw new Error("corona.json JSON 格式无效"); }
   if (!isRecord(value) || value.format !== RESOURCE_PACK_FORMAT ||
       value.formatVersion !== RESOURCE_PACK_VERSION)
     throw new Error("不支持的资源包格式或版本");

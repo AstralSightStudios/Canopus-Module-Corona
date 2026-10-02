@@ -4,8 +4,8 @@ interconnect 的应用层载荷使用文本。当前目标设备上实测单条�
 
 ## 设计原则
 
-- 传输协议不传 ZIP：分享用 `.crpack` 解包后，链路上是一棵 `canora.json` 与资源文件组成的目录树，按本协议逐文件传输。
-- Interconnect 传输层只枚举和传输文件，不解释或改写 `canora.json`，也不重排或改名任何资源相对路径。分享包校验属于发送端的导入层。
+- 传输协议不传 ZIP：分享用 `.crpack` 解包后，链路上是一棵 `corona.json` 与资源文件组成的目录树，按本协议逐文件传输。
+- Interconnect 传输层只枚举和传输文件，不解释或改写 `corona.json`，也不重排或改名任何资源相对路径。分享包校验属于发送端的导入层。
 - 不设 `packageId` 或版本代次。`themeId` 是短的包目录名；更新时先删除旧包再完整重传。
 - 一次只允许一个主题上传、一个文件传输；文件内部使用窗口分片。数据包头只带文件序号和分片序号。
 - 手环不回读、不计算整文件哈希；只逐片解码和写入。完成表示所有声明分片均写入成功，不是端到端内容校验。
@@ -13,20 +13,28 @@ interconnect 的应用层载荷使用文本。当前目标设备上实测单条�
 
 ## 可分享资源包格式（CRPack v1）
 
-`.crpack` 是给用户保存和分享的 ZIP 容器，不是链路载荷。发送端识别容器、展示元数据并安全解包后，将根目录下的 `canora.json` 和资源文件组成目录树交给传输协议；`canora.json` 原样传输并保存到设备主题目录，供 Manager 展示包信息及规则。包内资源相对路径保持不变；协议中的 `T` 文件清单仍由发送端按实际待传输文件生成，和这里的 JSON manifest 不是同一份清单。分享包不包含 `mappings.tsv`：接收完成后，设备 Manager 从 `canora.json` 生成主题目录内派生 `mappings.tsv`，另保存资源文件清单以便目录映射做静态分层合并。资源管理页保存资源包顺序和“系统样式”分界；首页重载时才从分界上方的资源包生成模块读取的活动 `internal://files/mappings.tsv`。
+`.crpack` 是给用户保存和分享的 ZIP 容器，不是链路载荷。发送端识别容器、展示元数据并安全解包后，将根目录下的 `corona.json` 和资源文件组成目录树交给传输协议；`corona.json` 原样传输并保存到设备主题目录，供 Manager 展示包信息及规则。包内资源相对路径保持不变；协议中的 `T` 文件清单仍由发送端按实际待传输文件生成，和这里的 JSON manifest 不是同一份清单。分享包不包含 `mappings.tsv`：接收完成后，设备 Manager 从 `corona.json` 生成主题目录内派生 `mappings.tsv`，另保存资源文件清单以便目录映射做静态分层合并。资源管理页保存资源包顺序和“系统样式”分界；首页重载时才从分界上方的资源包生成模块读取的活动 `internal://files/mappings.tsv`。
+
+### 配置文件名与旧包兼容
+
+- 新生成、重新导出以及导入后提供的文件树统一使用根目录 `corona.json`；JSON marker 和 `formatVersion: 1` 不变。
+- 导入与 Manager 接收兼容旧的根目录 `canora.json`。两种文件名合计必须恰有一个普通文件；同时出现时拒绝，即使内容一致。两者使用相同的格式、64 KiB、CRC、总大小和路径安全校验；均不能作为资源目标、目录或祖先目录。
+- 编辑器规范化旧 manifest 的文件名时保留原始 JSON 字节；原包备份保持原样。规范化必须在生成传输清单之前完成。Interconnect 开始传输后不得改名，旧发送端仍可按原名传输 `canora.json`，Manager 按实际清单读取并保存。
+- 已安装旧主题仍可读取 `canora.json`；新旧配置同时存在或配置内容损坏时不得静默回退到另一份。下文示例统一使用新文件名，兼容旧输入的规则适用于所有导入、接收和已安装主题读取。
+- 若续传清单中的配置文件名发生变化，必须用 `replace` 重新传输，不能沿用旧分片。
 
 ### 识别与布局
 
-推荐扩展名为 `.crpack`，但扩展名只是提示，不能单独作为识别依据。发送端必须同时确认文件是可读取的 ZIP，ZIP 根目录中有大小受限的 `canora.json`，且其中 `format` 精确为 `canopus-resource-pack`、`formatVersion` 为整数 `1`；普通 ZIP、错误 marker 或不支持的格式版本都不能作为资源包发送。ZIP 中不应再包一层同名目录，字段名和 ZIP 条目路径均区分大小写。
+推荐扩展名为 `.crpack`，但扩展名只是提示，不能单独作为识别依据。发送端必须同时确认文件是可读取的 ZIP，ZIP 根目录中恰有一个大小受限的 `corona.json`（或旧输入 `canora.json`），且其中 `format` 精确为 `canopus-resource-pack`、`formatVersion` 为整数 `1`；普通 ZIP、错误 marker 或不支持的格式版本都不能作为资源包发送。ZIP 中不应再包一层同名目录，字段名和 ZIP 条目路径均区分大小写。
 
 ```text
 dark.crpack  (ZIP)
-├── canora.json               # 元数据与映射规则；也会传输到设备主题目录
+├── corona.json               # 元数据与映射规则；也会传输到设备主题目录
 ├── app/settings/launcher.bin
 └── icons/confirm.bin
 ```
 
-`canora.json` 使用 UTF-8 JSON（无 BOM），文件大小不超过 64 KiB，根对象至少包含：
+`corona.json` 使用 UTF-8 JSON（无 BOM），文件大小不超过 64 KiB，根对象至少包含：
 
 ```json
 {
@@ -86,9 +94,9 @@ dark.crpack  (ZIP)
 ### 解包与发送校验
 
 - 普通文件条目必须位于 ZIP 根下，不能多套一层 wrapper 目录；安全的目录条目可忽略，拒绝加密条目、符号链接及其他特殊文件、重复路径、绝对路径、反斜杠、空段、`.` / `..`、越界路径、超限 manifest 及解压后超限内容。不得通过路径规范化来“修复”不安全条目。仅支持 ZIP Store/Deflate；校验 CRC，并按实际解压字节数执行限额，不能只信任 ZIP 目录中声明的大小。
-- ZIP 内所有普通文件都是待传输文件，包括 `canora.json`；空目录不传输。`fileCount` 和 `totalBytes` 均包含该文件，接收后路径为 `themes/<themeId>/canora.json`。CRPack v1 中不允许携带包内 `mappings.tsv`，避免两份映射来源不一致。
-- CRPack 容器不设文件数量上限；Interconnect 单次传输最多 65,536 个文件（受 4 位十六进制文件序号限制），解压总量最多 64 MiB；`canora.json` 最多 64 KiB，并且在 `.crpack` 中必须恰有一份。Manager 生成的主题派生及活动 `mappings.tsv` 最多 32 KiB；派生文件不计入传输 `fileCount` / `totalBytes`。单文件还必须能在协商的 `chunkSizeBytes` 和本地 2,048 片上限内传完。路径安全规则与下方协议接收端校验一致。
-- 导入层负责解析并校验 `canora.json` 的映射数组及资源包约束；之后的 Interconnect 传输层仍只传路径、大小和文件数据，不传 ZIP、不重写映射。接收端在登记前验证 `canora.json` 与传输 `themeId` 一致，并从其规则生成主题目录内的派生 `mappings.tsv`；设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；元数据文件在登记后损坏时退回显示 `themeId`。设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；新包进入排序列表顶部。资源管理页保存包括“系统样式”分界项在内的顺序；分界上方参与活动映射生成，下方不生效。
+- ZIP 内所有普通文件都是待传输文件，包括 `corona.json`；空目录不传输。`fileCount` 和 `totalBytes` 均包含该文件，接收后路径为 `themes/<themeId>/corona.json`。CRPack v1 中不允许携带包内 `mappings.tsv`，避免两份映射来源不一致。
+- CRPack 容器不设文件数量上限；Interconnect 单次传输最多 65,536 个文件（受 4 位十六进制文件序号限制），解压总量最多 64 MiB；`corona.json` 最多 64 KiB，并且在 `.crpack` 中必须恰有一份。Manager 生成的主题派生及活动 `mappings.tsv` 最多 32 KiB；派生文件不计入传输 `fileCount` / `totalBytes`。单文件还必须能在协商的 `chunkSizeBytes` 和本地 2,048 片上限内传完。路径安全规则与下方协议接收端校验一致。
+- 导入层负责解析并校验 `corona.json` 的映射数组及资源包约束；之后的 Interconnect 传输层仍只传路径、大小和文件数据，不传 ZIP、不重写映射。接收端在登记前验证 `corona.json` 与传输 `themeId` 一致，并从其规则生成主题目录内的派生 `mappings.tsv`；设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；元数据文件在登记后损坏时退回显示 `themeId`。设备端 Manager 展示名称、作者、版本、描述和目标设备，不展示映射规则；新包进入排序列表顶部。资源管理页保存包括“系统样式”分界项在内的顺序；分界上方参与活动映射生成，下方不生效。
 - marker 用于识别格式，不代表发布者可信或文件安全；v1 没有签名。ZIP CRC 只能发现部分传输损坏，不能证明来源或内容真实性。
 
 ## 路径约定
@@ -96,24 +104,24 @@ dark.crpack  (ZIP)
 CRPack v1 解包后的传输源是一个主题目录，例如：
 
 ```text
-canora.json
+corona.json
 app/settings/launcher.bin
 icons/confirm.bin
 ```
 
-资源包必须在根目录恰好包含一个 `canora.json`；资源文件直接放在包根目录下的相对路径中。
+新资源包必须在根目录恰好包含一个 `corona.json`；旧输入可改为唯一的 `canora.json`，不得两者共存。资源文件直接放在包根目录下的相对路径中。
 
 接收端将文件保存到 `themes/<themeId>/` 下，并原样保留包根目录之后的相对路径：
 
 ```text
-themes/dark/canora.json
+themes/dark/corona.json
 themes/dark/app/settings/launcher.bin
 themes/dark/icons/confirm.bin
 ```
 
-CRPack v1 的 `themeId` 取自 `canora.json`，限定为 1–12 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`canora.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
+CRPack v1 的 `themeId` 取自 `corona.json`，限定为 1–12 个小写 ASCII 字母、数字、`_` 或 `-`，例如 `dark`；接收端不另行重命名。传输清单中的 `relativePath` 必须原样用于写入；不得规范化、重排或改名。只拒绝绝对路径、空段、`.`、`..`、反斜杠和越界路径。`corona.json` 中的 `destination` 相对于 ZIP 根目录并对应包内资源路径；Manager 根据 `themeId` 加上主题根目录后生成最终安装路径。
 
-Manager 接收 CRPack v1 时解析 `canora.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级解析，配置预算内直接映射到包文件，超预算才合并到不可变活动代次；低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块要求最多 256 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数；CRPack 容器及已安装主题文件清单不设文件数量上限，文件清单仍受既有索引存储预算约束；Interconnect 单次传输受文件序号编码限制，最多 65,536 个文件（含 `canora.json`）；manifest 仍最多 64 KiB。旧版 Manager 的 128 文件限制已移除，超过 128 个文件的包需更新接收端 Manager。发送端导入检查文件路径安全和总大小，并在传输前检查文件数是否可由协议编码；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
+Manager 接收 CRPack v1 时解析 `corona.json`、校验规则及映射目标对应的包内文件，并将每条相对 `destination` 展开到 `themes/<themeId>/` 后逐行拼接到主题目录的派生 `mappings.tsv`；同时保存包内文件相对路径和大小。主页重载时只从系统样式分界上方的资源包生成活动 `internal://files/mappings.tsv` 并应用，包内不存第二份 TSV。跨包重叠的源路径按排序优先级解析，配置预算内直接映射到包文件，超预算才合并到不可变活动代次；低层文件填补高层没有的相对路径；同一包内重叠映射仍按模块最长前缀语义解析。当前模块要求最多 256 条有效映射、生成配置最多 32 KiB、最终绝对路径少于 256 UTF-8 字节。主题文件数不等于映射规则数；CRPack 容器及已安装主题文件清单不设文件数量上限，文件清单仍受既有索引存储预算约束；Interconnect 单次传输受文件序号编码限制，最多 65,536 个文件（含 `corona.json`）；manifest 仍最多 64 KiB。旧版 Manager 的 128 文件限制已移除，超过 128 个文件的包需更新接收端 Manager。发送端导入检查文件路径安全和总大小，并在传输前检查文件数是否可由协议编码；接收端按本地上限预检，但当前 Manager 没有可用空间查询接口，不能保证剩余空间，实际写入失败时回 `write-failed`。协议接收层不解释映射规则；Manager 在激活前完成上述校验。
 
 模块发布配置时使用紧凑索引快照，按实际 TSV 字节数及有效规则数分配；定向刷新按需保留旧快照引用，引用释放后回收，不为第二份最大容量规则表永久预留额外 32 KiB Umem。读取及解析仍需临时缓冲，32 KiB 是配置字节预算，不是每份快照的固定常驻开销；分配失败保留 last-known-good 并在后续轮询重试。
 
@@ -149,19 +157,19 @@ Manager -> AstroBox: response（replyTo 匹配 requestId）
 
 ### `T` — 文件清单与传输状态
 
-`begin` 声明主题 ID、模式、文件数和总字节数；每个 `file` 条目声明一个包内原始相对路径与文件大小；`end` 结束清单。清单不含映射规则；规则随 `canora.json` 一起作为普通文件传输。
+`begin` 声明主题 ID、模式、文件数和总字节数；每个 `file` 条目声明一个包内原始相对路径与文件大小；`end` 结束清单。清单不含映射规则；规则随 `corona.json` 一起作为普通文件传输。
 
 ```text
 T{"operation":"begin","themeId":"dark","mode":"replace","fileCount":3,"totalBytes":19440}
-T{"operation":"file","themeId":"dark","fileIndex":0,"relativePath":"canora.json","sizeBytes":1120}
+T{"operation":"file","themeId":"dark","fileIndex":0,"relativePath":"corona.json","sizeBytes":1120}
 T{"operation":"file","themeId":"dark","fileIndex":1,"relativePath":"app/settings/launcher.bin","sizeBytes":13580}
 T{"operation":"file","themeId":"dark","fileIndex":2,"relativePath":"icons/confirm.bin","sizeBytes":4740}
 T{"operation":"end","themeId":"dark"}
 ```
 
-`mode` 为 `replace` 或 `resume`。`replace` 仅当该主题不是 active 时删除旧包和旧进度，然后开始新传输；`resume` 重发完全相同的文件清单并保留已接收分片。源文件或相对路径发生任何变化都必须用 `replace`，不做哈希意味着不能把新旧内容混合续传。主题必须有且仅有一个根目录 `canora.json`，不接受 `mappings.tsv`。
+`mode` 为 `replace` 或 `resume`。`replace` 仅当该主题不是 active 时删除旧包和旧进度，然后开始新传输；`resume` 重发完全相同的文件清单并保留已接收分片。源文件或相对路径发生任何变化都必须用 `replace`，不做哈希意味着不能把新旧内容混合续传。主题必须有且仅有一个根目录 `corona.json`，不接受 `mappings.tsv`。
 
-`fileIndex` 从 0 连续编号。每条 `begin` / `file` 都要等接收端确认后再发下一条；丢失时可重发，相同序号及内容幂等确认。接收端可用 `T{"operation":"ack","themeId":"dark","itemType":"file","fileIndex":1}` 确认条目；`end` 校验文件数、总大小、相对路径重复项、路径安全、空间和本地上限，并确认文件清单恰含唯一根目录 `canora.json`，再回 `T{"operation":"status","themeId":"dark","status":"ready"}`。无效或超限时回 `status:"reject"` 和 `errorCode`。续传时清单必须与已有状态一致，否则拒绝并要求 `replace`。
+`fileIndex` 从 0 连续编号。每条 `begin` / `file` 都要等接收端确认后再发下一条；丢失时可重发，相同序号及内容幂等确认。接收端可用 `T{"operation":"ack","themeId":"dark","itemType":"file","fileIndex":1}` 确认条目；`end` 校验文件数、总大小、相对路径重复项、路径安全、空间和本地上限，并确认文件清单恰含唯一根目录 `corona.json`，再回 `T{"operation":"status","themeId":"dark","status":"ready"}`。无效或超限时回 `status:"reject"` 和 `errorCode`。续传时清单必须与已有状态一致，否则拒绝并要求 `replace`。
 
 ### `P` — 单文件准备与续传
 
@@ -214,8 +222,8 @@ E{"themeId":"dark","fileIndex":1,"errorCode":"write-failed"}
 
 ## 完成与切换
 
-1. 所有清单文件均收到 `C` 后，发送 `T{"operation":"finish","themeId":"dark"}`；接收端验证 `canora.json`、映射目标与已传文件的对应关系，生成主题目录内派生 `mappings.tsv` 和全包文件清单，确认全包文件完成后登记主题并更新排序；新包排在顶部，然后回 `T{"operation":"status","themeId":"dark","status":"ready"}`。`canora.json` 原样留在主题目录。
+1. 所有清单文件均收到 `C` 后，发送 `T{"operation":"finish","themeId":"dark"}`；接收端验证 `corona.json`、映射目标与已传文件的对应关系，生成主题目录内派生 `mappings.tsv` 和全包文件清单，确认全包文件完成后登记主题并更新排序；新包排在顶部，然后回 `T{"operation":"status","themeId":"dark","status":"ready"}`。`corona.json` 原样留在主题目录。
 2. 资源管理页按顶部优先顺序展示已安装包，并插入可拖动的“系统样式”分界；其上方参与覆盖，其下方暂不生效。每次放手后 Manager 将完整顺序立即写入自己的 `resource-order.json`。新安装包插入顶部；删除包时从顺序及文件清单中移除。
 3. 排序和混搭选择都不会立即修改模块活动映射。混搭微调按实际源文件路径列出所有已安装包注册的替换资源，不受系统样式分界影响；每个文件可选择默认、系统原资源或任一注册包，选择保存到 app-scoped `resource-overrides.json`。删除被选资源包时对应选择回退为默认，没有剩余注册包的路径设置会清理。用户点主页重载时，Manager 先按已保存顺序解析默认结果，再应用逐文件选择；显式包选择可覆盖资源管理优先级，系统选择序列化为模块专用的精确文件目标 `@system`，即使位于更宽目录映射内也透传到固件原资源；指定包选择则直接映射到包内文件，无需为逐文件选择复制资源。随后生成活动 `mappings.tsv`。跨包重叠源路径按包优先级解析，预算内用直接文件映射、超预算才静态合并，避免高层缺失文件跳过低层资源；同一包内的重叠源规则仍遵守模块最长前缀规则。生成失败时不发送重载信号；活动配置写入后发送信号并等待匹配版本的模块回执，成功后清理旧活动代次，并释放旧直接映射包的保护；已有活动代次索引先持久化新旧包依赖，重载未确认时删除/替换守卫继续保护可能驻留的包。应用会话共享包快照并复用未变的活动映射，接收/删除包使缓存失效；排序和选择仍在每次重载时读取。缓存命中也发送新的重载版本并等待回执，不检测外部文件修改，也不逐文件检查复制前后的大小/类型。更新同一包时保留其排序槽位。
 
-因此链路上不传 ZIP，也没有 `packageId`；分享用 `.crpack` ZIP 由发送端解包后按树逐文件传输。CRPack v1 仅有 `canora.json` 和资源文件，Manager 重载时才生成模块需要的活动 TSV 配置。
+因此链路上不传 ZIP，也没有 `packageId`；分享用 `.crpack` ZIP 由发送端解包后按树逐文件传输。CRPack v1 仅有 `corona.json` 和资源文件，Manager 重载时才生成模块需要的活动 TSV 配置。

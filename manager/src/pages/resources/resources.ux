@@ -32,7 +32,7 @@ import prompt from "@system.prompt"
 import router from "@system.router"
 import vibrator from "@system.vibrator"
 import * as file from "../../ts/file"
-import { parseResourcePackManifest } from "../../ts/resource-pack"
+import { readResourcePackManifest } from "../../ts/resource-pack"
 import {
   loadResourceOrder,
   readInstalledThemeIds,
@@ -135,8 +135,7 @@ export default {
       for (const themeId of themeIds) {
         let manifest = null
         try {
-          const canora = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`)
-          if (canora !== null) manifest = parseResourcePackManifest(canora, themeId)
+          manifest = await readResourcePackManifest(`${THEME_ROOT_URI}${themeId}/`, themeId, file)
         } catch (_error) {
           // Keep the installed entry visible if its metadata was removed or damaged.
         }
@@ -150,7 +149,7 @@ export default {
           name: manifest ? manifest.name : themeId,
           metaLine: manifest
             ? ([author, versionText].filter(Boolean).join(" · ") || "资源包详情")
-            : "canora.json 不可用",
+            : "corona.json 不可用",
           description: manifest
             ? (manifest.description || "点按查看资源包详情")
             : "包信息不可用",

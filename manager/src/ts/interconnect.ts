@@ -2,7 +2,7 @@ import { THEME_DESTINATION_ROOT, safeRelativeResourcePath, safeThemeDestination 
 import { interconnect } from "./import";
 import * as file from "./file";
 import type { FileOperationError } from "./file";
-import { parseResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
+import { isResourcePackManifestFilename, isReservedResourcePackPath, parseResourcePackManifest, serializeResourcePackMappings } from "./resource-pack";
 import type { ResourcePackManifest } from "./resource-pack";
 import { validateResourcePackFiles } from "./resource-pack";
 import { registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
@@ -17,7 +17,7 @@ const MAX_WINDOW = 4;
 // This wire bound applies to transfers, not to installed file inventories.
 const MAX_PROTOCOL_TRANSFER_FILES = 0x10000;
 const MAX_THEME_BYTES = 64 * 1024 * 1024;
-const MAX_CANORA_BYTES = 64 * 1024;
+const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_CHUNKS_PER_FILE = 2048;
 const QUICKAPP_FILES_URI = "internal://files/";
 const MAPPINGS_URI = `${QUICKAPP_FILES_URI}mappings.tsv`;
@@ -139,6 +139,7 @@ function validThemeId(value: unknown): value is string {
 /** Validate without rewriting: the returned path is the exact transmitted spelling. */
 export function validateThemeRelativePath(relativePath: unknown, themeId: string): relativePath is string {
   if (typeof relativePath !== "string" || !safeRelativeResourcePath(relativePath)) return false;
+  if (isReservedResourcePackPath(relativePath) && !isResourcePackManifestFilename(relativePath)) return false;
   const segments = relativePath.split("/");
   if (segments.some(segment => !segment || segment === "." || segment === "..")) return false;
   return validThemeId(themeId) &&
@@ -679,7 +680,7 @@ export class InterconnectThemeReceiver {
       throw protocolError("invalid-manifest", "文件清单数量不完整");
 
     let totalBytes = 0;
-    let canoraCount = 0;
+    let manifestCount = 0;
     const paths = new Set<string>();
     for (const entry of state.files) {
       if (!validateThemeRelativePath(entry.relativePath, state.themeId) || paths.has(entry.relativePath))
@@ -688,16 +689,16 @@ export class InterconnectThemeReceiver {
       totalBytes += entry.sizeBytes;
       if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_THEME_BYTES)
         throw protocolError("no-space", "主题总大小超过 Manager 本地限制");
-      if (entry.relativePath === "canora.json") {
-        canoraCount++;
-        if (entry.sizeBytes < 1 || entry.sizeBytes > MAX_CANORA_BYTES)
-          throw protocolError("invalid-manifest", "canora.json 为空或超过 64 KiB");
+      if (isResourcePackManifestFilename(entry.relativePath)) {
+        manifestCount++;
+        if (entry.sizeBytes < 1 || entry.sizeBytes > MAX_MANIFEST_BYTES)
+          throw protocolError("invalid-manifest", "corona.json 清单为空或超过 64 KiB");
       }
       if (entry.relativePath === "mappings.tsv")
         throw protocolError("invalid-manifest", "资源包不允许携带 mappings.tsv");
     }
-    if (totalBytes !== state.totalBytes || canoraCount !== 1)
-      throw protocolError("invalid-manifest", "清单总字节数不匹配或缺少唯一的 canora.json");
+    if (totalBytes !== state.totalBytes || manifestCount !== 1)
+      throw protocolError("invalid-manifest", "清单总字节数不匹配；根目录必须有唯一的 corona.json（或旧版 canora.json）");
 
     const next = {
       ...state,
@@ -830,11 +831,14 @@ export class InterconnectThemeReceiver {
       throw protocolError("invalid-manifest", "主题仍有未完成文件，不能登记为可用");
     let manifest: ResourcePackManifest;
     try {
-      const text = await file.readText(this.themeFileUri(state.themeId, "canora.json"));
+      const manifests = state.files.filter(entry => isResourcePackManifestFilename(entry.relativePath));
+      if (manifests.length !== 1 || manifests[0].sizeBytes < 1 || manifests[0].sizeBytes > MAX_MANIFEST_BYTES)
+        throw new Error("根目录必须有唯一的 corona.json（或旧版 canora.json）");
+      const text = await file.readText(this.themeFileUri(state.themeId, manifests[0].relativePath));
       manifest = parseResourcePackManifest(text, state.themeId);
       validateResourcePackFiles(manifest, state.files.map(entry => entry.relativePath));
     } catch (error) {
-      throw protocolError("invalid-manifest", `canora.json 无效：${String((error as Error).message || error)}`);
+      throw protocolError("invalid-manifest", `corona.json 清单无效：${String((error as Error).message || error)}`);
     }
     invalidateResourceCatalog();
     try {

@@ -2,7 +2,7 @@ import {
   THEME_DESTINATION_ROOT, isBinFileDestination, isQuickAppIconSource, isDirectoryResourceSource,
   safeAbsoluteResourcePath, safeRelativeResourcePath, safeResourceSource, safeThemeDestination
 } from "./resource-path";
-import { parseResourcePackManifest } from "./resource-pack";
+import { readResourcePackManifest } from "./resource-pack";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import {
   enumerateThemeFiles,
@@ -442,13 +442,12 @@ export async function regenerateActiveMappings(
   const themesHighToLow: ThemeRules[] = [];
   const loadManifest = async (themeId: string, required: boolean): Promise<ResourcePackManifest | null> => {
     if (snapshot) return snapshot.themes.get(themeId)!.manifest;
-    const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
-    if (text === null) {
-      if (required) throw new Error(`资源包 ${themeId} 的 canora.json 不存在，无法生成映射`);
-      return null;
-    }
-    try { return parseResourcePackManifest(text, themeId); }
-    catch (error) {
+    try {
+      const manifest = await readResourcePackManifest(`${THEME_ROOT_URI}${themeId}/`, themeId, file);
+      if (manifest === null && required)
+        throw new Error(`资源包 ${themeId} 的 corona.json 不存在，无法生成映射`);
+      return manifest;
+    } catch (error) {
       if (!required) return null;
       throw new Error(`资源包 ${themeId} 的 manifest 无效：${String((error as Error).message || error)}`);
     }

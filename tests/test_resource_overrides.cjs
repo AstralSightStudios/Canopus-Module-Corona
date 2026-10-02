@@ -42,15 +42,15 @@ async function main() {
   const overridesModule = require(path.join(temporary, 'resource-overrides.js'));
   const file = makeFile();
   const installed = ['base', 'dark', 'inactive'];
-  file.text.set(`${themeRoot}base/canora.json`, manifest('base', 'Base', [
+  file.text.set(`${themeRoot}base/corona.json`, manifest('base', 'Base', [
     { source: '/resource/', destination: 'assets/' },
     { source: '/resource/a.bin', destination: 'special.bin' },
     { source: '/resource/missing/', destination: 'more-specific/' }
   ]));
-  file.text.set(`${themeRoot}dark/canora.json`, manifest('dark', 'Dark', [
+  file.text.set(`${themeRoot}dark/corona.json`, manifest('dark', 'Dark', [
     { source: '/resource/', destination: 'files/' }
   ]));
-  file.text.set(`${themeRoot}inactive/canora.json`, manifest('inactive', 'Inactive', [
+  file.text.set(`${themeRoot}inactive/corona.json`, manifest('inactive', 'Inactive', [
     { source: '/resource/', destination: 'other/' }
   ]));
   file.text.set(filesUri, JSON.stringify({ version: 1, themes: {
@@ -151,13 +151,13 @@ async function main() {
     const recursiveManifest = manifest('nested', 'Nested', [
       { source: '/resource/app/settings/', destination: 'app/settings/' }
     ]);
-    recursiveFile.text.set(`${themeRoot}nested/canora.json`, recursiveManifest);
+    recursiveFile.text.set(`${themeRoot}nested/corona.json`, recursiveManifest);
     recursiveFile.readFileInfo = async (uri, recursive) => {
       assert.equal(recursive, true, 'inventory fallback requests recursive Vela file metadata');
       const rootUri = `${themeRoot}nested/`;
       return {
         uri, length: 0, type: 'dir', subFiles: [
-          { uri: `${rootUri}canora.json`, length: Buffer.byteLength(recursiveManifest), type: 'file' },
+          { uri: `${rootUri}corona.json`, length: Buffer.byteLength(recursiveManifest), type: 'file' },
           { uri: `${rootUri}app/`, length: 0, type: 'dir', subFiles: [
             { uri: `${rootUri}app/settings/`, length: 0, type: 'dir', subFiles: [
               { uri: `${rootUri}app/settings/icon.bin`, length: 123, type: 'file' }
@@ -177,7 +177,7 @@ async function main() {
     const longFile = makeFile();
     const longSource = `/${'s'.repeat(200)}/`;
     const relativePath = `x/${'f'.repeat(60)}.bin`;
-    longFile.text.set(`${themeRoot}long/canora.json`, manifest('long', 'Long', [
+    longFile.text.set(`${themeRoot}long/corona.json`, manifest('long', 'Long', [
       { source: longSource, destination: 'x/' }
     ]));
     longFile.text.set(filesUri, JSON.stringify({ version: 1, themes: {
@@ -190,7 +190,8 @@ async function main() {
   {
     const invalidFile = makeFile();
     const original = JSON.stringify({ version: 1, overrides: { '/resource/a.bin': 'broken' } });
-    invalidFile.text.set(`${themeRoot}broken/canora.json`, '{bad manifest');
+    invalidFile.text.set(`${themeRoot}broken/corona.json`, '{bad manifest');
+    invalidFile.text.set(`${themeRoot}broken/canora.json`, manifest('broken', 'Legacy', []));
     invalidFile.text.set(overridesUri, original);
     await assert.rejects(overridesModule.loadRegisteredResourcePaths(['broken'], invalidFile), /manifest 无效/);
     assert.equal(invalidFile.text.get(overridesUri), original,

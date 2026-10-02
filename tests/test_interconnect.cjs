@@ -163,7 +163,7 @@ async function main() {
   for (const unsafe of ['/absolute', 'C:/absolute', '../escape', 'app//x', 'app/./x', 'app/../x', 'app\\x'])
     assert.equal(validateThemeRelativePath(unsafe, 'dark'), false, unsafe);
 
-  const canoraObject = {
+  const coronaObject = {
     format: 'canopus-resource-pack',
     formatVersion: 1,
     themeId: 'dark',
@@ -177,24 +177,24 @@ async function main() {
       destination: 'icons/'
     }]
   };
-  const canoraBytes = Buffer.from(JSON.stringify(canoraObject));
-  const canoraText = canoraBytes.toString('utf8');
-  const parsedCanora = parseResourcePackManifest(canoraText, 'dark');
-  assert.equal(parsedCanora.name, 'Dark');
-  assert.equal(parsedCanora.mappings.length, 1);
-  assert.equal(serializeResourcePackMappings(parsedCanora),
+  const coronaBytes = Buffer.from(JSON.stringify(coronaObject));
+  const coronaText = coronaBytes.toString('utf8');
+  const parsedCorona = parseResourcePackManifest(coronaText, 'dark');
+  assert.equal(parsedCorona.name, 'Dark');
+  assert.equal(parsedCorona.mappings.length, 1);
+  assert.equal(serializeResourcePackMappings(parsedCorona),
     '/resource/icons/\tthemes/dark/icons/\n');
-  assert.doesNotThrow(() => validateResourcePackFiles(parsedCanora, ['canora.json', 'icons/a.bin']));
-  assert.throws(() => validateResourcePackFiles(parsedCanora, ['canora.json']), /映射目标.*不存在/);
-  assert.throws(() => parseResourcePackManifest(canoraText, 'other'), /不匹配/);
+  assert.doesNotThrow(() => validateResourcePackFiles(parsedCorona, ['corona.json', 'icons/a.bin']));
+  assert.throws(() => validateResourcePackFiles(parsedCorona, ['corona.json']), /映射目标.*不存在/);
+  assert.throws(() => parseResourcePackManifest(coronaText, 'other'), /不匹配/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
-    ...canoraObject, mappings: [{ source: '/resource/', destination: '/tmp/theme/' }]
+    ...coronaObject, mappings: [{ source: '/resource/', destination: '/tmp/theme/' }]
   }), 'dark'), /destination 必须为安全的包内相对路径/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
-    ...canoraObject, mappings: [{ source: '/resource/', destination: '../outside/' }]
+    ...coronaObject, mappings: [{ source: '/resource/', destination: '../outside/' }]
   }), 'dark'), /destination 必须为安全的包内相对路径/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
-    ...canoraObject, mappings: [{ source: '/resource/\\t', destination: 'icons/' }]
+    ...coronaObject, mappings: [{ source: '/resource/\\t', destination: 'icons/' }]
   }), 'dark'), /source 必须为绝对路径/);
 
   apkStatus = 'connected';
@@ -274,11 +274,33 @@ async function main() {
   assert(activeReply.some(packet => packet.errorCode === 'active-theme'));
   assert.deepEqual(nativeStorageSnapshot(), beforeActiveReplace);
 
+  let invalidCaseIndex = 0;
+  for (const entries of [
+    [{ relativePath: 'corona.json', sizeBytes: 1 }, { relativePath: 'canora.json', sizeBytes: 1 }],
+    [{ relativePath: 'nested/corona.json', sizeBytes: 1 }],
+    [{ relativePath: 'nested/canora.json', sizeBytes: 1 }],
+    ...['corona.json', 'canora.json'].flatMap(relativePath => [
+      [{ relativePath, sizeBytes: 0 }], [{ relativePath, sizeBytes: 65537 }],
+      [{ relativePath: 'corona.json', sizeBytes: 1 }, { relativePath: `${relativePath}/asset.bin`, sizeBytes: 1 }],
+      [{ relativePath: 'canora.json', sizeBytes: 1 }, { relativePath: `${relativePath}/`, sizeBytes: 1 }]
+    ])
+  ]) {
+    const themeId = 'dark';
+    entries.push({ relativePath: 'case.bin', sizeBytes: 100 + invalidCaseIndex++ });
+    await deliver('T' + JSON.stringify({ operation: 'begin', themeId, mode: 'replace',
+      fileCount: entries.length, totalBytes: entries.reduce((sum, entry) => sum + entry.sizeBytes, 0) }));
+    const packets = [];
+    for (const [fileIndex, entry] of entries.entries())
+      packets.push(...messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId, fileIndex, ...entry }))));
+    packets.push(...messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId }))));
+    assert(packets.some(packet => packet.status === 'reject'), JSON.stringify(entries));
+  }
+
   const manifest = [
-    { relativePath: 'canora.json', sizeBytes: canoraBytes.length },
+    { relativePath: 'corona.json', sizeBytes: coronaBytes.length },
     { relativePath: 'icons/a.bin', sizeBytes: 3 }
   ];
-  const header = { themeId: 'dark', mode: 'replace', fileCount: 2, totalBytes: canoraBytes.length + 3 };
+  const header = { themeId: 'dark', mode: 'replace', fileCount: 2, totalBytes: coronaBytes.length + 3 };
   let reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...header })));
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'dark', fileIndex: 0,
@@ -299,33 +321,33 @@ async function main() {
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
   assert.equal(transferPageRequests, 0);
 
-  const canoraChunkSize = Math.ceil(canoraBytes.length / 2);
-  const canoraChunkCount = Math.ceil(canoraBytes.length / canoraChunkSize);
-  const canoraChunk = index => canoraBytes.slice(index * canoraChunkSize,
-    Math.min(canoraBytes.length, (index + 1) * canoraChunkSize));
+  const coronaChunkSize = Math.ceil(coronaBytes.length / 2);
+  const coronaChunkCount = Math.ceil(coronaBytes.length / coronaChunkSize);
+  const coronaChunk = index => coronaBytes.slice(index * coronaChunkSize,
+    Math.min(coronaBytes.length, (index + 1) * coronaChunkSize));
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
-    sizeBytes: canoraBytes.length, chunkSizeBytes: canoraChunkSize, chunkCount: canoraChunkCount })));
+    sizeBytes: coronaBytes.length, chunkSizeBytes: coronaChunkSize, chunkCount: coronaChunkCount })));
   assert(reply.some(packet => packet.status === 'ready'));
   assert.equal(transferPageRequests, 1);
-  reply = messages(await deliver(`F00000001${encodeBase91(canoraChunk(1))}`));
+  reply = messages(await deliver(`F00000001${encodeBase91(coronaChunk(1))}`));
   assert(reply.includes('A00000001'));
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
-    sizeBytes: canoraBytes.length, chunkSizeBytes: canoraChunkSize, chunkCount: canoraChunkCount })));
+    sizeBytes: coronaBytes.length, chunkSizeBytes: coronaChunkSize, chunkCount: coronaChunkCount })));
   assert(reply.some(packet => packet.status === 'resume' &&
     JSON.stringify(packet.receivedRanges) === '[[1,1]]'));
   assert.equal(transferPageRequests, 1); // P packets for further files do not navigate again.
-  reply = messages(await deliver(`F00000000${encodeBase91(canoraChunk(0))}`));
+  reply = messages(await deliver(`F00000000${encodeBase91(coronaChunk(0))}`));
   assert(reply.includes('A00000000'));
   assert.equal(states.at(-1).phase, 'receiving');
-  assert.equal(states.at(-1).percent, Math.floor(canoraBytes.length * 100 / header.totalBytes));
+  assert.equal(states.at(-1).percent, Math.floor(coronaBytes.length * 100 / header.totalBytes));
   connection.onerror({ data: 'link lost' });
   assert.equal(states.at(-1).phase, 'error');
   assert.match(states.at(-1).message, /接收进度已保留/);
-  assert.equal(states.at(-1).percent, Math.floor(canoraBytes.length * 100 / header.totalBytes));
+  assert.equal(states.at(-1).percent, Math.floor(coronaBytes.length * 100 / header.totalBytes));
   connection.onopen({ isReconnected: true });
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(states.at(-1).phase, 'ready');
-  assert.deepEqual([...native.binary.get('internal://files/themes/dark/canora.json')], [...canoraBytes]);
+  assert.deepEqual([...native.binary.get('internal://files/themes/dark/corona.json')], [...coronaBytes]);
   const savedProgress = JSON.parse(native.text.get('internal://files/interconnect-transfer.json'));
   assert.equal(savedProgress.files[0].receivedBitmap, '3');
   assert.equal(Object.hasOwn(savedProgress.files[0], 'receivedChunks'), false);
@@ -343,7 +365,7 @@ async function main() {
   await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'dark' }));
 
   reply = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
-    sizeBytes: canoraBytes.length, chunkSizeBytes: canoraChunkSize, chunkCount: canoraChunkCount })));
+    sizeBytes: coronaBytes.length, chunkSizeBytes: coronaChunkSize, chunkCount: coronaChunkCount })));
   assert(reply.some(packet => packet.status === 'complete' &&
     JSON.stringify(packet.receivedRanges) === '[[0,1]]'));
   assert.equal(transferPageRequests, 2); // A resumed upload on a new app session opens once.
@@ -402,7 +424,7 @@ async function main() {
 
   // One directory mapping can back more than 128 actual transferred files.
   const manyFiles = [
-    { relativePath: 'canora.json', bytes: Buffer.from(JSON.stringify({ ...canoraObject, themeId: 'legacy' })) },
+    { relativePath: 'canora.json', bytes: Buffer.from(JSON.stringify({ ...coronaObject, themeId: 'legacy' })) },
     ...Array.from({ length: 129 }, (_, index) => ({
       relativePath: `icons/${index}.bin`, bytes: Buffer.from([index])
     }))
@@ -469,6 +491,10 @@ async function main() {
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader, mode: 'resume' })));
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'),
     'a new receiver accepts a persisted manifest larger than 128 files');
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'legacy', fileIndex: 0,
+    relativePath: 'corona.json', sizeBytes: manyFiles[0].bytes.length })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'),
+    'resume must not alias legacy and canonical manifest paths');
   for (const [fileIndex, entry] of manyFiles.entries()) {
     reply = messages(await deliver('T' + JSON.stringify({ operation: 'file', themeId: 'legacy', fileIndex,
       relativePath: entry.relativePath, sizeBytes: entry.bytes.length })));
@@ -511,12 +537,12 @@ async function main() {
 
   async function transferCapacityPack(ruleCount) {
     // Mapping-rule capacity remains independent of the number of transferred files.
-    const bytes = Buffer.from(JSON.stringify({ ...canoraObject, themeId: 'legacy',
+    const bytes = Buffer.from(JSON.stringify({ ...coronaObject, themeId: 'legacy',
       mappings: Array.from({ length: ruleCount }, (_, index) => ({
         source: `/resource/${index}.bin`, destination: 'shared.bin'
       })) }));
     const files = [
-      { relativePath: 'canora.json', bytes },
+      { relativePath: 'corona.json', bytes },
       { relativePath: 'shared.bin', bytes: Buffer.from([7]) }
     ];
     let packets = messages(await deliver('T' + JSON.stringify({
@@ -569,7 +595,7 @@ async function main() {
   // Exercise the highest wire index without sending 65,536 manifest/control sequences.
   // All earlier files are complete in this persisted transfer; only 0xffff needs one chunk.
   const wireFiles = Array.from({ length: 65536 }, (_, index) => ({
-    relativePath: index === 0 ? 'canora.json' : `icons/${index}.bin`,
+    relativePath: index === 0 ? 'corona.json' : `icons/${index}.bin`,
     sizeBytes: index === 0 || index === 65535 ? 1 : 0,
     chunkSizeBytes: 1,
     chunkCount: index === 0 || index === 65535 ? 1 : 0,
@@ -600,7 +626,7 @@ async function main() {
   function seedPriorPack() {
     native.text.set(transferStateUri, finishedDarkState);
     native.text.set(installedUri, JSON.stringify(['dark']));
-    native.text.set('internal://files/themes/dark/canora.json', canoraText);
+    native.text.set('internal://files/themes/dark/corona.json', coronaText);
     native.binary.set('internal://files/themes/dark/icons/a.bin', Uint8Array.from([1, 2, 255]));
     native.directories.add('internal://files/themes/dark/');
     native.directories.add('internal://files/themes/dark/icons/');
@@ -629,7 +655,7 @@ async function main() {
     native.text.set(generationsUri, acknowledgedRegistry);
     reply = messages(await deliver(protectedReplacePacket));
     assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
-    assert.equal(native.text.has('internal://files/themes/dark/canora.json'), false);
+    assert.equal(native.text.has('internal://files/themes/dark/corona.json'), false);
     assert.equal(native.binary.has('internal://files/themes/dark/icons/a.bin'), false);
     assert.deepEqual(JSON.parse(native.text.get(installedUri)), []);
     assert.equal(JSON.parse(native.text.get(transferStateUri)).manifestReceiving, true);

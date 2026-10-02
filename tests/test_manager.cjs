@@ -5,6 +5,7 @@ const { spawnSync } = require('node:child_process');
 const tests = [
   'test_file.cjs',
   'test_interconnect.cjs',
+  'test_manifest_filenames.cjs',
   'test_resource_storage.cjs',
   'test_reload_signal.cjs',
   'test_resource_order.cjs',
@@ -52,7 +53,7 @@ async function testQuickAppIcons(temporary) {
   assert.equal(safeAbsoluteResourcePath(key), false, 'virtual keys are not native resource paths');
   assert.equal(validateThemeRelativePath(key, 'top'), false, 'transfer paths cannot carry semantic keys');
   assert.equal(validSourcePath(key), true);
-  assert.doesNotThrow(() => validateFiles(pack, ['canora.json', 'icons/corona.bin']));
+  assert.doesNotThrow(() => validateFiles(pack, ['corona.json', 'icons/corona.bin']));
   assert.throws(() => validateFiles(pack, ['icons/corona.bin/child']), /不存在/);
   assert.throws(() => parseObject({ ...base, mappings: undefined }), /mappings/);
   assert.throws(() => parseObject({ ...base, quickappIcons: null }), /quickappIcons/);
@@ -174,8 +175,8 @@ async function testQuickAppIcons(temporary) {
   assert.ok(fallback.copies.every(copy => !copy.destinationUri.includes('@quickapp-icon')));
 
   const texts = new Map([
-    ['internal://files/themes/top/canora.json', JSON.stringify(base)],
-    ['internal://files/themes/low/canora.json', JSON.stringify({ ...base, themeId: 'low', name: 'Low' })],
+    ['internal://files/themes/top/corona.json', JSON.stringify(base)],
+    ['internal://files/themes/low/corona.json', JSON.stringify({ ...base, themeId: 'low', name: 'Low' })],
     ['internal://files/resource-files.json', JSON.stringify({ version: 1, themes: {
       top: [{ relativePath: 'icons/corona.bin', sizeBytes: 1 }],
       low: [{ relativePath: 'icons/corona.bin', sizeBytes: 1 }]
@@ -312,7 +313,7 @@ async function testPortableDestinations() {
     const capacityPack = parseMappings(capacityMappings);
     assert.equal(capacityPack.mappings.length, 256);
     assert.equal(serialize(capacityPack).split('\n').filter(Boolean).length, 256);
-    assert.doesNotThrow(() => validateFiles(capacityPack, ['canora.json', 'shared.bin']),
+    assert.doesNotThrow(() => validateFiles(capacityPack, ['corona.json', 'shared.bin']),
       '256 source aliases may share one transmitted resource file');
     assert.equal(plan([{ themeId: 'top', manifest: capacityPack, files: null }], 'portable').mappings,
       serialize(capacityPack));

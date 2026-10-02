@@ -11,7 +11,7 @@ const installedUri = 'internal://files/interconnect-themes.json';
 const mappingsUri = 'internal://files/mappings.tsv';
 const generationsUri = 'internal://files/resource-active-generations.json';
 const oldMappings = '/resource/\tthemes/.active-old/r0/\n';
-const manifestUri = id => `${themeRoot}${id}/canora.json`;
+const manifestUri = id => `${themeRoot}${id}/corona.json`;
 const generationRoot = id => `${themeRoot}.active-${id}/`;
 
 function deferred() {
@@ -168,7 +168,7 @@ async function testFreshSnapshots(api, activation) {
   assert.deepEqual(snapshot.paths[0].themes.map(theme => theme.themeId), ids);
   assert.strictEqual(snapshot.byPath.get(snapshot.paths[0].sourcePath), snapshot.paths[0]);
   const reloadReads = file.calls.slice(before).filter(call => call.method === 'read');
-  assert.equal(reloadReads.length, ids.length + 1);
+  assert.equal(reloadReads.length, ids.length * 2 + 1);
   for (const id of ids) assert.equal(reloadReads.filter(call => call.uri === manifestUri(id)).length, 1);
   assert.equal(reloadReads.filter(call => call.uri === inventoryUri).length, 1);
 
@@ -232,8 +232,8 @@ async function testResolvedEnumeration(api, activation) {
     const originalIndex = file.text.get(inventoryUri);
     if (mode === 'missing' || mode === 'list-get') file.text.delete(inventoryUri);
     if (mode === 'stale') file.text.set(inventoryUri, JSON.stringify({ version: 1, themes: {
-      top: [{ relativePath: 'canora.json', sizeBytes: 1 }],
-      base: [{ relativePath: 'canora.json', sizeBytes: 1 }]
+      top: [{ relativePath: 'corona.json', sizeBytes: 1 }],
+      base: [{ relativePath: 'corona.json', sizeBytes: 1 }]
     } }));
     if (mode === 'corrupt') file.text.set(inventoryUri, '{bad optional index');
     if (mode === 'unreadable') file.onRead = async (uri, value) => {
@@ -450,7 +450,7 @@ async function testReadBudget(api, activation) {
   assert.equal(sharedPlan.generation, null);
   for (const id of ids) assert.equal(shared.count('read', manifestUri(id)), 1);
   assert.equal(shared.count('read', inventoryUri), 1);
-  assert.equal(shared.count('read'), 5, 'two manifests, one inventory, protection registry and prior TSV');
+  assert.equal(shared.count('read'), 7, 'both names for two manifests, one inventory, protection registry and prior TSV');
   for (const method of ['info', 'copy', 'mkdir', 'list']) assert.equal(shared.count(method), 0, method);
   const before = shared.calls.length;
   assert.strictEqual(await activation.regenerateActiveMappings([...ids, '@system'], 'sample2', shared, {}, snapshot),
@@ -464,7 +464,7 @@ async function testReadBudget(api, activation) {
   assert.deepEqual(separatePlan.copies, []);
   for (const id of ids) assert.equal(separate.count('read', manifestUri(id)), 2);
   assert.equal(separate.count('read', inventoryUri), 2);
-  assert.equal(separate.count('read'), 8);
+  assert.equal(separate.count('read'), 12);
 
   const choices = { '/resource/icon0.bin': '@system', '/resource/icon1.bin': 'base' };
   const selected = await activation.regenerateActiveMappings([...ids, '@system'], 'choices', shared, choices, snapshot);

@@ -90,7 +90,7 @@ async function main() {
   {
     const file = makeFileApi();
     const entries = [
-      { relativePath: 'canora.json', sizeBytes: 1 },
+      { relativePath: 'corona.json', sizeBytes: 1 },
       ...Array.from({ length: 256 }, (_, index) => ({ relativePath: `assets/${index}.bin`, sizeBytes: 1 }))
     ];
     await order.writeThemeFileInventory('large', entries, file);
@@ -150,7 +150,7 @@ async function main() {
       assert.equal(uri, rootUri);
       assert.equal(recursive, true);
       return { type: 'dir', length: 0, subFiles: [
-        { uri: `${rootUri}canora.json`, type: 'file', length: 1 },
+        { uri: `${rootUri}corona.json`, type: 'file', length: 1 },
         { uri: `${rootUri}mappings.tsv`, type: 'file', length: 1 },
         { uri: `${rootUri}assets/`, type: 'dir', length: 0,
           subFiles: assets.map(entry => ({ uri: rootUri + entry.relativePath, type: 'file', length: entry.sizeBytes })) }
@@ -158,7 +158,7 @@ async function main() {
     };
     file.listDirectory = async () => { throw new Error('A complete recursive inventory must not fall back'); };
     assert.deepEqual(await order.enumerateThemeFiles('recursive', file),
-      [...assets, { relativePath: 'canora.json', sizeBytes: 1 }].sort((a, b) =>
+      [...assets, { relativePath: 'corona.json', sizeBytes: 1 }].sort((a, b) =>
         a.relativePath.localeCompare(b.relativePath)));
 
     // On-disk discovery is not constrained by the interconnect four-hex index field.
@@ -229,13 +229,13 @@ async function main() {
 
   {
     const file = makeFileApi();
-    file.text.set('internal://files/themes/top/canora.json', manifest('top', {
+    file.text.set('internal://files/themes/top/corona.json', manifest('top', {
       source: '/resource/icons/', destination: 'icons/'
     }));
     file.text.set('internal://files/themes/base/canora.json', manifest('base', {
       source: '/resource/icons/', destination: 'other/'
     }));
-    file.text.set('internal://files/themes/inactive/canora.json', '{not loaded}');
+    file.text.set('internal://files/themes/inactive/corona.json', '{not loaded}');
     file.text.set(fileIndexUri, JSON.stringify({ version: 1, themes: {
       top: [{ relativePath: 'icons/a.bin', sizeBytes: 2 }],
       base: [
@@ -260,14 +260,18 @@ async function main() {
       { version: 1, generations: [], protectedThemes: ['base', 'top'] },
       'direct rules record protected packages without creating an overlay generation');
     assert(![...file.binary.keys()].some(uri => uri.includes('/.active-')));
+    file.text.set('internal://files/themes/base/corona.json', '{invalid canonical');
+    await assert.rejects(activation.regenerateActiveMappings(['base', systemId], 'bad', file), /同时包含/);
+    file.text.delete('internal://files/themes/base/canora.json');
+    await assert.rejects(activation.regenerateActiveMappings(['base', systemId], 'bad', file), /JSON 格式无效/);
   }
 
   {
     const file = makeFileApi();
     const topManifest = manifest('top', { source: '/legacy/', destination: 'icons/' });
     const baseManifest = manifest('base', { source: '/legacy/', destination: 'assets/' });
-    file.text.set('internal://files/themes/top/canora.json', topManifest);
-    file.text.set('internal://files/themes/base/canora.json', baseManifest);
+    file.text.set('internal://files/themes/top/corona.json', topManifest);
+    file.text.set('internal://files/themes/base/corona.json', baseManifest);
     const entries = {
       top: Array.from({ length: 257 }, (_, index) => `icons/top-${index}.bin`),
       base: ['assets/base.bin']
@@ -277,7 +281,7 @@ async function main() {
       if (!match) return [];
       const [, themeId, relative] = match;
       if (!relative) return [
-        { uri: `${uri}canora.json`, length: Buffer.byteLength(themeId === 'top' ? topManifest : baseManifest) },
+        { uri: `${uri}corona.json`, length: Buffer.byteLength(themeId === 'top' ? topManifest : baseManifest) },
         { uri: `${uri}${themeId === 'top' ? 'icons/' : 'assets/'}`, length: 0 }
       ];
       if (relative === 'icons/' || relative === 'assets/')
@@ -285,7 +289,7 @@ async function main() {
       return [];
     };
     file.readFileInfo = async uri => ({
-      length: uri.endsWith('canora.json')
+      length: uri.endsWith('corona.json')
         ? Buffer.byteLength(uri.includes('/top/') ? topManifest : baseManifest) : (uri.endsWith('/') ? 0 : 1),
       type: uri.endsWith('/') ? 'dir' : 'file'
     });
@@ -359,10 +363,10 @@ async function main() {
 
   {
     const file = makeFileApi();
-    file.text.set('internal://files/themes/top/canora.json', manifest('top', {
+    file.text.set('internal://files/themes/top/corona.json', manifest('top', {
       source: '/resource/', destination: 'top/'
     }));
-    file.text.set('internal://files/themes/picked/canora.json', manifest('picked', {
+    file.text.set('internal://files/themes/picked/corona.json', manifest('picked', {
       source: '/resource/', destination: 'picked/'
     }));
     file.text.set(fileIndexUri, JSON.stringify({ version: 1, themes: {
@@ -399,10 +403,10 @@ async function main() {
   {
     const file = makeFileApi();
     file.text.set(mappingsUri, 'old active config');
-    file.text.set('internal://files/themes/top/canora.json', manifest('top', {
+    file.text.set('internal://files/themes/top/corona.json', manifest('top', {
       source: '/resource/', destination: 'top/'
     }));
-    file.text.set('internal://files/themes/base/canora.json', manifest('base', {
+    file.text.set('internal://files/themes/base/corona.json', manifest('base', {
       source: '/resource/', destination: 'base/'
     }));
     file.text.set(fileIndexUri, JSON.stringify({ version: 1, themes: {
@@ -557,11 +561,11 @@ async function main() {
     }));
     const capacityManifest = { ...JSON.parse(manifest('capacity', capacityMappings[0])),
       mappings: capacityMappings };
-    file.text.set('internal://files/themes/capacity/canora.json', JSON.stringify(capacityManifest));
+    file.text.set('internal://files/themes/capacity/corona.json', JSON.stringify(capacityManifest));
     const plan = await activation.regenerateActiveMappings(['capacity', systemId], 'g-capacity', file);
     assert.equal(plan.mappings.split('\n').filter(Boolean).length, 256);
     assert.equal(file.text.get(mappingsUri), plan.mappings);
-    file.text.set('internal://files/themes/extra/canora.json', manifest('extra', {
+    file.text.set('internal://files/themes/extra/corona.json', manifest('extra', {
       source: '/resource/extra.bin', destination: 'extra.bin'
     }));
     await assert.rejects(activation.regenerateActiveMappings(
@@ -581,13 +585,13 @@ async function main() {
         destination: 'shared.bin' };
     });
     themeIds.forEach((themeId, index) => file.text.set(
-      `internal://files/themes/${themeId}/canora.json`, JSON.stringify({
+      `internal://files/themes/${themeId}/corona.json`, JSON.stringify({
         ...JSON.parse(manifest(themeId, rules[0])), mappings: rules.slice(index * 128, (index + 1) * 128)
       })));
     const plan = await activation.regenerateActiveMappings([...themeIds, systemId], 'g-budget', file);
     assert.equal(Buffer.byteLength(plan.mappings), 32 * 1024);
     assert.ok(plan.mappings.length < 32 * 1024, 'TSV limit uses bytes, not JS string length');
-    const firstUri = 'internal://files/themes/budgeta/canora.json';
+    const firstUri = 'internal://files/themes/budgeta/corona.json';
     const oversized = JSON.parse(file.text.get(firstUri));
     oversized.mappings[0].source += 'x';
     file.text.set(firstUri, JSON.stringify(oversized));

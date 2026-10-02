@@ -25,7 +25,7 @@
 import router from "@system.router"
 import prompt from "@system.prompt"
 import * as file from "../../ts/file"
-import { parseResourcePackManifest } from "../../ts/resource-pack"
+import { readResourcePackManifest } from "../../ts/resource-pack"
 import { removeInstalledTheme } from "../../ts/resource-storage"
 
 const THEME_ROOT_URI = "internal://files/themes/"
@@ -57,9 +57,8 @@ export default {
 
     this.statusText = "正在读取资源包…"
     try {
-      const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`)
-      if (text === null) throw new Error("找不到 canora.json")
-      const manifest = parseResourcePackManifest(text, themeId)
+      const manifest = await readResourcePackManifest(`${THEME_ROOT_URI}${themeId}/`, themeId, file)
+      if (manifest === null) throw new Error("找不到 corona.json")
       this.name = manifest.name
       this.metaLine = [
         manifest.author || "",

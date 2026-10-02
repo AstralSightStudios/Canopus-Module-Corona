@@ -1,4 +1,4 @@
-import { parseResourcePackManifest } from "./resource-pack";
+import { readResourcePackManifest } from "./resource-pack";
 import { safeResourceSource, isDirectoryResourceSource } from "./resource-path";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import type { ActiveMappingsPlan } from "./resource-activation";
@@ -294,14 +294,15 @@ export async function loadResourcePackSnapshot(
         checkCurrent();
         const index = nextIndex++;
         const themeId = installedThemeIds[index];
-        const text = await file.readOptionalText(`${THEME_ROOT_URI}${themeId}/canora.json`);
-        checkCurrent();
-        if (failed) return;
-        if (text === null) throw new Error(`资源包 ${themeId} 缺少 canora.json，无法读取混搭路径`);
-        try { manifests[index] = parseResourcePackManifest(text, themeId); }
+        let manifest: ResourcePackManifest | null;
+        try { manifest = await readResourcePackManifest(`${THEME_ROOT_URI}${themeId}/`, themeId, file, checkCurrent); }
         catch (error) {
           throw new Error(`资源包 ${themeId} 的 manifest 无效：${String((error as Error).message || error)}`);
         }
+        checkCurrent();
+        if (failed) return;
+        if (manifest === null) throw new Error(`资源包 ${themeId} 缺少 corona.json，无法读取混搭路径`);
+        manifests[index] = manifest;
       }
     } catch (error) {
       failed = true;
