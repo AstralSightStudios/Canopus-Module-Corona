@@ -83,6 +83,51 @@ for (const [page, listSelector] of pages) {
   if (page === 'resources') resourcesSource = source;
 }
 
+for (const [page, action, image, handler] of [
+  ['index', 'reload', 'reload', 'requestReload'],
+  ['resource-detail', 'delete', 'del', 'onDeleteTap']
+]) {
+  const source = fs.readFileSync(path.join(root, `manager/src/pages/${page}/${page}.ux`), 'utf8');
+  const style = /<style>([\s\S]*?)<\/style>/.exec(source)[1];
+  const template = /<template>([\s\S]*?)<\/template>/.exec(source)[1];
+  const narrowSelector = `.${action}-action`;
+  const wideSelector = `.${action}-action-wide`;
+  const wrapperSelector = `.${action}-action-wrap`;
+
+  for (const [width, height, density, wide] of [
+    [212, 520, 1, false],
+    [212, 520, 2, false],
+    [336, 480, 2.1, true],
+    [212, 468, 1, false]
+  ]) {
+    const active = stylesForScreen(style, width, height, density);
+    const narrow = rule(active, narrowSelector);
+    const wideAction = rule(active, wideSelector);
+    const wrapper = rule(active, wrapperSelector);
+    assert.equal(narrow.display || 'flex', wide ? 'none' : 'flex', `${page}: original image visibility`);
+    assert.equal(wideAction.display, wide ? 'flex' : 'none', `${page}: wide image visibility`);
+    assert.equal(narrow.width, '150px');
+    assert.equal(narrow.height, '78px');
+    assert.equal(wideAction.width, '324px');
+    assert.equal(wideAction.height, '80px');
+    assert.equal(wrapper.height, wide ? '80px' : '78px');
+    assert.equal(wrapper.bottom, '10px');
+    if (wide) assert(parseInt(wideAction.width) <= width, 'wide action must fit on screen');
+  }
+
+  for (const suffix of ['', '-wide']) {
+    const tag = template.match(new RegExp(`<img class="${action}-action${suffix}"[^>]*>`))[0];
+    assert(tag.includes(`src="/common/images/${image}${suffix}.png"`));
+    assert(tag.includes(`onclick="${handler}"`), `${page}: both images retain their action`);
+    if (action === 'reload') assert(tag.includes('opacity: {{sendingReload ? 0.4 : 1}};'));
+  }
+
+  const png = fs.readFileSync(path.join(root, `manager/src/common/images/${image}-wide.png`));
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(16), 324);
+  assert.equal(png.readUInt32BE(20), 80);
+}
+
 const script = /<script>([\s\S]*?)<\/script>/.exec(resourcesSource)[1]
   .replace(/^import[\s\S]*?from "[^"]+"\n/gm, '')
   .replace('export default', 'globalThis.page =');

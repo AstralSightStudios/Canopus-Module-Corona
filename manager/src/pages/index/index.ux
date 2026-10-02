@@ -19,6 +19,8 @@
     <div class="reload-action-wrap">
       <img class="reload-action" style="opacity: {{sendingReload ? 0.4 : 1}};"
         src="/common/images/reload.png" onclick="requestReload" />
+      <img class="reload-action-wide" style="opacity: {{sendingReload ? 0.4 : 1}};"
+        src="/common/images/reload-wide.png" onclick="requestReload" />
     </div>
   </div>
 </template>
@@ -154,7 +156,25 @@ export default {
   height: 78px;
 }
 
+.reload-action-wide {
+  display: none;
+  width: 324px;
+  height: 80px;
+}
+
 @media (width: 160) {
+  .reload-action-wrap {
+    height: 80px;
+  }
+
+  .reload-action {
+    display: none;
+  }
+
+  .reload-action-wide {
+    display: flex;
+  }
+
   .page {
     flex-direction: row;
     justify-content: flex-start;

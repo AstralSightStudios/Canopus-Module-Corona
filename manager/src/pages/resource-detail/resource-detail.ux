@@ -16,6 +16,7 @@
     </div>
     <div if="{{loaded}}" class="delete-action-wrap">
       <img class="delete-action" src="/common/images/del.png" onclick="onDeleteTap" />
+      <img class="delete-action-wide" src="/common/images/del-wide.png" onclick="onDeleteTap" />
     </div>
   </div>
 </template>
@@ -214,7 +215,25 @@ export default {
   height: 78px;
 }
 
+.delete-action-wide {
+  display: none;
+  width: 324px;
+  height: 80px;
+}
+
 @media (width: 160) {
+  .delete-action-wrap {
+    height: 80px;
+  }
+
+  .delete-action {
+    display: none;
+  }
+
+  .delete-action-wide {
+    display: flex;
+  }
+
   .header {
     top: 0px;
     height: 60px;
