@@ -117,12 +117,12 @@ function requestLine(operation: string, id: string): string {
   return `${operation}\tng.lst.corona\t${id}\n`;
 }
 
-/** Verify the ENTIRE fixed-size record, including NUL padding and exact echo. */
+/** Verify the complete text payload and exact echo, not native file padding. */
 function responseFields(text: string, operation: string, id: string): string[] | null {
-  if (!VALID_ID.test(id) || text.length !== 256) return null;
-  const end = text.indexOf("\0");
-  if (end < 0 || !/^\0+$/.test(text.slice(end))) return null;
-  const record = text.slice(0, end);
+  if (!VALID_ID.test(id)) return null;
+  // Text APIs may omit native NUL padding or preserve it in the returned string.
+  // Both representations contain the same three-line checksummed payload.
+  const record = text.split("\0", 1)[0];
   if (/[^\x00-\x7f]/.test(record)) return null;
   const lines = record.split("\n");
   if (lines.length !== 4 || lines[3] !== "" ||

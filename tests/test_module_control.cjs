@@ -95,20 +95,32 @@ async function main() {
     state: 'config_error', configError: error, activeRuleCount: count, refreshPending
   });
 
-  // Full framing, exact operation/app/ID, checksum and zero padding integrity.
+  // Full text framing, exact operation/app/ID and checksum; native padding is optional.
   for (const [parse, valid] of [[parseModuleStatus, status('id')], [parseReloadResult, reload('id')]]) {
     assert.ok(parse(valid, 'id'));
     assert.equal(parse(valid, 'stale'), null);
     assert.equal(parse(valid, ''), null);
     assert.equal(parse(valid, 'bad/id'), null);
     assert.equal(parse(valid, 'x'.repeat(65)), null);
-    for (let length = 0; length < 256; length++)
-      assert.equal(parse(valid.slice(0, length), 'id'), null, `short write: ${length}`);
     const end = valid.indexOf('\0');
+    const body = valid.slice(0, end);
+    for (let length = 0; length < end; length++) {
+      const short = valid.slice(0, length);
+      assert.equal(parse(short, 'id'), null, `incomplete body: ${length}`);
+      assert.equal(parse(short + '\0'.repeat(256 - length), 'id'), null,
+        `zero padding cannot repair an incomplete body: ${length}`);
+    }
+    for (let length = end; length <= valid.length; length++)
+      assert.deepEqual(parse(valid.slice(0, length), 'id'), parse(valid, 'id'),
+        `complete body with optional padding: ${length}`);
+    for (const compatible of [body, body + '\0', valid + '\0', valid.slice(0, -1) + 'x',
+      valid.slice(0, end + 3) + 'x' + valid.slice(end + 4)])
+      assert.deepEqual(parse(compatible, 'id'), parse(valid, 'id'),
+        'native padding does not determine text-payload validity');
     const checksumStart = valid.lastIndexOf('\n', end - 2) + 1;
     for (const bad of [
-      '', 'pending\tid\n', valid.slice(0, end), valid.slice(0, -1), valid + '\0',
-      valid.slice(0, -1) + 'x', valid.slice(0, end + 3) + 'x' + valid.slice(end + 4),
+      '', 'pending\tid\n', body + 'x', body + '\n', body + body,
+      body.slice(0, 5) + '\0' + body.slice(5),
       valid.replace('\n', '\r\n').slice(0, 256),
       valid.replace('ng.lst.corona', 'ng.lst.coronb'), valid.replace('id', 'iD'),
       valid.slice(0, checksumStart) + (valid[checksumStart] === '0' ? '1' : '0') + valid.slice(checksumStart + 1),
@@ -215,7 +227,7 @@ async function main() {
   await queryModuleStatus(healthyFile, 1, 0);
   assert.notEqual(healthyFile.id, firstId);
   const stale = statusFile({ read: (id, polls) => polls === 1 ? status('stale') :
-    polls === 2 ? reload(id) : polls === 3 ? status(id).slice(0, -1) : status(id) });
+    polls === 2 ? reload(id) : polls === 3 ? status(id).split('\0', 1)[0].slice(0, -1) : status(id) });
   assert.equal((await queryModuleStatus(stale, 5, 0)).reason, 'response');
   assert.equal(stale.reads, 4);
   for (const unavailable of [null, 'pending\tx\n', status('stale')]) {
@@ -239,6 +251,32 @@ async function main() {
     assert.equal((await queryModuleStatus(file, 5, 0)).reason, 'write_error');
     assert.equal(file.reads, 0);
     assert.equal(file.writes.length, uri === RESPONSE ? 1 : 2);
+  }
+
+  // A null-terminated text API returns only the prefix before the first NUL.
+  initialize();
+  {
+    const textOnly = statusFile({ read: id => status(id).split('\0', 1)[0] });
+    assert.deepEqual((await getInitialModuleStatus(textOnly)).status, running());
+    assert.equal(textOnly.reads, 1, 'a text-only status reply must not exhaust the poll budget');
+    const errorText = statusFile({ read: id => status(id,
+      { state: 'config_error', error: -2103, count: 9 }).split('\0', 1)[0] });
+    assert.deepEqual((await queryModuleStatus(errorText, 1, 0)).status, configError(-2103, 9));
+    let reads = 0;
+    const reply = await waitForReloadOutcome('text-only', { async readOptionalText(uri) {
+      assert.equal(uri, RESPONSE);
+      reads++;
+      return reload('text-only', { count: 42 }).split('\0', 1)[0];
+    } }, 1, 0);
+    assert.deepEqual(reply, { successful: true, message: '重载完成，更新 1 项资源', status: running(42) });
+    assert.equal(reads, 1, 'a text-only reload receipt is accepted immediately');
+    assert.deepEqual(await waitForReloadOutcome('text-error', { async readOptionalText() {
+      return reload('text-error', { result: -2103, state: 'config_error', error: -2103,
+        count: 9 }).split('\0', 1)[0];
+    } }, 1, 0), { successful: false, message: '模块拒绝重载（-2103）',
+      reason: 'rejected', status: configError(-2103, 9) });
+    assert.deepEqual((await getInitialModuleStatus(textOnly)).status, configError(-2103, 9));
+    assert.equal(textOnly.reads, 1, 'cached text-only receipts do not trigger another status query');
   }
 
   // Reload waits: accurate native count, no additional query, pending != absent.

@@ -63,8 +63,14 @@ nonnegative, and `refreshPending` is exactly `0` or `1`.
 The checksum is 32-bit FNV-1a over the first two lines, including both LF bytes:
 start at `2166136261`, XOR each byte, multiply by `16777619` modulo `2^32`.
 Render the final unsigned value in decimal followed by LF. Padding is not hashed.
-Clients must verify the echoed ID/line, schema, checksum and complete record;
-ignore stale, malformed or torn replies. The checksum is not authentication.
+Clients must verify the echoed ID/line, schema, checksum and complete three-line
+text payload; ignore stale, malformed or torn replies. The checksum is not
+authentication. The native file is still 256 bytes, but a text API may stop at
+its first NUL and omit padding. Manager uses the same parser for every target:
+it accepts either the complete text payload alone or that payload followed by
+NUL padding, and ignores bytes after the first NUL. It does not require a
+256-character string or validate padding. A missing final LF, incomplete body,
+invalid checksum, wrong request or extra text before the first NUL is rejected.
 
 Status reads **memory only**: it does not open, parse or validate configuration,
 resolve QuickApps, publish rules, retire caches or refresh owners. It remains
@@ -173,7 +179,9 @@ guarded against reentrant observation and I/O.
 ## Manager integration contract
 
 The accompanying Manager upgrade migrates both paths, precreates the response
-file and validates/correlates RHST1 and RHRS2 records. First homepage entry
+file and validates/correlates RHST1 and RHRS2 text payloads. Both use the same
+text framing checks on all targets; native fixed-width padding is not a
+requirement for the `readText` return value. First homepage entry
 issues **one** status query; do not add periodic queries. Existing UI reload
 actions use v2, updating the displayed active count and configuration state from
 each correlated snapshot, without a follow-up status request. Keep reload/font
