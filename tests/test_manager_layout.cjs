@@ -128,6 +128,47 @@ for (const [page, action, image, handler] of [
   assert.equal(png.readUInt32BE(20), 80);
 }
 
+const detailSource = fs.readFileSync(path.join(root,
+  'manager/src/pages/resource-detail/resource-detail.ux'), 'utf8');
+const detailStyle = /<style>([\s\S]*?)<\/style>/.exec(detailSource)[1];
+const detailTemplate = /<template>([\s\S]*?)<\/template>/.exec(detailSource)[1];
+assert.deepEqual([...detailTemplate.matchAll(/class="detail-title">([^<]+)<\/text>/g)]
+  .map(([, title]) => title), ['主题包', '作者', '版本', '简介', '适用设备', '资源包 ID']);
+assert.equal([...detailTemplate.matchAll(/class="detail-card"/g)].length, 6);
+assert.match(detailTemplate, /<div class="detail-bottom-spacer"><\/div>\s*<\/scroll>/,
+  'floating action clearance belongs inside the scrolling content');
+assert(detailTemplate.indexOf('</scroll>') < detailTemplate.indexOf('class="delete-action-wrap"'),
+  'delete action is painted after the list as a floating overlay');
+assert.match(detailTemplate, /<scroll if="\{\{loaded\}\}" class="detail-list" scroll-y="true"/);
+assert.match(detailTemplate, /class="detail-value">\{\{author\}\}/);
+assert.match(detailTemplate, /class="detail-value">\{\{version\}\}/);
+for (const [width, height, density, wide] of [
+  [212, 520, 1, false], [212, 520, 2, false],
+  [336, 480, 2.1, true], [212, 468, 1, false]
+]) {
+  const active = stylesForScreen(detailStyle, width, height, density);
+  const list = rule(active, '.detail-list');
+  const card = rule(active, '.detail-card');
+  const value = rule(active, '.detail-value');
+  const action = rule(active, '.delete-action-wrap');
+  assert.equal(list.top, wide ? '60px' : '96px');
+  assert.equal(list.bottom, '0px', 'detail list extends to the screen bottom');
+  const spacer = rule(active, '.detail-bottom-spacer');
+  assert.equal(spacer.height, wide ? '100px' : '98px');
+  assert.equal(spacer['flex-shrink'], '0');
+  assert(parseInt(spacer.height) > parseInt(action.bottom) + parseInt(action.height),
+    'last card can scroll above the floating delete action');
+  assert.equal(list['padding-left'], '8px');
+  assert.equal(list['padding-right'], '8px');
+  assert.equal(card['background-color'], '#262626');
+  assert.equal(card['border-radius'], '24px');
+  assert.equal(card['min-height'], '132px');
+  assert.equal(card['flex-shrink'], '0');
+  assert(!('height' in card), 'cards grow with long content');
+  assert(!('lines' in value) && !('text-overflow' in value),
+    'names, descriptions and targets remain fully readable');
+}
+
 const homepage = fs.readFileSync(path.join(root, 'manager/src/pages/index/index.ux'), 'utf8');
 const homeStyle = /<style>([\s\S]*?)<\/style>/.exec(homepage)[1];
 assert.match(homepage, /<time-banner title="Corona" flat="true"/);
