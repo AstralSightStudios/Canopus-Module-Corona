@@ -38,3 +38,4 @@ venv/
 *.swp
 *.swo
 *~
+manager/package-lock.json
