@@ -41,6 +41,7 @@ export default {
   private: {
     headerTitle: "< 混搭微调",
     rows: [],
+    pathRows: [],
     statusText: "正在读取替换资源…",
     loaded: false,
     visible: false,
@@ -81,37 +82,57 @@ export default {
       ])
       if (version !== this.loadVersion || !this.visible) return
       if (!isResourceCatalogCurrent(catalog)) return this.loadCatalog()
-      const makeRow = item => {
-        const choice = resolveResourceChoice(item, overrides)
+      const choiceName = (item, choice) => {
+        if (choice === DEFAULT_RESOURCE_CHOICE) return "默认"
+        if (choice === SYSTEM_RESOURCE_CHOICE) return "系统"
         const selectedTheme = item.themes.find(theme => theme.themeId === choice)
-        return {
-          sourcePath: item.sourcePath,
-          choiceId: choice,
-          choiceName: choice === DEFAULT_RESOURCE_CHOICE
-            ? "默认"
-            : (choice === SYSTEM_RESOURCE_CHOICE ? "系统" : (selectedTheme ? selectedTheme.name : "默认"))
-        }
+        return selectedTheme ? selectedTheme.name : "默认"
       }
+      let reorder = false
       if (this.loaded && this.catalogRevision === catalog.revision) {
-        // Preserve row identity and scroll position when returning from the choice page.
-        this.rows.forEach(row => {
-          const updated = makeRow(catalog.byPath.get(row.sourcePath))
-          if (row.choiceId !== updated.choiceId) row.choiceId = updated.choiceId
-          if (row.choiceName !== updated.choiceName) row.choiceName = updated.choiceName
+        // Update retained rows without allocating replacements on return.
+        this.pathRows.forEach(row => {
+          const item = catalog.byPath.get(row.sourcePath)
+          const choice = resolveResourceChoice(item, overrides)
+          if (row.choiceId === choice) return
+          if ((row.choiceId === DEFAULT_RESOURCE_CHOICE) !== (choice === DEFAULT_RESOURCE_CHOICE))
+            reorder = true
+          row.choiceId = choice
+          row.choiceName = choiceName(item, choice)
         })
       } else {
-        this.rows = catalog.paths.map(makeRow)
-        this.rows.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+        // Cache the original path order; regrouping the displayed order would lose it.
+        this.pathRows = catalog.paths.map(item => {
+          const choice = resolveResourceChoice(item, overrides)
+          return { sourcePath: item.sourcePath, choiceId: choice, choiceName: choiceName(item, choice) }
+        }).sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+        reorder = true
       }
+      if (reorder) this.orderRows()
       this.catalogRevision = catalog.revision
       this.loaded = true
       this.statusText = ""
     } catch (error) {
       if (version !== this.loadVersion || !this.visible) return
       this.rows = []
+      this.pathRows = []
       this.loaded = false
       this.statusText = String(error && error.message || "读取混搭资源失败")
     }
+  },
+
+  orderRows() {
+    // Stable partition in O(n), reusing row objects and avoiding path comparisons.
+    const customized = []
+    const defaults = []
+    this.pathRows.forEach(row => {
+      if (row.choiceId === DEFAULT_RESOURCE_CHOICE) defaults.push(row)
+      else customized.push(row)
+    })
+    const rows = customized.concat(defaults)
+    // A grouping change need not change positions; keep the array when it does not.
+    if (rows.length !== this.rows.length || rows.some((row, index) => row !== this.rows[index]))
+      this.rows = rows
   },
 
   openPath(sourcePath) {
