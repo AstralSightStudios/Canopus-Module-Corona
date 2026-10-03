@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Build signed watchface installer bundles with QuickApp icon support."""
+"""Build signed normal Resource Hook installers (fonts, QuickApp icons, calendar)."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import stat
 import subprocess
@@ -28,6 +29,7 @@ TARGET_GROUPS = {
     'band10pro': ['xiaomi-band-10-pro-3.101.043'],
 }
 ALL_TARGETS = ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155', 'xiaomi-band-10-pro-3.101.043']
+verify_watchface = runpy.run_path(str(ROOT / 'scripts/build-watchface.py'))['verify_watchface']
 
 
 def trusted_public_key():
@@ -79,6 +81,7 @@ def build_bundle(device_family, targets, private_key, public_pem, public_fingerp
         module_version = manifest_data['module']['version']
 
         target_metadata = {}
+        modules, receipts = {}, {}
         for target in targets:
             target_payload = payload_dir / target
             target_payload.mkdir()
@@ -106,6 +109,8 @@ def build_bundle(device_family, targets, private_key, public_pem, public_fingerp
                             str(target_payload), '--target', target,
                             '--public-key', str(public_pem)], check=True)
 
+            modules[target] = elf_dest
+            receipts[target] = receipt
             target_metadata[target] = {
                 'elf_sha256': hashlib.sha256(elf_dest.read_bytes()).hexdigest(),
                 'elf_size': elf_dest.stat().st_size,
@@ -130,13 +135,25 @@ def build_bundle(device_family, targets, private_key, public_pem, public_fingerp
         if not generated_prod_zip.is_file():
             raise RuntimeError(f'Expected generated watchface zip at {generated_prod_zip}')
 
+        verify_watchface(generated_device, targets, modules, receipts,
+                         archive_path=generated_prod_zip)
+        manifest_path = generated_device / 'build/manifest.json'
+        installer_manifest = json.loads(manifest_path.read_text())
+        installer_manifest.update({
+            'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
+            'font_reload_device_status': 'USER_REPORTED_PASS',
+            'hardware_status': 'NOT_PROBED', 'gpu_recovery': 'UNSUPPORTED',
+            'framework_restart_safety': 'UNSUPPORTED',
+        })
+        manifest_path.write_text(json.dumps(installer_manifest, indent=2) + '\n')
+
         # Destination paths
         if device_family == 'band11':
-            zip_name = 'resource-hook-quickapp-band11-139-155.zip'
-            folder_name = 'resource-hook-quickapp-band11-139-155'
+            folder_name = 'resource-hook-0.3.0-quickapp-band11-139-155'
+            zip_name = folder_name + '.zip'
         else:
-            zip_name = 'resource-hook-quickapp-band10-pro-1043.zip'
-            folder_name = 'resource-hook-quickapp-band10-pro-1043'
+            folder_name = 'resource-hook-0.3.0-quickapp-band10-pro-1043'
+            zip_name = folder_name + '.zip'
 
         dest_folder = out_dir / folder_name
         dest_zip = out_dir / zip_name
@@ -154,6 +171,16 @@ def build_bundle(device_family, targets, private_key, public_pem, public_fingerp
         shutil.copytree(payload_dir, dest_folder / 'payload')
         shutil.copytree(watchface_stage, dest_folder / 'watchface')
         shutil.copyfile(public_pem, dest_folder / 'signer-public.pem')
+        (dest_folder / 'docs').mkdir()
+        shutil.copyfile(ROOT / 'docs/FONT_RELOAD.md', dest_folder / 'docs/FONT_RELOAD.md')
+        for target in targets:
+            evidence = dest_folder / 'evidence' / target
+            evidence.mkdir(parents=True)
+            for item in (ROOT / 'targets' / target).iterdir():
+                if item.is_file() and item.suffix in ('.json', '.md'):
+                    shutil.copyfile(item, evidence / item.name)
+        verify_watchface(dest_folder / 'watchface' / device_dir_name,
+                         targets, modules, receipts, archive_path=dest_zip)
 
         flat_files = ['main.lua']
         for target in targets:
@@ -163,7 +190,10 @@ def build_bundle(device_family, targets, private_key, public_pem, public_fingerp
         validation = {
             'module': 'corona',
             'version': module_version,
-            'feature': 'quickapp-launcher-icons',
+            'features': ['transactional-font-reload', 'quickapp-launcher-icons', 'calendar-reload'],
+            'module_build_id': 'resource-hook-0.3.0',
+            'font_reload': True, 'font_reload_device_status': 'USER_REPORTED_PASS',
+            'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
             'targets': target_metadata,
             'signer_public_key_sha256': public_fingerprint,
             'private_key_included': False,
@@ -174,20 +204,21 @@ def build_bundle(device_family, targets, private_key, public_pem, public_fingerp
                 'strict ELF verification for targets',
                 'CMI1 signature and target/fingerprint/ELF binding',
                 'Supervisor trust-key match',
-                'production installer generation and protocol suite',
-                'flat ZIP byte equality, CRC and private-key exclusion',
+                'production installer generation',
+                'flat ZIP byte equality, CRC and exact resource allowlist',
             ]
         }
         (dest_folder / 'validation.json').write_text(json.dumps(validation, indent=2) + '\n')
 
         readme_text = (
-            f"# Signed QuickApp icon installer: {device_family.upper()}\n\n"
+            f"# Signed Resource Hook installer: {device_family.upper()}\n\n"
             f"Targets: {', '.join(targets)}. Runtime module: corona {module_version}.\n\n"
             "The flat ZIP is input to a watchface packer, not a vendor watchface file.\n"
             "Opening the installed watchface installs the module DISABLED. Enable it separately.\n"
             "Requires a matching resident Canopus Supervisor with /canopus/install and the trusted signing key.\n"
-            "Includes QuickApp launcher icon routing (@quickapp-icon/<package>) and dynamic calendar reload.\n"
-            "Device/GPU acceptance remains NOT_PROBED; native allocation/file-write success is not guaranteed.\n"
+            "Includes transactional font reload, QuickApp launcher icon routing (@quickapp-icon/<package>) and calendar reload.\n"
+            "Font reload: USER_REPORTED_PASS on all supported targets (user report). This new artifact is NOT_PROBED on hardware.\n"
+            "GPU recovery and framework restart safety are unsupported; native allocation/file-write success is not guaranteed.\n"
             "No private signing key is included.\n"
         )
         (dest_folder / 'README.md').write_text(readme_text)

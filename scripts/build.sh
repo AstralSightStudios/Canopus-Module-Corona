@@ -13,14 +13,6 @@ case "$TARGET_ID" in
     xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1; NATIVE_PLATFORM=platform_band10pro ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
-FONT_EXPERIMENT=${RH_EXPERIMENTAL_FONT_RELOAD:-0}
-case "$FONT_EXPERIMENT" in
-    0) FONT_DEFINE=; ARTIFACT=resource-hook.elf ;;
-    1)
-        FONT_DEFINE=-DRH_EXPERIMENTAL_FONT_RELOAD=1
-        ARTIFACT=resource-hook-font-experimental.elf ;;
-    *) printf 'RH_EXPERIMENTAL_FONT_RELOAD must be 0 or 1.\n' >&2; exit 1 ;;
-esac
 CC=${CC:-cc}
 CLANG=${CLANG:-clang}
 LD_LLD=${LD_LLD:-ld.lld}
@@ -53,7 +45,7 @@ CANOPUS_ROOT="$SDK" CC="$CC" sh "$ROOT/scripts/test-host.sh"
 for name in module resource_hook config platform "$NATIVE_PLATFORM" font_reload quickapp_icon; do
     "$CLANG" -Wall -Wextra -Werror --target=arm-none-eabi -mcpu=cortex-m33 -mthumb \
         -mfloat-abi=soft -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
-        -Os $TARGET_DEFINE $FONT_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
+        -Os $TARGET_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
         -I"$SDK/targets/$TARGET_ID/generated" -I"$ROOT/include" \
         -c "$ROOT/src/$name.c" -o "$ROOT/build/$name.o"
 done
@@ -64,10 +56,8 @@ done
     "$ROOT/build/module.o" "$ROOT/build/resource_hook.o" "$ROOT/build/config.o" \
     "$ROOT/build/platform.o" "$ROOT/build/$NATIVE_PLATFORM.o" "$ROOT/build/font_reload.o" \
     "$ROOT/build/quickapp_icon.o" \
-    "$ROOT/build/control.o" -o "$ROOT/build/$ARTIFACT"
-"$CANOPUS_CLI" verify "$ROOT/build/$ARTIFACT" \
+    "$ROOT/build/control.o" -o "$ROOT/build/resource-hook.elf"
+"$CANOPUS_CLI" verify "$ROOT/build/resource-hook.elf" \
     --target "$TARGET_ID" --targets-dir "$SDK/targets"
-printf 'Built %s for %s. Static validation only; physical-device acceptance remains required.\n' "$ARTIFACT" "$TARGET_ID"
-if [ "$FONT_EXPERIMENT" = 1 ]; then
-    printf 'EXPERIMENTAL: healthy serialized UI only; GPU recovery/restart safety is NOT verified.\n'
-fi
+printf 'Built resource-hook.elf for %s. Font reload: USER_REPORTED_PASS on supported targets; this artifact: NOT_PROBED.\n' "$TARGET_ID"
+printf 'GPU recovery and framework restart safety remain unsupported.\n'

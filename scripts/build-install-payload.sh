@@ -1,9 +1,5 @@
 #!/bin/sh
 set -eu
-[ "${RH_EXPERIMENTAL_FONT_RELOAD:-0}" = 0 ] || {
-    printf 'Experimental fonts are not a release payload; use build.sh for the opt-in prototype.\n' >&2
-    exit 1
-}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CANOPUS=${CANOPUS_ROOT:-"$ROOT/../Canopus"}
 if [ -z "${CANOPUS_ROOT:-}" ] && [ ! -d "$CANOPUS" ]; then
@@ -45,6 +41,13 @@ python3 "$ROOT/scripts/verify-payload.py" "$STAGE" --target "$TARGET_ID" --publi
 cp "$ROOT/examples/mappings.tsv" "$STAGE/mappings.tsv.example"
 cp "$ROOT/docs/INSTALL.md" "$STAGE/INSTALL.md"
 cp "$ROOT/docs/STARTUP_DIAGNOSTICS.md" "$STAGE/STARTUP_DIAGNOSTICS.md"
+cp "$ROOT/docs/FONT_RELOAD.md" "$STAGE/FONT_RELOAD.md"
+mkdir "$STAGE/evidence"
+for evidence in "$ROOT/targets/$TARGET_ID"/*; do
+    case "$evidence" in
+        *.json|*.md) cp "$evidence" "$STAGE/evidence/" ;;
+    esac
+done
 cp "$ROOT/scripts/verify-payload.py" "$STAGE/verify-payload.py"
 python3 - "$STAGE" "$TARGET_ID" "$FIRMWARE" "$ROOT/Canopus.toml" <<'PY'
 import hashlib
@@ -60,12 +63,15 @@ metadata = {
     "receipt_module_version": 3, "receipt_format_version": 1,
     "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi1",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",
+    "module_build_id": "resource-hook-0.3.0", "font_reload": True,
+    "font_reload_device_status": "USER_REPORTED_PASS",
+    "gpu_recovery": "UNSUPPORTED", "framework_restart_safety": "UNSUPPORTED",
     "automatic_ui_restart": False, "complete_cache_refresh": False,
 }
 (p / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
-files = sorted(f for f in p.iterdir() if f.is_file())
+files = sorted(f for f in p.rglob("*") if f.is_file())
 (p / 'SHA256SUMS').write_text(''.join(
-    f'{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}\n' for f in files))
+    f'{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.relative_to(p).as_posix()}\n' for f in files))
 PY
 # Rename only a complete, verified payload; never merge it into an older output.
 python3 - "$STAGE" "$OUT" <<'PY'

@@ -1,14 +1,27 @@
 # .155 font reload: user-reported device pass
 
+## Latest acceptance and default-build promotion
+
+The user subsequently reports: “已实机验收，能不能把字体重载从实验性拉出来，目前固件都能用了”.
+This records **USER_REPORTED_PASS** for the normal font-reload workflow on all
+three supported targets, including `.155`, and authorizes promotion into the
+default module. See [the current font contract](../../docs/FONT_RELOAD.md).
+No per-target artifact hashes or individual restore/fault steps were supplied
+with this later report. It does not independently establish GPU recovery,
+restart, endurance or arbitrary-owner coverage. Newly built signed packages
+are not automatically marked as individually device-tested.
+
+## Historical 2026-09-26 checkpoint
+
 - Recorded: 2026-09-26 (UTC).
 - Device/firmware: Xiaomi Band 11, 4.100.155, as identified by the user during this session.
 - Result: **USER_REPORTED_PASS** for the experimental font-replacement/reload test through Manager. A later stock-restoration attempt is **USER_REPORTED_FAIL** (`-2`, then diagnostic `-2908`); see the follow-up below.
 - Evidence: after testing the wrapper-capacity fix, the user reported: “实机验证通过，记录并commit”.
 - This is a user report, not an independently observed hardware trace. No screenshot, device memory dump, measured resource counts, or device-side artifact hash was supplied.
 
-## Associated local artifacts
+## Historical associated local artifacts
 
-These are the local artifacts provided for the latest test; their hashes were checked locally, not read back from the device.
+These artifacts belong to the 2026-09-26 checkpoint, not the latest all-target acceptance report. Their hashes were checked locally, not read back from the device.
 
 | Artifact | Identity |
 | --- | --- |
@@ -49,12 +62,12 @@ Later in the same session the user reported: “字体替换生效之后，再�
 
 The diagnostic update separated allocation, intern-list, target-face ownership and native preparation failures into `-29xx` codes. A host fixture reproduces the now-reported `-2908` branch: successful replacement followed by refused restoration when another consumer retains the stock face. The report does not identify that device consumer or its exact reference count.
 
-The follow-up fix allows checked reuse of unchanged, fingerprint-verified stock faces using the existing native acquisition contract. It preserves other owners, cache identities and rollback; non-stock external faces remain refused. Host tests cover repeated replace/restore, 12 fresh-face and 3 borrowed-face allocation-failure positions, pixel-size/snapshot/precommit failures, busy child caches and balanced external references. Static inspection confirms the native factory's existing-face branch skips cache construction, while glyph callbacks select the required FT size. **The fixed restoration path still requires device validation; these tests are not a device restoration pass.**
+The follow-up fix allows checked reuse of unchanged, fingerprint-verified stock faces using the existing native acquisition contract. It preserves other owners, cache identities and rollback; non-stock external faces remain refused. Host tests cover repeated replace/restore, 12 fresh-face and 3 borrowed-face allocation-failure positions, pixel-size/snapshot/precommit failures, busy child caches and balanced external references. Static inspection confirms the native factory's existing-face branch skips cache construction, while glyph callbacks select the required FT size. **At that checkpoint the fixed restoration path still required device validation; these tests alone were not a device restoration pass.** The later normal-workflow acceptance is recorded above without inventing a separate restoration trace.
 
 The hashes above identify the original reported test artifacts, **not** later rebuilt diagnostic/refactored artifacts.
 
 ## Unchanged exclusions
 
-This pass does **not** establish GPU timeout/reset recovery, framework restart safety, unknown/custom text-owner support, arbitrary font compatibility, repeated switching endurance, memory-pressure behavior on hardware, or successful hardware stock restoration. The other cases were not explicitly reported as tested; restoration was subsequently reported as failing, as recorded above. `.139` font hot reload is not enabled by this result.
+This pass does **not** establish GPU timeout/reset recovery, framework restart safety, unknown/custom text-owner support, arbitrary font compatibility, repeated switching endurance, memory-pressure behavior on hardware, or successful hardware stock restoration. The historical checkpoint did not enable `.139` and recorded the restoration failure above. The later all-target report supersedes normal-workflow status, not independent fault/coverage evidence.
 
-Keep the feature opt-in, retain immutable generation files, and do not bypass ownership, allocation, signature or exact-target checks. Installer builders should not automatically label newly generated artifacts as device-tested; this report records the specific user-reported test and associated local artifacts only.
+The feature is now in the default build. Retain immutable generation files and do not bypass ownership, allocation, signature or exact-target checks. Installer builders should not automatically label newly generated artifacts as device-tested; this report records the specific user-reported test and associated local artifacts only.

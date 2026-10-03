@@ -1,20 +1,12 @@
 #include "resource_hook_font_reload.h"
 
-#if !defined(RH_EXPERIMENTAL_FONT_RELOAD) || !RH_EXPERIMENTAL_FONT_RELOAD
-int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
-    (void)current;
-    if (changed) *changed = 0;
-    return 0;
-}
-void rh_font_reload_disable(void) {}
-#else
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 #include <stddef.h>
 
-/* Exact Q66 4.100.139/.155 APs only. Shared layouts/algorithm and explicit
- * target identities: see .155/font-reload-investigation.md and
- * .139/font-reload-compatibility.md under targets/xiaomi-band-11-4.100.*.
+/* Exact Band 11 4.100.139/.155 and Band 10 Pro 3.101.043 APs only.
+ * Shared transaction with audited target identities, face payload sizes and
+ * vector-drop ABI. See the font audits under targets/.
  * No native wrapper creation,
  * cache constructor, registry remove/add, GPU wait, drain or reset is called.
  *
@@ -25,8 +17,8 @@ void rh_font_reload_disable(void) {}
  * establish its backend/style contract. Only scalar exemplar keys persist.
  * Not supported: copied/app-owned fonts, canvas pixels, custom cached text,
  * other font backends, framework restart, GPU error/reset/concurrent drawing.
- * An empty queue cannot prove hardware completion after GPU recovery. Explicit
- * opt-in assumes the healthy serialized standard UI path, not fault safety.
+ * An empty queue cannot prove hardware completion after GPU recovery. Font
+ * reload assumes the healthy serialized standard UI path, not fault safety.
  *
  * Generation files MUST remain immutable and available. This module makes no
  * filesystem copies. A used non-stock pathname cannot be selected again after
@@ -47,16 +39,17 @@ void rh_font_reload_disable(void) {}
  * not allocation: hashing streams the file and never loads it wholesale. */
 #define FILE_LIMIT (32u * 1024u * 1024u)
 #define MAGIC 1600079444u
+#define FACE_SIZE RH_FW_FR_FACE_SIZE
 #define CNT_CLASS RH_FW_HEADER_CACHE_CLASS
 #define SIZE_CLASS RH_FW_IMAGE_CACHE_CLASS
-#define METRICS 0x0c396b5du
-#define OUTLINE 0x0c3a7c45u
-#define RELEASE 0x0c3a0993u
+#define METRICS RH_FW_FR_METRICS
+#define OUTLINE RH_FW_FR_OUTLINE
+#define RELEASE RH_FW_FR_GLYPH_RELEASE
 #define VECTOR_CLASS RH_FW_VECTOR_CLASS
-#define UIKIT_SLOT 0x200bd1e8u
-#define CONTEXT_SLOT 0x200bd3ecu
-#define DRAW_SLOT 0x200bd318u
-#define VECTOR_SLOT 0x200d3280u
+#define UIKIT_SLOT RH_FW_UIKIT_SLOT
+#define CONTEXT_SLOT RH_FW_FR_CONTEXT_SLOT
+#define DRAW_SLOT RH_FW_FR_DRAW_SLOT
+#define VECTOR_SLOT RH_FW_FR_VECTOR_SLOT
 
 /* Test builds execute the actual transaction against a 32-bit memory model;
  * only memory/native leaves are injected. No test models a physical GPU. */
@@ -95,11 +88,11 @@ static int native_eq(uint32_t p, const char *s) {
     return 0;
 }
 static uint32_t alloc(uint32_t n) {
-    uint32_t p=call(0x0c3abe20u,n,0,0);
+    uint32_t p=call(RH_FW_FR_ALLOC,n,0,0);
     if(p) nz(p,n);
     return p;
 }
-static void release_mem(uint32_t p) { if(p) (void)call(0x0c3abe58u,p,0,0); }
+static void release_mem(uint32_t p) { if(p) (void)call(RH_FW_FR_FREE,p,0,0); }
 static uint32_t duplicate(const char *s) {
     uint32_t i,n=length(s)+1,p=alloc(n);
     if(p) for(i=0;i<n;i++) wb(p+i,(unsigned char)s[i]);
@@ -149,7 +142,7 @@ static int roots(uint32_t *manager, uint32_t *context) {
     if(state.initialized && (mgr!=state.manager || rd(ctx+24)!=state.face_cache)) return disable();
     if(rd(mgr)!=48 || rd(mgr+12)!=40 || rd(mgr+24)!=8 || rd(ctx+4)!=8 ||
        !rd(ctx) || !rd(ctx+24) || rd(ctx+20)==0 || rd(ctx+20)>1024 ||
-       rd(ctx+16)!=0x0c3981d1u) return disable();
+       rd(ctx+16)!=RH_FW_FR_OUTLINE_EVENT) return disable();
     *manager=mgr; *context=ctx; return 0;
 }
 /* Generic audited intrusive list. Check both links and tail, bounded cycle
@@ -195,16 +188,16 @@ static int cache_check(uint32_t cache, uint32_t clz, uint32_t size, int holds, i
     uint32_t p,prev=0,n=0;
     /* Stable diagnostic ranges: face 23xx, metrics 24xx, outline 25xx,
      * vector 28xx. Negative results remain refusals; held entries stay busy. */
-    int base=vector ? 2800 : size==28 ? 2300 : size==32 ? 2400 : 2500;
+    int base=vector ? 2800 : size==FACE_SIZE ? 2300 : size==32 ? 2400 : 2500;
     if(!cache) return -base-1;
     if(rd(cache)!=clz) return -base-2;
     if(rd(cache+4)!=size) return -base-3;
     if(rd(cache+48)!=4) return -base-4;
     if(clz==CNT_CLASS) {
         uint32_t compare,create,destroy;
-        if(size==28) { compare=0x0c396785u; create=0x0c3967b5u; destroy=0x0c396b25u; }
-        else if(size==32) { compare=0x0c39fd9bu; create=0x0c3a5ef1u; destroy=0x0c39fd95u; }
-        else if(size==8) { compare=0x0c39fdcdu; create=0x0c3a8bb9u; destroy=0x0c3a09f5u; }
+        if(size==FACE_SIZE) { compare=RH_FW_FR_FACE_COMPARE; create=RH_FW_FR_FACE_CREATE; destroy=RH_FW_FR_FACE_DESTROY; }
+        else if(size==32) { compare=RH_FW_FR_METRICS_COMPARE; create=RH_FW_FR_METRICS_CREATE; destroy=RH_FW_FR_METRICS_DESTROY; }
+        else if(size==8) { compare=RH_FW_FR_OUTLINE_COMPARE; create=RH_FW_FR_OUTLINE_CREATE; destroy=RH_FW_FR_OUTLINE_DESTROY; }
         else return -base-20;
         if(rd(cache+16)!=compare) return -base-5;
         if(rd(cache+20)!=create) return -base-6;
@@ -250,8 +243,8 @@ static int queue(uint32_t p, uint32_t element, uint32_t cb) {
 }
 static int boundary(void) {
     uint32_t p,n=0,vg=0,sw=0,displays[4],nd,i; int r;
-    if(!rb(0x200bd1ecu) || !rb(0x200bd210u)) return -1;
-    if(list(0x200bd1f0u,792,displays,4,&nd) || !nd) return -1;
+    if(!rb(RH_FW_FR_INITIALIZED_SLOT) || !rb(RH_FW_FR_STYLE_ENABLED_SLOT)) return -1;
+    if(list(RH_FW_FR_DISPLAY_LIST,792,displays,4,&nd) || !nd) return -1;
     for(i=0;i<nd;i++) {
         uint32_t layer,j=0,d=displays[i];
         if(rd(d+720)>OBJECTS || (rd(d+720) && !rd(d+692))) return -1;
@@ -265,15 +258,15 @@ static int boundary(void) {
         uint32_t dispatch=rd(p+16);
         if(++n>2) return -1;
         if(rd(p+32)) return 1;
-        if(dispatch==0x0c3913edu) {
+        if(dispatch==RH_FW_FR_VG_DISPATCH) {
             uint32_t grad=rd(p+40);
             if(vg++ || !grad) return -1;
-            if((r=queue(rd(p+48),24,0x0c399b63u))!=0) return r;
-            if((r=queue(rd(p+36),76,0x0c395be1u))!=0) return r;
-            if((r=queue(rd(grad+8),4,0x0c395bd1u))!=0) return r;
+            if((r=queue(rd(p+48),24,RH_FW_FR_GLYPH_PENDING_FREE))!=0) return r;
+            if((r=queue(rd(p+36),76,RH_FW_FR_IMAGE_PENDING_FREE))!=0) return r;
+            if((r=queue(rd(grad+8),4,RH_FW_FR_GRADIENT_PENDING_FREE))!=0) return r;
             if(rd(p+52)) return 1;
-            if(rd(0x200d327cu) && rd(0x200d327cu)!=p) return -1;
-        } else if(dispatch==0x0c3948adu) { if(sw++) return -1; }
+            if(rd(RH_FW_FR_VG_SLOT) && rd(RH_FW_FR_VG_SLOT)!=p) return -1;
+        } else if(dispatch==RH_FW_FR_SW_DISPATCH) { if(sw++) return -1; }
         else return -1;
     }
     if(vg!=1 || sw!=1) return -1;
@@ -314,9 +307,9 @@ static int descriptor(uint32_t font, uint32_t ctx, const char *path) {
     if(!native_eq(rd(d+60),path)) return -2611;
     face=rd(d+52); e=rd(d+56);
     if(!face) return -2612;
-    if(!e || e!=face+28) return -2613;
+    if(!e || e!=face+FACE_SIZE) return -2613;
     if(rd(e)!=rd(ctx+24)) return -2614;
-    if(rd(e+8)!=28) return -2615;
+    if(rd(e+8)!=FACE_SIZE) return -2615;
     if(!rd(e+4)) return -2616;
     if(rb(e+12)) return -2617;
     if(rd(face)!=rd(d+60)) return -2618;
@@ -328,7 +321,7 @@ static int descriptor(uint32_t font, uint32_t ctx, const char *path) {
 }
 static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
     uint32_t nodes[BACKING_SCAN],n,i,j,p,idle=rd(mgr+556); char name[RH_PATH]; int f,r;
-    r=cache_check(rd(ctx+24),CNT_CLASS,28,0,0); if(r) return r;
+    r=cache_check(rd(ctx+24),CNT_CLASS,FACE_SIZE,0,0); if(r) return r;
     if(rd(rd(ctx+24)+8)!=0x7fffffffu) return -2701;
     /* Scan all records, including unrelated families, with the existing
      * scratch capacity. RESOURCES bounds replacements, not registry occupancy. */
@@ -430,7 +423,7 @@ static uint32_t new_cache(uint32_t size,uint32_t count,uint32_t compare,uint32_t
     if(!p) return 0;
     wr(p,CNT_CLASS); wr(p+4,size); wr(p+8,count);
     wr(p+16,compare); wr(p+20,create); wr(p+24,destroy);
-    if(!call(0x0c3a9e48u,p,0,0)) { release_mem(p); return 0; }
+    if(!call(RH_FW_FR_CACHE_INIT,p,0,0)) { release_mem(p); return 0; }
     return p;
 }
 /* Entry invalid=0 and a held descriptor reference are checked before this
@@ -439,7 +432,7 @@ static void destroy_descriptor(uint32_t d) {
     uint32_t ctx=rd(d+48),cache=rd(ctx+24),e=rd(d+56),face=rd(d+52),path=rd(d+60);
     (void)call(RH_FW_CACHE_RELEASE,cache,e,0);
     if(rd(e+4)==0) (void)call(RH_FW_CACHE_DROP,cache,face,0);
-    (void)call(0x0c39a424u,ctx,path,0);
+    (void)call(RH_FW_FR_DROP_FACE_ID,ctx,path,0);
     release_mem(d);
 }
 /* Borrow only a fingerprint-verified stock face, using the native factory's
@@ -448,9 +441,9 @@ static void destroy_descriptor(uint32_t d) {
  * Never replace existing caches or retire another consumer's reference. */
 static int stock_face(uint32_t ctx, uint32_t path, uint32_t key, uint32_t e) {
     uint32_t face,ft; int r;
-    if(rd(e)!=rd(ctx+24) || rd(e+8)!=28 || rb(e+12) ||
+    if(rd(e)!=rd(ctx+24) || rd(e+8)!=FACE_SIZE || rb(e+12) ||
        rd(e+4)<2 || rd(e+4)>=0x7ffffffeu) return -2941;
-    face=e-28;
+    face=e-FACE_SIZE;
     if(rd(face)!=path || rd(face+4)!=key) return -2942;
     ft=rd(face+12);
     if(!ft || !(rd(ft+8)&1u)) return -2913;
@@ -463,13 +456,13 @@ static int stock_face(uint32_t ctx, uint32_t path, uint32_t key, uint32_t e) {
  * native metrics callback selects its descriptor's pixel size on cache miss,
  * so preparation uses the same shared-FT-face size contract as the factory. */
 static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
-    uint32_t d=0,path=0,e=0,face=0,i,found=0,key[7],ft,size,metrics,v;
+    uint32_t d=0,path=0,e=0,face=0,i,found=0,key[FACE_SIZE/4u],ft,size,metrics,v;
     int error;
     zero(key,sizeof(key));
     d=alloc(64); if(!d) return -2904;
     path=intern(ctx,t->target[r->family],&error); if(!path) goto fail;
     key[0]=path; key[1]=65536u | r->style;
-    e=call(0x0c3a3860u,rd(ctx+24),key,0);
+    e=call(RH_FW_FR_CACHE_ACQUIRE,rd(ctx+24),key,0);
     if(e) {
         for(i=0;i<t->nres;i++) if(t->res[i].fresh && rd(t->res[i].fresh+56)==e) found=1;
         if(rd(e+4)>=0x7ffffffeu) { error=-2909; goto acquired_fail; }
@@ -483,7 +476,7 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
             found=1; /* Reuse child caches; do not allocate or overwrite them. */
         }
     } else {
-        e=call(0x0c3a7b78u,rd(ctx+24),key,0);
+        e=call(RH_FW_FR_CACHE_ACQUIRE_CREATE,rd(ctx+24),key,0);
         /* The native leaf returns NULL for open/parse/allocation failure;
          * do not claim to distinguish those without a native error report. */
         if(!e) { error=-2910; goto fail; }
@@ -493,10 +486,10 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     wr(d,MAGIC); wr(d+40,r->size); wr(d+44,key[1]); wr(d+48,ctx);
     wr(d+52,face); wr(d+56,e); wr(d+60,path);
     if(!found) {
-        v=new_cache(32,2*rd(ctx+20),0x0c39fd9bu,0x0c3a5ef1u,0x0c39fd95u);
+        v=new_cache(32,2*rd(ctx+20),RH_FW_FR_METRICS_COMPARE,RH_FW_FR_METRICS_CREATE,RH_FW_FR_METRICS_DESTROY);
         if(!v) { error=-2911; goto owned_fail; }
         wr(face+16,v);
-        v=new_cache(8,rd(ctx+20),0x0c39fdcdu,0x0c3a8bb9u,0x0c3a09f5u);
+        v=new_cache(8,rd(ctx+20),RH_FW_FR_OUTLINE_COMPARE,RH_FW_FR_OUTLINE_CREATE,RH_FW_FR_OUTLINE_DESTROY);
         if(!v) { error=-2912; goto owned_fail; }
         wr(face+20,v);
     }
@@ -510,9 +503,9 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     wr(d+16,(uint32_t)((int32_t)rd(metrics+32)>>6));
     wr(d+20,(uint32_t)(-((int32_t)rd(metrics+28)>>6)));
     wr(d+28,d);
-    v=call(0x0c424304u,rd(metrics+20),(int16_t)(rb(ft+80)|(rb(ft+81)<<8)),0);
+    v=call(RH_FW_FR_FT_MUL_FIX,rd(metrics+20),(int16_t)(rb(ft+80)|(rb(ft+81)<<8)),0);
     wb(d+25,(uint32_t)((int32_t)v>>6));
-    v=call(0x0c424304u,rd(metrics+20),(int16_t)(rb(ft+82)|(rb(ft+83)<<8)),0);
+    v=call(RH_FW_FR_FT_MUL_FIX,rd(metrics+20),(int16_t)(rb(ft+82)|(rb(ft+83)<<8)),0);
     v=(uint32_t)((int32_t)(v<<18)>>24); wb(d+26,(int32_t)v<1 ? 1 : v);
     r->fresh=d; return 0;
 owned_fail:
@@ -521,7 +514,7 @@ acquired_fail:
     /* Balance just the lookup reference, leaving the preexisting face intact. */
     (void)call(RH_FW_CACHE_RELEASE,rd(ctx+24),e,0);
 fail:
-    if(path) (void)call(0x0c39a424u,ctx,path,0);
+    if(path) (void)call(RH_FW_FR_DROP_FACE_ID,ctx,path,0);
     release_mem(d); return error;
 }
 struct membership { uint32_t wanted,found,visited,overflow; };
@@ -538,7 +531,7 @@ static int find(uint32_t p, void *cookie) {
     if(++m->visited>OBJECTS || !depth_ok(p)) { m->overflow=1; return 2; }
     if(p==m->wanted) { m->found=1; return 2; } return 0;
 }
-static void walk(int (*cb)(uint32_t,void *), void *cookie) { (void)call(0x0c380574u,0,cb,cookie); }
+static void walk(int (*cb)(uint32_t,void *), void *cookie) { (void)call(RH_FW_OBJECT_TREE_WALK,0,cb,cookie); }
 static int live(uint32_t p) { struct membership m={p,0,0,0}; walk(find,&m); return m.overflow ? -1 : (int)m.found; }
 static int refresh(struct transaction *t) {
     uint32_t i;
@@ -548,9 +541,16 @@ static int refresh(struct transaction *t) {
         if(!r) continue;
         /* Drop copied non-uploaded vector paths, then property refresh lets the
          * next draw rebuild lazily. Avoid unchecked eager vector allocations. */
-        if(rd(p)==VECTOR_CLASS) (void)call(RH_FW_VECTOR_DROP,p,0,0);
+        if(rd(p)==VECTOR_CLASS) {
+#if RH_FW_FR_VECTOR_DROP_SECOND_ARG
+            /* .043 class destructor is a key-drop only; object is in r1. */
+            (void)call(RH_FW_VECTOR_DROP,0,p,0);
+#else
+            (void)call(RH_FW_VECTOR_DROP,p,0,0);
+#endif
+        }
         r=live(p); if(r<0) return -1; if(!r) continue;
-        (void)call(0x0c38525cu,p,0x000f0000u,90); /* LV_PART_ANY */
+        (void)call(RH_FW_OBJECT_STYLE_REFRESH,p,0x000f0000u,90); /* LV_PART_ANY */
         if(state.disabled || rd(UIKIT_SLOT)!=state.uikit || rd(CONTEXT_SLOT)!=state.context) return disable();
     }
     return 0;
@@ -705,7 +705,7 @@ int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
     for(i=0;i<t->nres;i++) {
         struct replacement *v=&t->res[i];
         if(v->idle==1) {
-            (void)call(0x0c3a46dcu,rd(mgr+556),v->node,0);
+            (void)call(RH_FW_FR_LIST_REMOVE,rd(mgr+556),v->node,0);
             release_mem(v->node);
         }
         if(v->idle) destroy_descriptor(v->fresh);
@@ -724,4 +724,3 @@ done:
     if(t->wrapper) rh_platform_free(t->wrapper);
     state.running=0; rh_platform_free(t); return r;
 }
-#endif

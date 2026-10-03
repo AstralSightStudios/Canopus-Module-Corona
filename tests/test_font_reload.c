@@ -1,6 +1,6 @@
 /* Executable transaction tests, not native FT parsing or GPU simulation.
- * Opt in with -DRH_EXPERIMENTAL_FONT_RELOAD=1; select .155 with -DRH_TARGET_155=1.
- * Without opt-in, this exercises the no-native-access default stub.
+ * Select .155 with RH_TARGET_155 or Band 10 Pro .043 with RH_TARGET_1043.
+ * The default target is .139. Addresses come from the target header.
  * cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude \
  *    tests/test_font_reload.c src/resource_hook.c -o build/test_font_reload
  */
@@ -8,22 +8,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if !defined(RH_EXPERIMENTAL_FONT_RELOAD) || !RH_EXPERIMENTAL_FONT_RELOAD
-#include "../src/font_reload.c"
-int main(void) {
-    uint32_t changed=99;
-    rh_font_reload_disable();
-    assert(rh_font_reload(NULL,&changed)==0 && changed==0);
-    assert(rh_font_reload(NULL,NULL)==0);
-    puts("font reload default stub passed"); return 0;
-}
-#else
 #define RH_FONT_RELOAD_TEST 1
 #include "../src/font_reload.c"
 
 #define MEM_BASE 0x30000000u
 #define MEM_SIZE (4u*1024u*1024u)
-static unsigned char memory[MEM_SIZE],globals[0x100000];
+static unsigned char memory[MEM_SIZE],globals[0x200000];
 struct allocation { uint32_t p,size,live; };
 static struct allocation allocations[8192];
 static uint32_t bump,nalloc,alloc_calls,fail_alloc,fail_parse,fail_size,fail_cache_init,bitmap_only;
@@ -90,13 +80,13 @@ static uint32_t lookup(uint32_t c,uintptr_t key) {
     for(p=rd(c+52);p;p=rd(p+8)) {
         uint32_t data=rd(rd(p)+16);
         assert(string(rd(data),a)); assert(string(key_word(key,0),b));
-        if(eq(a,b) && rd(data+4)==key_word(key,4)) return data+28;
+        if(eq(a,b) && rd(data+4)==key_word(key,4)) return data+FACE_SIZE;
     }
     return 0;
 }
 static uint32_t face_create(uint32_t c,uintptr_t key) {
     uint32_t data=0,tree=0,ll=0,ft=0,metrics=0;
-    data=heap(48); if(!data) goto fail;
+    data=heap(FACE_SIZE+20); if(!data) goto fail;
     tree=heap(20); if(!tree) goto fail;
     ll=heap(12); if(!ll) goto fail;
     if(fail_parse) goto fail;
@@ -105,15 +95,15 @@ static uint32_t face_create(uint32_t c,uintptr_t key) {
     wr(data,key_word(key,0)); wr(data+4,key_word(key,4)); wr(data+12,ft);
     wr(ft+8,bitmap_only ? 0u : 1u); /* FT_FACE_FLAG_SCALABLE */
     wr(ft+88,metrics); wb(ft+80,2); wb(ft+82,1);
-    wr(data+28,c); wr(data+32,1); wr(data+36,28);
-    wr(tree+16,data); wr(ll,tree); append(c+48,ll); wr(data+44,ll);
-    wr(c+12,rd(c+12)+1); return data+28;
+    wr(data+FACE_SIZE,c); wr(data+FACE_SIZE+4,1); wr(data+FACE_SIZE+8,FACE_SIZE);
+    wr(tree+16,data); wr(ll,tree); append(c+48,ll); wr(data+FACE_SIZE+16,ll);
+    wr(c+12,rd(c+12)+1); return data+FACE_SIZE;
 fail:
     free_heap(metrics); free_heap(ft); free_heap(ll); free_heap(tree); free_heap(data); return 0;
 }
 static void drop_face(uint32_t c,uint32_t data) {
-    uint32_t ll=rd(data+44),tree=rd(ll),ft=rd(data+12);
-    assert(rd(data+32)==0);
+    uint32_t ll=rd(data+FACE_SIZE+16),tree=rd(ll),ft=rd(data+12);
+    assert(rd(data+FACE_SIZE+4)==0);
     free_heap(rd(data+16)); free_heap(rd(data+20));
     free_heap(rd(ft+88)); free_heap(ft);
     unlink_node(c+48,ll); wr(c+12,rd(c+12)-1);
@@ -122,18 +112,18 @@ static void drop_face(uint32_t c,uint32_t data) {
 uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
     uint32_t p=(uint32_t)a,q=(uint32_t)b;
     switch(pc & ~1u) {
-    case 0x0c3abe20: return heap(p);
-    case 0x0c3abe58: free_heap(p); return 0;
-    case 0x0c3a9e48:
+    case (RH_FW_FR_ALLOC & ~1u): return heap(p);
+    case (RH_FW_FR_FREE & ~1u): free_heap(p); return 0;
+    case (RH_FW_FR_CACHE_INIT & ~1u):
         if(fail_cache_init && --fail_cache_init==0) return 0;
         assert(rd(p)==CNT_CLASS && rd(p+16) && rd(p+24));
         wr(p+40,rd(p+16)); wr(p+44,rd(p+4)+20); wr(p+48,4); return 1;
-    case 0x0c3a3860:
+    case (RH_FW_FR_CACHE_ACQUIRE & ~1u):
         q=lookup(p,b); if(q) wr(q+4,rd(q+4)+1); return q;
-    case 0x0c3a7b78: return face_create(p,b);
+    case (RH_FW_FR_CACHE_ACQUIRE_CREATE & ~1u): return face_create(p,b);
     case (RH_FW_CACHE_RELEASE & ~1u): assert(rd(q+4)>0 && !rb(q+12)); wr(q+4,rd(q+4)-1); return 0;
     case (RH_FW_CACHE_DROP & ~1u): drop_face(p,q); return 0;
-    case 0x0c39a424:
+    case (RH_FW_FR_DROP_FACE_ID & ~1u):
         for(q=rd(p+8);q;q=rd(q+12)) if(rd(q)==(uint32_t)b) {
             assert(rd(q+4)); wr(q+4,rd(q+4)-1);
             if(!rd(q+4)) { unlink_node(p+4,q); free_heap(rd(q)); free_heap(q); }
@@ -147,9 +137,9 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
         if(fail_size) return 1;
         wr(rd(p+88)+32,q*64); wr(rd(p+88)+28,(uint32_t)-128);
         wr(rd(p+88)+20,65536); return 0;
-    case 0x0c424304: return (uint32_t)b;
-    case 0x0c3a46dc: unlink_node(p,q); return 0;
-    case 0x0c380574: {
+    case (RH_FW_FR_FT_MUL_FIX & ~1u): return (uint32_t)b;
+    case (RH_FW_FR_LIST_REMOVE & ~1u): unlink_node(p,q); return 0;
+    case (RH_FW_OBJECT_TREE_WALK & ~1u): {
         uint32_t i; int (*cb)(uint32_t,void *)=(int (*)(uint32_t,void *))b;
         if(post_overflow && refresh_calls) {
             /* A callback-expanded tree exhausts membership traversal before
@@ -158,8 +148,14 @@ uint32_t rh_fr_call(uint32_t pc,uintptr_t a,uintptr_t b,uintptr_t c) {
         } else for(i=0;i<owner_count;i++) if(cb(owner_list[i],(void *)c)==2) break;
         return 0;
     }
-    case (RH_FW_VECTOR_DROP & ~1u): vector_drops++; return 0;
-    case 0x0c38525c:
+    case (RH_FW_VECTOR_DROP & ~1u):
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+        assert(p==0 && q==owner_list[0] && rd(q)==VECTOR_CLASS && c==0);
+#else
+        assert(p==owner_list[0] && rd(p)==VECTOR_CLASS && q==0 && c==0);
+#endif
+        vector_drops++; return 0;
+    case (RH_FW_OBJECT_STYLE_REFRESH & ~1u):
         assert(q==0x000f0000 && c==90); refresh_calls++;
         if(mutate_owner && owner_count>1) { free_heap(owner_list[1]); owner_count=1; }
         if(post_fail) rh_font_reload_disable();
@@ -200,7 +196,7 @@ static uint32_t fixture_dsc(uint32_t size,uint32_t face) {
     uint32_t d=heap(64);
     wr(d,MAGIC); wr(d+4,METRICS); wr(d+8,OUTLINE); wr(d+12,RELEASE);
     wr(d+16,size); wr(d+28,d); wr(d+40,size); wr(d+44,65536);
-    wr(d+48,ctx); wr(d+52,face); wr(d+56,face+28); wr(d+60,rd(face));
+    wr(d+48,ctx); wr(d+52,face); wr(d+56,face+FACE_SIZE); wr(d+60,rd(face));
     return d;
 }
 static uint32_t fixture_record(uint32_t d,uint32_t size,uint32_t refs) {
@@ -213,7 +209,7 @@ static uint32_t fixture_wrapper(uint32_t rec) {
     wr(p+36,rec); append(mgr+12,p); return p;
 }
 static void setup(void) {
-    uint32_t ui,path,id,face,key[7]={0},d2,di,idle,gradient,imgq,gradq,sw,obj;
+    uint32_t ui,path,id,face,key[FACE_SIZE/4]={0},d2,di,idle,gradient,imgq,gradq,sw,obj;
     assert(temp_live==0); temp_calls=fail_temp_at=0;
     memset(&state,0,sizeof(state)); memset(memory,0,sizeof(memory)); memset(globals,0,sizeof(globals));
     memset(allocations,0,sizeof(allocations));
@@ -224,13 +220,13 @@ static void setup(void) {
     ui=heap(64); mgr=heap(560); ctx=heap(28);
     wr(UIKIT_SLOT,ui); wr(ui+28,mgr); wr(CONTEXT_SLOT,ctx);
     wr(mgr,48); wr(mgr+12,40); wr(mgr+24,8);
-    wr(ctx,heap(4)); wr(ctx+4,8); wr(ctx+16,0x0c3981d1); wr(ctx+20,256);
-    cache=new_cache(28,0x7fffffff,0x0c396785,0x0c3967b5,0x0c396b25); wr(ctx+24,cache);
+    wr(ctx,heap(4)); wr(ctx+4,8); wr(ctx+16,RH_FW_FR_OUTLINE_EVENT); wr(ctx+20,256);
+    cache=new_cache(FACE_SIZE,0x7fffffff,RH_FW_FR_FACE_COMPARE,RH_FW_FR_FACE_CREATE,RH_FW_FR_FACE_DESTROY); wr(ctx+24,cache);
     reg=heap(16); wr(reg,duplicate("Regular")); wr(reg+4,duplicate(stock)); append(mgr+24,reg);
     path=duplicate(stock); id=heap(16); wr(id,path); wr(id+4,3); append(ctx+4,id);
-    key[0]=path; key[1]=65536; face=face_create(cache,(uintptr_t)key)-28; wr(face+32,3);
-    wr(face+16,new_cache(32,512,0x0c39fd9b,0x0c3a5ef1,0x0c39fd95));
-    wr(face+20,new_cache(8,256,0x0c39fdcd,0x0c3a8bb9,0x0c3a09f5));
+    key[0]=path; key[1]=65536; face=face_create(cache,(uintptr_t)key)-FACE_SIZE; wr(face+FACE_SIZE+4,3);
+    wr(face+16,new_cache(32,512,RH_FW_FR_METRICS_COMPARE,RH_FW_FR_METRICS_CREATE,RH_FW_FR_METRICS_DESTROY));
+    wr(face+20,new_cache(8,256,RH_FW_FR_OUTLINE_COMPARE,RH_FW_FR_OUTLINE_CREATE,RH_FW_FR_OUTLINE_DESTROY));
     old_dsc=fixture_dsc(24,face); d2=fixture_dsc(30,face); di=fixture_dsc(20,face);
     record=fixture_record(old_dsc,24,2); record2=fixture_record(d2,30,1);
     wrapper=fixture_wrapper(record); wrapper2=fixture_wrapper(record); wrapper3=fixture_wrapper(record2);
@@ -238,14 +234,14 @@ static void setup(void) {
     idle=heap(12); wr(idle,44); wr(mgr+556,idle);
     idle_node=heap(52); wr(idle_node,idle_node+8); memcpy(address(idle_node+8,8),"Regular",8);
     wr(idle_node+4,20); wr(idle_node+40,di+4); append(idle,idle_node);
-    wr(0x200bd1f0,792); display=heap(800); append(0x200bd1f0,display);
-    wb(0x200bd1ec,1); wb(0x200bd210,1);
-    vg=heap(292); sw=heap(40); wr(vg,sw); wr(vg+16,0x0c3913ed); wr(sw+16,0x0c3948ad); wr(DRAW_SLOT,vg);
-    glyph_queue=heap(44); init_queue(glyph_queue,24,0x0c399b63); wr(vg+48,glyph_queue);
-    imgq=heap(44); init_queue(imgq,76,0x0c395be1); wr(vg+36,imgq);
-    gradient=heap(12); gradq=heap(44); init_queue(gradq,4,0x0c395bd1); wr(gradient+8,gradq); wr(vg+40,gradient);
+    wr(RH_FW_FR_DISPLAY_LIST,792); display=heap(800); append(RH_FW_FR_DISPLAY_LIST,display);
+    wb(RH_FW_FR_INITIALIZED_SLOT,1); wb(RH_FW_FR_STYLE_ENABLED_SLOT,1);
+    vg=heap(292); sw=heap(40); wr(vg,sw); wr(vg+16,RH_FW_FR_VG_DISPATCH); wr(sw+16,RH_FW_FR_SW_DISPATCH); wr(DRAW_SLOT,vg);
+    glyph_queue=heap(44); init_queue(glyph_queue,24,RH_FW_FR_GLYPH_PENDING_FREE); wr(vg+48,glyph_queue);
+    imgq=heap(44); init_queue(imgq,76,RH_FW_FR_IMAGE_PENDING_FREE); wr(vg+36,imgq);
+    gradient=heap(12); gradq=heap(44); init_queue(gradq,4,RH_FW_FR_GRADIENT_PENDING_FREE); wr(gradient+8,gradq); wr(vg+40,gradient);
     obj=heap(128); wr(obj,VECTOR_CLASS); owner_list[owner_count++]=obj;
-    obj=heap(128); wr(obj,0x2ca177e0); owner_list[owner_count++]=obj;
+    obj=heap(128); wr(obj,0x12345678u); owner_list[owner_count++]=obj;
     old_live=live_allocations(); alloc_calls=0;
 }
 static int reload_path(const char *path,uint32_t *changed) {
@@ -362,7 +358,7 @@ static void add_affected_records(uint32_t active_extra, uint32_t idle_extra) {
         wr(p,p+8); memcpy(address(p+8,8),"Regular",8);
         wr(p+4,257+i); wr(p+40,d+4); append(rd(mgr+556),p);
     }
-    wr(face+32,rd(face+32)+active_extra+idle_extra);
+    wr(face+FACE_SIZE+4,rd(face+FACE_SIZE+4)+active_extra+idle_extra);
     wr(id+4,rd(id+4)+active_extra+idle_extra);
     old_live=live_allocations(); alloc_calls=0;
 }
@@ -376,7 +372,7 @@ static void assert_batch_commit(const char *path, uint32_t changed, uint32_t act
         assert(descriptor(d+4,ctx,path)==0);
     }
     d=rd(wrapper+24); face=rd(d+52);
-    assert(rd(face+32)==active_count);
+    assert(rd(face+FACE_SIZE+4)==active_count);
     assert(!rd(rd(mgr+556)+4)); /* All affected idle descriptors were evicted. */
     assert(list(mgr+12,40,nodes,WRAPPERS,&n)==0 && n==active_count+1);
     for(i=0;i<n;i++) assert(rd(nodes[i]+24)==rd(rd(rd(nodes[i]+36))+24));
@@ -394,10 +390,10 @@ static void test_large_affected_transaction(void) {
     for(i=0;i<3;i++) {
         uint32_t before_face,before_path;
         setup(); add_affected_records(253,255);
-        before_face=rd(rd(old_dsc+52)+32); before_path=rd(rd(ctx+8)+4);
+        before_face=rd(rd(old_dsc+52)+FACE_SIZE+4); before_path=rd(rd(ctx+8)+4);
         fail_alloc=failures[i];
         assert(reload_path(path_a,&changed)<0 && !changed); unchanged();
-        assert(rd(rd(old_dsc+52)+32)==before_face && rd(rd(ctx+8)+4)==before_path);
+        assert(rd(rd(old_dsc+52)+FACE_SIZE+4)==before_face && rd(rd(ctx+8)+4)==before_path);
         fail_alloc=0;
         assert(reload_path(path_a,&changed)==0); assert_batch_commit(path_a,changed,255);
     }
@@ -505,7 +501,7 @@ static void test_paths_and_lifecycle(void) {
 static void test_unknown_and_owners(void) {
     uint32_t changed;
     setup(); wr(vg+16,0x12345679); assert(reload_path(path_a,&changed)<0); unchanged();
-    setup(); wr(old_dsc+8,0x0c3a7bd9); wr(wrapper+4,0x0c3a7bd9); wr(wrapper2+4,0x0c3a7bd9);
+    setup(); wr(old_dsc+8,0x12345679u); wr(wrapper+4,0x12345679u); wr(wrapper2+4,0x12345679u);
     assert(reload_path(path_a,&changed)<0); unchanged();
     setup(); wr(record+44,3); assert(reload_path(path_a,&changed)<0); unchanged();
     setup(); mutate_owner=1; assert(!reload_path(path_a,&changed)); committed(path_a,changed);
@@ -530,7 +526,7 @@ static uint32_t held_entry(uint32_t c,uint32_t size) {
     wr(data+size,c); wr(data+size+4,1); wr(data+size+8,size); return data;
 }
 static void test_holds_limits_and_external_faces(void) {
-    uint32_t changed,child,vec,data,path,key[7]={0},before; int error;
+    uint32_t changed,child,vec,data,path,key[FACE_SIZE/4]={0},before; int error;
     setup(); child=rd(rd(old_dsc+52)+20); held_entry(child,8); old_live=live_allocations();
     assert(reload_path(path_a,&changed)==1); unchanged();
     setup(); vec=heap(64); wr(vec,SIZE_CLASS); wr(vec+4,16); wr(vec+48,4);
@@ -585,7 +581,7 @@ static uint32_t alias_dsc,alias_record,alias_wrapper,alias_reg;
 static void setup_alias(void) {
     uint32_t face,path_node;
     setup(); face=rd(old_dsc+52); path_node=rd(ctx+8);
-    wr(face+32,rd(face+32)+1); wr(path_node+4,rd(path_node+4)+1);
+    wr(face+FACE_SIZE+4,rd(face+FACE_SIZE+4)+1); wr(path_node+4,rd(path_node+4)+1);
     alias_dsc=fixture_dsc(26,face); alias_record=fixture_record(alias_dsc,26,1);
     memcpy(address(alias_record+12,6),"Alias",6); alias_wrapper=fixture_wrapper(alias_record);
     alias_reg=heap(16); wr(alias_reg,duplicate("Alias")); wr(alias_reg+4,duplicate(stock)); append(mgr+24,alias_reg);
@@ -625,10 +621,10 @@ static void test_restore_failures(void) {
     for(i=1;i<=calls;i++) {
         setup(); assert(reload_path(path_a,&changed)==0);
         before=live_allocations(); current=rd(wrapper+24); face=rd(current+52);
-        refs=rd(face+32); history=state.history_count; fail_alloc=alloc_calls+i;
+        refs=rd(face+FACE_SIZE+4); history=state.history_count; fail_alloc=alloc_calls+i;
         assert(reload_path(NULL,&changed)<0 && !changed);
         assert(live_allocations()==before && rd(wrapper+24)==current);
-        assert(rd(face+32)==refs && state.history_count==history && !temp_live);
+        assert(rd(face+FACE_SIZE+4)==refs && state.history_count==history && !temp_live);
         committed(path_a,1);
         fail_alloc=0; assert(reload_path(NULL,&changed)==0); committed(stock,changed);
     }
@@ -637,10 +633,10 @@ static void test_restore_failures(void) {
 static uint32_t retain_stock_and_replace(uint32_t *face,uint32_t *id) {
     uint32_t changed,external;
     setup(); *face=rd(old_dsc+52); *id=rd(ctx+8);
-    wr(*face+32,rd(*face+32)+1); wr(*id+4,rd(*id+4)+1);
+    wr(*face+FACE_SIZE+4,rd(*face+FACE_SIZE+4)+1); wr(*id+4,rd(*id+4)+1);
     external=fixture_dsc(42,*face);
     assert(reload_path(path_a,&changed)==0); committed(path_a,changed);
-    assert(alive(*face) && rd(*face+32)==1 && rd(*id+4)==1);
+    assert(alive(*face) && rd(*face+FACE_SIZE+4)==1 && rd(*id+4)==1);
     return external;
 }
 static void test_restore_with_retained_stock_face(void) {
@@ -651,17 +647,17 @@ static void test_restore_with_retained_stock_face(void) {
     metrics=rd(face+16); outline=rd(face+20);
     assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
     assert(rd(rd(wrapper+24)+52)==face && rd(rd(wrapper3+24)+52)==face);
-    assert(rd(face+32)==3 && rd(id+4)==3);
+    assert(rd(face+FACE_SIZE+4)==3 && rd(id+4)==3);
     assert(rd(face+16)==metrics && rd(face+20)==outline);
     assert(!memcmp(saved,address(external,sizeof(saved)),sizeof(saved)));
     /* Switching away again must not retire the external stock consumer. */
     assert(reload_path(path_b,&changed)==0); committed(path_b,changed);
-    assert(rd(face+32)==1 && rd(id+4)==1 && alive(face));
+    assert(rd(face+FACE_SIZE+4)==1 && rd(id+4)==1 && alive(face));
     assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
     assert(rd(face+16)==metrics && rd(face+20)==outline);
     assert(!memcmp(saved,address(external,sizeof(saved)),sizeof(saved)));
     destroy_descriptor(external);
-    assert(rd(face+32)==2 && rd(id+4)==2 && alive(face) && !temp_live);
+    assert(rd(face+FACE_SIZE+4)==2 && rd(id+4)==2 && alive(face) && !temp_live);
 }
 static void test_borrowed_stock_failures(void) {
     uint32_t changed,face,id,external,before,current,calls,start,i,child,data;
@@ -679,13 +675,13 @@ static void test_borrowed_stock_failures(void) {
         result=reload_path(NULL,&changed); assert(result<0 && !changed);
         if(i==calls+3) assert(result==-2406);
         assert(live_allocations()==before && rd(wrapper+24)==current && !temp_live);
-        assert(rd(face+32)==1 && rd(id+4)==1 && alive(face));
+        assert(rd(face+FACE_SIZE+4)==1 && rd(id+4)==1 && alive(face));
         assert(!memcmp(saved,address(external,sizeof(saved)),sizeof(saved)));
         committed(path_a,1);
-        if(mutate_cache_in_prepare) wr(mutate_cache_in_prepare+20,0x0c3a5ef1u);
+        if(mutate_cache_in_prepare) wr(mutate_cache_in_prepare+20,RH_FW_FR_METRICS_CREATE);
         fail_alloc=fail_size=fail_temp_at=mutate_cache_in_prepare=0;
         assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
-        assert(rd(face+32)==3 && rd(id+4)==3);
+        assert(rd(face+FACE_SIZE+4)==3 && rd(id+4)==3);
     }
     for(i=0;i<2;i++) {
         external=retain_stock_and_replace(&face,&id);
@@ -693,26 +689,26 @@ static void test_borrowed_stock_failures(void) {
         before=live_allocations(); current=rd(wrapper+24);
         assert(reload_path(NULL,&changed)==1 && !changed);
         assert(live_allocations()==before && rd(wrapper+24)==current && !temp_live);
-        assert(rd(face+32)==1 && rd(id+4)==1 && alive(external));
+        assert(rd(face+FACE_SIZE+4)==1 && rd(id+4)==1 && alive(external));
         wr(data+(i ? 12u : 36u),0);
         assert(reload_path(NULL,&changed)==0); committed_with_refs(stock,changed,3);
     }
     external=retain_stock_and_replace(&face,&id);
     stock_content++; before=live_allocations();
     assert(reload_path(NULL,&changed)<0 && !changed);
-    assert(rd(face+32)==1 && rd(id+4)==1 && live_allocations()==before && alive(external));
+    assert(rd(face+FACE_SIZE+4)==1 && rd(id+4)==1 && live_allocations()==before && alive(external));
     external=retain_stock_and_replace(&face,&id);
-    wr(face+32,0x7ffffffdu); before=live_allocations();
+    wr(face+FACE_SIZE+4,0x7ffffffdu); before=live_allocations();
     assert(reload_path(NULL,&changed)==-2909 && !changed);
-    assert(rd(face+32)==0x7ffffffdu && rd(id+4)==1 && live_allocations()==before);
+    assert(rd(face+FACE_SIZE+4)==0x7ffffffdu && rd(id+4)==1 && live_allocations()==before);
     external=retain_stock_and_replace(&face,&id);
-    wr(face+32,0); before=live_allocations();
+    wr(face+FACE_SIZE+4,0); before=live_allocations();
     assert(reload_path(NULL,&changed)==-2941 && !changed);
-    assert(rd(face+32)==0 && rd(id+4)==1 && live_allocations()==before && alive(external));
+    assert(rd(face+FACE_SIZE+4)==0 && rd(id+4)==1 && live_allocations()==before && alive(external));
     external=retain_stock_and_replace(&face,&id);
     data=duplicate(stock); wr(face,data); before=live_allocations();
     assert(reload_path(NULL,&changed)==-2942 && !changed);
-    assert(rd(face+32)==1 && rd(id+4)==1 && live_allocations()==before && alive(external));
+    assert(rd(face+FACE_SIZE+4)==1 && rd(id+4)==1 && live_allocations()==before && alive(external));
     printf("borrowed stock face: %u allocation failures, size/snapshot/precommit failures and busy child caches passed\n",calls);
 }
 static void test_multi_family_atomicity(void) {
@@ -740,4 +736,3 @@ int main(void) {
     test_borrowed_stock_failures();
     puts("font reload transaction tests passed (modeled native leaves)"); return 0;
 }
-#endif

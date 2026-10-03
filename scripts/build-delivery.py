@@ -18,11 +18,31 @@ TARGET = 'xiaomi-band-11-4.100.139'
 TARGETS = runpy.run_path(str(ROOT / 'scripts/verify-payload.py'))['TARGETS']
 
 
+def firmware_test_commands(target, python):
+    """Select only suites that actually support the exact requested AP."""
+    if target not in TARGETS:
+        raise ValueError(f'unsupported target: {target}')
+    if target == 'xiaomi-band-10-pro-3.101.043':
+        names = ('firmware_font_1043', 'firmware_quickapp_reload_1043')
+    else:
+        names = ('firmware_paths', 'firmware_restart', 'firmware_rebind',
+                 'firmware_font_lifecycle', 'firmware_image_lifecycle',
+                 'firmware_ui_redraw', 'firmware_page_rebuild',
+                 'firmware_font_retarget', 'firmware_font_barrier_155',
+                 'firmware_reload')
+    commands = [(name, [python, str(ROOT / 'tests' / (name + '.py'))]) for name in names]
+    # Calendar has an explicit exact-target CLI; QuickApp lookup tests all three
+    # exact APs in one suite, so it is run once separately (not mislabeled .043).
+    commands.append(('firmware_calendar',
+                     [python, str(ROOT / 'tests/firmware_calendar.py'), '--target', target]))
+    return commands
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='new delivery directory; existing paths are refused')
     parser.add_argument('--target', choices=TARGETS, action='append',
-                        help='target to include; repeat for a dual bundle (default: .139)')
+                        help='target to include; repeat for a multi-device bundle (default: .139)')
     args = parser.parse_args()
     targets = args.target or [TARGET]
     module_manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
@@ -68,20 +88,20 @@ def main():
                 ['sh', str(ROOT / 'scripts/build-install-payload.sh'), target, str(payload)])
             run(f'{target}: Delivery identity and tamper rejection',
                 [sys.executable, str(ROOT / 'tests/test_delivery.py')])
-            for name in ('firmware_paths', 'firmware_restart', 'firmware_rebind',
-                         'firmware_font_lifecycle', 'firmware_image_lifecycle',
-                         'firmware_ui_redraw', 'firmware_page_rebuild',
-                         'firmware_font_retarget'):
-                run(f'{target}: {name}', [firmware_python, str(ROOT / 'tests' / (name + '.py'))])
-            reload_env = dict(env, RESOURCE_HOOK_TARGET=target)
-            if target == 'xiaomi-band-11-4.100.139':
-                local_ap = ROOT / 'build/firmware-analysis/vela_ap_4.100.139.bin'
-                if not reload_env.get('RESOURCE_HOOK_FIRMWARE') and local_ap.is_file():
-                    reload_env['RESOURCE_HOOK_FIRMWARE'] = str(local_ap)
-            else:
-                reload_env.pop('RESOURCE_HOOK_FIRMWARE', None)
-            run(f'{target}: firmware_reload',
-                [firmware_python, str(ROOT / 'tests/firmware_reload.py')], reload_env)
+            native_env = dict(env, RESOURCE_HOOK_TARGET=target)
+            # Never inherit a different target's AP override in a multi bundle.
+            if len(targets) > 1:
+                native_env.pop('RESOURCE_HOOK_FIRMWARE', None)
+            local_ap = ROOT / 'build/firmware-analysis' / f'vela_ap_{target.rsplit("-", 1)[1]}.bin'
+            if not native_env.get('RESOURCE_HOOK_FIRMWARE') and local_ap.is_file():
+                native_env['RESOURCE_HOOK_FIRMWARE'] = str(local_ap)
+            for name, command in firmware_test_commands(target, firmware_python):
+                run(f'{target}: {name}', command, native_env)
+        run('All three exact targets: firmware_quickapp_icon',
+            [firmware_python, str(ROOT / 'tests/firmware_quickapp_icon.py')])
+        if any(target.startswith('xiaomi-band-11-') for target in targets):
+            run('Band 11 .139/.155: firmware_font_compatibility',
+                [firmware_python, str(ROOT / 'tests/firmware_font_compatibility.py')])
         run('Installer generation and restricted Lua protocol',
             [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
         target_args = [arg for target in targets for arg in ('--target', target)]
@@ -89,6 +109,15 @@ def main():
             sys.executable, str(canopus / 'scripts/build_module_installer_prod.py'),
             '--product', 'resource-hook', *target_args, '--payload-dir', str(stage / 'payload'),
             '--assets-dir', str(ROOT / 'examples'), '--output-dir', str(stage / 'watchface')])
+        for manifest_path in (stage / 'watchface').glob('*/build/manifest.json'):
+            manifest = json.loads(manifest_path.read_text())
+            manifest.update({
+                'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
+                'font_reload_device_status': 'USER_REPORTED_PASS',
+                'hardware_status': 'NOT_PROBED', 'gpu_recovery': 'UNSUPPORTED',
+                'framework_restart_safety': 'UNSUPPORTED',
+            })
+            manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
         source = stage / 'source'
         source.mkdir()
         for name in ('src', 'include', 'scripts', 'tests', 'tools', 'docs', 'examples', 'targets'):
@@ -97,7 +126,10 @@ def main():
             shutil.copyfile(ROOT / name, source / name)
         (stage / 'README.md').write_text(
             '# Resource Hook 0.3.0 integration delivery\n\n'
-            f'Targets: {", ".join(targets)}. Physical device: NOT_PROBED.\n\n'
+            f'Targets: {", ".join(targets)}. New artifact physical device: NOT_PROBED.\n\n'
+            'Font reload: USER_REPORTED_PASS on all supported targets (user report). '
+            'Transactional font reload is included by default; GPU recovery and framework '
+            'restart safety remain unsupported.\n\n'
             '- Read INSTALL.md before installing or enabling.\n'
             '- payload/: signed ELF/CMI1, example mapping and verifier.\n'
             '- watchface/: installer Lua/resources; ZIP is input to a watchface packer, not a vendor watchface file.\n'
@@ -106,26 +138,40 @@ def main():
             '- validation.json and validation.log: checks run for this delivery.\n\n'
             'No automatic miwear restart, complete cache refresh or hardware-readiness claim.\n')
         shutil.copyfile(ROOT / 'docs/INSTALL.md', stage / 'INSTALL.md')
+        shutil.copyfile(ROOT / 'docs/FONT_RELOAD.md', stage / 'FONT_RELOAD.md')
         evidence = stage / 'evidence'
         evidence.mkdir()
         for target in targets:
             destination = evidence if len(targets) == 1 else evidence / target
             destination.mkdir(exist_ok=True)
-            for name in ('evidence.json', 'ui-reload-audit.md', 'lifecycle-recovery.json'):
-                shutil.copyfile(ROOT / 'targets' / target / name, destination / name)
+            for item in (ROOT / 'targets' / target).iterdir():
+                if item.is_file() and item.suffix in ('.json', '.md'):
+                    shutil.copyfile(item, destination / item.name)
         (stage / 'validation.json').write_text(json.dumps({
             'module': 'corona', 'version': module_version,
             'project_id': project_id,
             **({'target': targets[0]} if len(targets) == 1 else {}),
             'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',
+            'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
+            'font_reload_device_status': 'USER_REPORTED_PASS',
+            'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
+            'native_firmware_suites': {
+                target: [name for name, _ in firmware_test_commands(target, firmware_python)]
+                for target in targets},
+            'cross_target_suites': ['firmware_quickapp_icon'] + (
+                ['firmware_font_compatibility']
+                if any(target.startswith('xiaomi-band-11-') for target in targets) else []),
             'automatic_miwear_restart': False, 'complete_cache_refresh': False,
         }, indent=2) + '\n')
         files = sorted(p for p in stage.rglob('*') if p.is_file())
         (stage / 'SHA256SUMS').write_text(''.join(
             f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(stage).as_posix()}\n'
             for p in files))
-        archive_target = targets[0] if len(targets) == 1 else 'xiaomi-band-11-4.100.139-4.100.155'
+        archive_target = targets[0] if len(targets) == 1 else (
+            'xiaomi-band-11-4.100.139-4.100.155'
+            if set(targets) == {'xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155'}
+            else 'multi-device')
         archive = stage / f'resource-hook-0.3.0-{archive_target}.zip'
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
             for path in files + [stage / 'SHA256SUMS']:
@@ -135,9 +181,10 @@ def main():
         if output.exists() or output.is_symlink():
             raise RuntimeError('output appeared during build; refusing to overwrite')
         stage.rename(output)
-    print(f'Static integration bundle (miwear restart incomplete): {output}')
+    print(f'Signed release bundle (new artifacts NOT_PROBED): {output}')
     print(f'Archive: {output / archive.name}')
-    print('Hardware acceptance remains NOT_PROBED; no device was modified.')
+    print('Font reload: USER_REPORTED_PASS on supported targets; new artifact: NOT_PROBED.')
+    print('GPU recovery/restart safety unsupported; no device was modified.')
 
 
 if __name__ == '__main__':

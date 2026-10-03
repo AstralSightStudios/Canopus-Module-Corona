@@ -46,6 +46,15 @@ TARGETS = {
 }
 
 
+# Independently pinned ordinary font-call approvals: allocator and exact
+# metrics-destroy callback (PSRAM on .043). Probes never execute these calls.
+FONT_CALLABLES = {
+    target: {'lv_malloc': 0x0c16daa9 if target == TARGET_1043 else 0x0c3abe21,
+             'metrics_destroy': 0x1c056d19 if target == TARGET_1043 else 0x0c39fd95}
+    for target in TARGETS
+}
+
+
 def required_tool(variable, default):
     name = os.environ.get(variable, str(default))
     path = shutil.which(name)
@@ -69,6 +78,8 @@ class QuickAppAllowlist(unittest.TestCase):
         # package pointer through so the call cannot be constant-folded away.
         addresses = {address + delta for _, address, _ in TARGETS.values()
                      for delta in (-2, 0, 2)}
+        addresses.update(address for roles in FONT_CALLABLES.values()
+                         for address in roles.values())
         for address in sorted(addresses):
             source = cls.work / f'probe-{address:x}.c'
             obj = source.with_suffix('.o')
@@ -161,16 +172,20 @@ class QuickAppAllowlist(unittest.TestCase):
                     self.assertTrue(links, f'Missing evidence link: {filename}')
                     self.assertTrue(all(a.get('role') for a in links))
 
-    def test_firmware_ranges_remain_exact_not_expanded(self):
+    def test_firmware_ranges_match_xip_and_audited_startup_copy(self):
         for target, (_, _, firmware_hash) in TARGETS.items():
             with self.subTest(target=target):
                 manifest = tomllib.loads(
                     (SDK / 'targets' / target / 'target.toml').read_text())
                 self.assertEqual(manifest['target_id'], target)
                 self.assertEqual(manifest['firmware_sha256'], firmware_hash)
-                self.assertEqual(manifest['firmware_address_ranges'],
-                                 [{'base': 0x0c000000, 'size':
-                                    0x00e00000 if target == TARGET_1043 else 0x00d00000}])
+                expected = [{'base': 0x0c000000, 'size':
+                             0x00e00000 if target == TARGET_1043 else 0x00d00000}]
+                if target == TARGET_1043:
+                    # Font callback identities live in the exact startup copy,
+                    # not a broadened XIP range. Symbols remain exact-address.
+                    expected.append({'base': 0x1c000000, 'size': 0x80500})
+                self.assertEqual(manifest['firmware_address_ranges'], expected)
 
     def verify_probe(self, target, address, targets_dir=None):
         result = self.run_cli('verify', self.probes[address], '--target', target,
@@ -212,6 +227,26 @@ class QuickAppAllowlist(unittest.TestCase):
             for rejected in (address - 2, address + 2, *others):
                 with self.subTest(target=target, rejected=hex(rejected)):
                     self.assert_address_rejected(target, rejected)
+
+    def test_default_font_symbols_are_exact_required_approvals(self):
+        # Normal builds always call these font leaves. Keep approval causal,
+        # including the declared .043 PSRAM range: a range is not a whitelist.
+        for target, roles in FONT_CALLABLES.items():
+            for role, address in roles.items():
+                with self.subTest(target=target, role=role):
+                    result, report = self.verify_probe(target, address)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertTrue(report['ok'])
+                    targets_dir = self.work / f'without-font-{role}'
+                    pack = targets_dir / target
+                    shutil.copytree(SDK / 'targets' / target, pack)
+                    symbol = (pack / 'symbols' /
+                              f'{target}.private_abi.font_reload_{role}.json')
+                    data = json.loads(symbol.read_text())
+                    self.assertEqual(int(data['callable_address'], 16), address)
+                    self.assertEqual(data['policy'], 'restricted')
+                    symbol.unlink()
+                    self.assert_address_rejected(target, address, targets_dir)
 
     def test_1043_reuses_calendar_record_without_redundant_alias(self):
         alias = SDK / 'targets' / TARGET_1043 / 'symbols' / f'{TARGET_1043}.app_lookup_package.json'

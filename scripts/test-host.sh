@@ -16,7 +16,7 @@ for test in hook boundaries; do
     "$ROOT/build/test_$test"
 done
 # Compile the actual shared transaction for each exact address selection.
-# Also test absent and explicitly disabled opt-in, without native leaf stubs.
+# Fonts are part of the ordinary runtime; no opt-in or legacy stub matrix.
 for target in 139 155 1043; do
     if [ "$target" = 1043 ]; then
         TARGET_DEFINE=-DRH_TARGET_1043=1
@@ -33,50 +33,36 @@ for target in 139 155 1043; do
         $TARGET_DEFINE -I"$ROOT/include" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
         "$ROOT/tests/test_quickapp.c" -o "$ROOT/build/test_quickapp_${target}"
     "$ROOT/build/test_quickapp_${target}"
-    modes="default disabled"
-    if [ "$target" != 1043 ]; then
-        modes="default disabled experimental"
-    fi
-    for mode in $modes; do
-        case "$mode" in
-            default) FONT_DEFINE= ;;
-            disabled) FONT_DEFINE=-DRH_EXPERIMENTAL_FONT_RELOAD=0 ;;
-            experimental) FONT_DEFINE=-DRH_EXPERIMENTAL_FONT_RELOAD=1 ;;
-        esac
-        printf 'Host target .%s: %s font reload\n' "$target" "$mode"
-        "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-            $TARGET_DEFINE $FONT_DEFINE -I"$ROOT/include" -I"$SDK/sdk/c" \
-            "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
-            "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
-            -o "$ROOT/build/test_module_${target}_${mode}"
-        if [ "$mode" = experimental ]; then
-            "$ROOT/build/test_module_${target}_${mode}" --experimental-fonts
-        else
-            "$ROOT/build/test_module_${target}_${mode}"
-            "$ROOT/build/test_module_${target}_${mode}" --empty-startup
-        fi
-        "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
-        "$ROOT/build/test_module_${target}_${mode}" --control-quickapp-status
-        "$ROOT/build/test_module_${target}_${mode}" --control-reload-status
-        for startup in missing empty comments valid; do
-            "$ROOT/build/test_module_${target}_${mode}" --control-status "$startup"
-        done
-        for fault in eacces open-io unknown-errno scratch-oom snapshot-oom \
-                     materialize-oom materialized-map-oom read-io malformed outside duplicate oversized; do
-            "$ROOT/build/test_module_${target}_${mode}" --startup-fallback "$fault"
-        done
-        "$ROOT/build/test_module_${target}_${mode}" --snapshots
-        "$ROOT/build/test_module_${target}_${mode}" --calendar
-        "$ROOT/build/test_module_${target}_${mode}" --quickapp
-        for fault in open-fail write-fail short-write fd-zero; do
-            RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}_${mode}" --startup-diagnostics
-        done
-        "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-            $TARGET_DEFINE $FONT_DEFINE -I"$ROOT/include" \
-            "$ROOT/tests/test_font_reload.c" "$ROOT/src/resource_hook.c" \
-            -o "$ROOT/build/test_font_reload_${target}_${mode}"
-        "$ROOT/build/test_font_reload_${target}_${mode}"
+    printf 'Host target .%s: default font reload\n' "$target"
+    "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        $TARGET_DEFINE -I"$ROOT/include" -I"$SDK/sdk/c" \
+        "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+        "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
+        -o "$ROOT/build/test_module_${target}"
+    "$ROOT/build/test_module_${target}" --font-reload
+    "$ROOT/build/test_module_${target}"
+    "$ROOT/build/test_module_${target}" --empty-startup
+    "$ROOT/build/test_module_${target}" --startup-diagnostics
+    "$ROOT/build/test_module_${target}" --control-quickapp-status
+    "$ROOT/build/test_module_${target}" --control-reload-status
+    for startup in missing empty comments valid; do
+        "$ROOT/build/test_module_${target}" --control-status "$startup"
     done
+    for fault in eacces open-io unknown-errno scratch-oom snapshot-oom \
+                 materialize-oom materialized-map-oom read-io malformed outside duplicate oversized; do
+        "$ROOT/build/test_module_${target}" --startup-fallback "$fault"
+    done
+    "$ROOT/build/test_module_${target}" --snapshots
+    "$ROOT/build/test_module_${target}" --calendar
+    "$ROOT/build/test_module_${target}" --quickapp
+    for fault in open-fail write-fail short-write fd-zero; do
+        RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}" --startup-diagnostics
+    done
+    "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        $TARGET_DEFINE -I"$ROOT/include" \
+        "$ROOT/tests/test_font_reload.c" "$ROOT/src/resource_hook.c" \
+        -o "$ROOT/build/test_font_reload_${target}"
+    "$ROOT/build/test_font_reload_${target}"
 done
 CC="$CC" python3 "$ROOT/tests/test_platform_io.py"
 CC="$CC" python3 "$ROOT/tests/test_quickapp_icon_native.py"

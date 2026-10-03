@@ -2,12 +2,7 @@
 #include "canopus_module_registration.h"
 #include "resource_hook_platform.h"
 #include "resource_hook_quickapp.h"
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
 #include "resource_hook_font_reload.h"
-#define RH_FONT_EXPERIMENT 1
-#else
-#define RH_FONT_EXPERIMENT 0
-#endif
 
 #define RH_MODULE_ID "corona"
 #define RH_VERSION "0.3.0"
@@ -41,11 +36,9 @@ static uint32_t redraws;
 /* Reserved RHQ1 v5 field: no forced page rebuilds in the reload path. */
 static const uint32_t rebuilds;
 static uint32_t fonts_retargeted;
-#if RH_FONT_EXPERIMENT
 /* 1 = pending/busy, 0 = completed, negative = rejected/failed. */
 static int32_t font_result;
 static uint32_t font_last_changed;
-#endif
 static void *refresh_timer, *watch_timer;
 static struct rh_snapshot *active_snapshot, *refresh_previous_snapshot;
 /* Semantic declarations survive absent packages and app upgrades. Only the
@@ -130,28 +123,6 @@ static void startup_record(const char *stage, int32_t rc, int error, uintptr_t d
     rh_platform_close(fd);
 }
 
-/* Point every registered font family whose file falls under a mapping rule at
- * the themed file. A retargeted entry is re-added at the end of the registry, so
- * the same index is re-examined; a themed path normally no longer matches a
- * rule, which ends the walk. The bound stops a pathological rule set that maps a
- * theme directory back onto itself from looping. */
-#if !RH_FONT_EXPERIMENT
-static void retarget_fonts(const struct rh_mapping_view *current) {
-    char name[RH_PATH], path[RH_PATH], mapped[RH_PATH];
-    uint32_t index = 0, guard = 0;
-    while (guard++ < RH_RULES * 8u) {
-        if (rh_platform_font_path_get(index, name, path)) return;
-        if (rh_resolve_view(current, path, mapped) == 1 &&
-            rh_platform_font_retarget(index, mapped) == 0) {
-            if (fonts_retargeted != UINT32_MAX) fonts_retargeted++;
-            continue;
-        }
-        index++;
-    }
-}
-
-#endif
-
 /* One request, coalesced across activations. The temporary UI timer retries only
  * until the selected target's verified retirement/owner stages and dirty-area
  * request complete; a failed adapter never counts as a completed retirement. */
@@ -187,7 +158,6 @@ static void refresh_step(void *timer, unsigned ui_owner) {
             }
         }
     }
-#if RH_FONT_EXPERIMENT
     if (cache_dropped && !fonts_done && ui_owner) {
         uint32_t changed = 0;
         int rc = rh_font_reload(&current, &changed);
@@ -201,13 +171,6 @@ static void refresh_step(void *timer, unsigned ui_owner) {
             else fonts_retargeted += changed;
         }
     }
-#else
-    /* Legacy path only affects future resolutions and cannot restore paths. */
-    if (cache_dropped && !fonts_done) {
-        fonts_done = 1;
-        retarget_fonts(&current);
-    }
-#endif
     /* Calendar snapshots consume the new background/fonts and must be generated
      * before refreshing their launcher owner. Never invoke native snapshot work
      * from activate(); only serialized UI timer callbacks may run this stage. */
@@ -263,9 +226,7 @@ static int request_refresh(void) {
     if (!refresh_pending) {
         cache_dropped = 0;
         fonts_done = 0;
-#if RH_FONT_EXPERIMENT
         font_result = 1;
-#endif
         images_done = calendar_done = 0;
         refresh_previous_snapshot = 0;
         refresh_pending = 1;
@@ -456,7 +417,7 @@ static void publish_result(const char *signal, uint32_t size, int32_t result,
     for(i=0;i<RH_RESULT_BYTES;i++) ((volatile char *)buffer)[i]=0;
     for(i=0;i<size;i++) *p++=signal[i];
     p=log_text(p,v2 ? "RHRS2\t" : "RHRS1\t");
-    p=result_number(p,v2 ? 1u : (RH_FONT_EXPERIMENT ? 6u : 5u)); *p++='\t';
+    p=result_number(p,v2 ? 1u : 6u); *p++='\t';
     if(result<0) *p++='-';
     p=result_number(p,result<0 ? 0u-(uint32_t)result : (uint32_t)result); *p++='\t';
     p=result_number(p,pending); *p++='\t';
@@ -494,12 +455,8 @@ static void publish_current_result(void) {
         return;
     }
     if(!last_reload_signal_valid) return;
-#if RH_FONT_EXPERIMENT
     publish_result(last_reload_signal,last_reload_signal_size,font_result,
                    refresh_pending,font_last_changed);
-#else
-    publish_result(last_reload_signal,last_reload_signal_size,0,refresh_pending,0);
-#endif
 }
 static int resolve_quickapp(void *cookie, const char *package, char path[RH_PATH]) {
     (void)cookie;
@@ -607,11 +564,9 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         S.count = candidate ? candidate->count : 0u;
         candidate = 0;
         cache_dropped = images_done = calendar_done = 0;
-        fonts_done = RH_FONT_EXPERIMENT ? 0u : 1u;
-#if RH_FONT_EXPERIMENT
+        fonts_done = 0;
         font_result = 1;
         font_last_changed = 0;
-#endif
         refresh_pending = 1;
     } else {
         /* An explicit revision can replace calendar assets at unchanged paths.
@@ -623,7 +578,6 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
             refresh_previous_snapshot = 0;
             refresh_pending = 1;
         }
-#if RH_FONT_EXPERIMENT
         font_last_changed = 0;
         /* A rejected font transaction may also be retried at this revision. */
         if (font_result < 0) {
@@ -635,7 +589,6 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
             refresh_previous_snapshot = 0;
             refresh_pending = 1;
         }
-#endif
         /* An explicit same-map revision may replace icon bytes in place. Do not
          * silently acknowledge it without file-cache retirement/owner refresh. */
         if (quickapp_affected) {
@@ -781,9 +734,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     uint32_t irq;
     int rc = 0, valid;
     uintptr_t observed = 0, expected;
-#if RH_FONT_EXPERIMENT
     unsigned font_restart = 0;
-#endif
     /* Keep a complete activation together, including the final return code. */
     if (startup_log_used > RH_STARTUP_LOG_BYTES - 1536u) startup_log_used = 0;
     startup_record("activate.begin", 0, 0, (uintptr_t)configured);
@@ -806,9 +757,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     if (!configured || !valid) rc = -2008;
     else if (!slot || (observed != expected && *slot != rh_wrapper)) rc = -2009;
     else {
-#if RH_FONT_EXPERIMENT
         font_restart = S.installed && *slot != rh_wrapper;
-#endif
         if (rh_reinstall_posix(&S, rh_platform_driver(), slot,
                               rh_platform_original(), rh_wrapper)) rc = -2010;
     }
@@ -817,12 +766,10 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     startup_record("slot.expected", 0, 0, expected);
     startup_record("slot.observed", 0, 0, observed);
     startup_record("hook.end", rc, 0, (uintptr_t)S.installed);
-#if RH_FONT_EXPERIMENT
     if (font_restart) {
         /* Never dereference a font snapshot from the previous UI lifetime. */
         rh_font_reload_disable();
     }
-#endif
     if (!rc) {
         int refresh_rc, watch_rc;
         startup_record("refresh.begin", 0, 0, S.count);
@@ -833,11 +780,9 @@ static int32_t activate(const struct canopus_context_v1 *c) {
         startup_record("watch.end", watch_rc, 0, (uintptr_t)watch_timer);
         rc = refresh_rc ? refresh_rc : watch_rc;
     }
-#if RH_FONT_EXPERIMENT
     /* request_refresh initializes the new transaction status; the observed
      * restart must remain visible until the timer reaches the disabled adapter. */
     if (font_restart) font_result = -2014;
-#endif
     startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
     return rc;
 }
@@ -847,12 +792,10 @@ static int32_t stop(const struct canopus_context_v1 *c) {
 }
 static int32_t query(struct canopus_status_writer_v1 *writer) {
     uint32_t irq, installed, count, redirected, fallback, dropped, redrawn, rebuilt, fonts;
-#if RH_FONT_EXPERIMENT
     int32_t font_status;
     uint32_t font_pending;
-#endif
     if (!writer || !writer->buf || writer->state != CANOPUS_STATUS_WRITER_WRITING ||
-        writer->used > writer->capacity || writer->capacity - writer->used < (RH_FONT_EXPERIMENT ? 48u : 40u))
+        writer->used > writer->capacity || writer->capacity - writer->used < 48u)
         return -1;
     irq = rh_platform_lock();
     installed = (uint32_t)S.installed;
@@ -863,13 +806,11 @@ static int32_t query(struct canopus_status_writer_v1 *writer) {
     redrawn = redraws;
     rebuilt = rebuilds;
     fonts = fonts_retargeted;
-#if RH_FONT_EXPERIMENT
     font_status = font_result;
     font_pending = refresh_pending && !fonts_done;
-#endif
     rh_platform_unlock(irq);
     if (canopus_status_put_u32(writer, 0x31514852u) ||
-        canopus_status_put_u32(writer, RH_FONT_EXPERIMENT ? 6u : 5u) ||
+        canopus_status_put_u32(writer, 6u) ||
         canopus_status_put_u32(writer, installed) ||
         canopus_status_put_u32(writer, count) ||
         canopus_status_put_u32(writer, redirected) ||
@@ -878,10 +819,8 @@ static int32_t query(struct canopus_status_writer_v1 *writer) {
         canopus_status_put_u32(writer, redrawn) ||
         canopus_status_put_u32(writer, rebuilt) ||
         canopus_status_put_u32(writer, fonts)) return -1;
-#if RH_FONT_EXPERIMENT
     if (canopus_status_put_u32(writer, (uint32_t)font_status) ||
         canopus_status_put_u32(writer, font_pending)) return -1;
-#endif
     return canopus_status_writer_publish(writer);
 }
 __attribute__((used)) struct canopus_module_descriptor_v1 canopus_module_descriptor;
@@ -901,7 +840,7 @@ __attribute__((constructor)) static void ctor(void) {
     cp((char *)canopus_module_descriptor.module_id, RH_MODULE_ID, 32);
     cp((char *)canopus_module_descriptor.module_version, RH_VERSION, 16);
     cp((char *)canopus_module_descriptor.build_id,
-       RH_FONT_EXPERIMENT ? "resource-hook-0.3.0-font-exp" : "resource-hook-0.3.0", 32);
+       "resource-hook-0.3.0", 32);
     cp((char *)canopus_module_descriptor.target_id, RH_TARGET_ID, 32);
     canopus_module_descriptor.prepare = prepare;
     canopus_module_descriptor.activate = activate;

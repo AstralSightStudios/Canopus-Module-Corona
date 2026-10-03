@@ -1,4 +1,5 @@
 """Delivery checks require a built payload; failures are not skipped."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -17,6 +18,39 @@ PAYLOAD = Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
 spec = importlib.util.spec_from_file_location('verify_payload', ROOT / 'scripts/verify-payload.py')
 verifier = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verifier)
+spec = importlib.util.spec_from_file_location('build_delivery', ROOT / 'scripts/build-delivery.py')
+delivery_builder = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(delivery_builder)
+
+
+class FirmwareSelection(unittest.TestCase):
+    def suites(self, target):
+        return dict(delivery_builder.firmware_test_commands(target, 'firmware-python'))
+
+    def test_1043_uses_designated_native_suites(self):
+        target = 'xiaomi-band-10-pro-3.101.043'
+        suites = self.suites(target)
+        self.assertEqual(set(suites), {'firmware_font_1043', 'firmware_quickapp_reload_1043',
+                                      'firmware_calendar'})
+        self.assertEqual(suites['firmware_calendar'][-2:], ['--target', target])
+        for name, command in suites.items():
+            self.assertEqual(command[:2], ['firmware-python', str(ROOT / 'tests' / (name + '.py'))])
+
+    def test_band11_uses_exact_target_barrier_and_reload(self):
+        for target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155'):
+            with self.subTest(target=target):
+                suites = self.suites(target)
+                self.assertIn('firmware_font_barrier_155', suites)
+                self.assertIn('firmware_font_lifecycle', suites)
+                self.assertIn('firmware_reload', suites)
+                self.assertIn('firmware_image_lifecycle', suites)
+                self.assertNotIn('firmware_font_1043', suites)
+                self.assertNotIn('firmware_quickapp_reload_1043', suites)
+                self.assertEqual(suites['firmware_calendar'][-2:], ['--target', target])
+
+    def test_unknown_native_target_refused(self):
+        with self.assertRaisesRegex(ValueError, 'unsupported target'):
+            self.suites('xiaomi-band-11-4.100.108')
 
 
 class Delivery(unittest.TestCase):
@@ -86,12 +120,35 @@ class Delivery(unittest.TestCase):
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)
         self.assertEqual(metadata['version'], manifest['module']['version'])
         self.assertEqual(metadata['physical_device'], 'NOT_PROBED')
+        self.assertEqual(metadata['font_reload_device_status'], 'USER_REPORTED_PASS')
+        self.assertTrue(metadata['font_reload'])
+        self.assertEqual(metadata['module_build_id'], 'resource-hook-0.3.0')
+        self.assertEqual(metadata['gpu_recovery'], 'UNSUPPORTED')
+        self.assertEqual(metadata['framework_restart_safety'], 'UNSUPPORTED')
+        self.assertFalse(metadata['automatic_ui_restart'])
+        self.assertFalse(metadata['complete_cache_refresh'])
         self.assertEqual(metadata['target'], TARGET)
         receipt = (PAYLOAD / 'receipt.bin').read_bytes()
         self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'))
         self.assertEqual(receipt[112:144].hex(), verifier.TARGETS[TARGET])
         self.assertEqual(struct.unpack_from('<I', (PAYLOAD / 'receipt.bin').read_bytes(), 20)[0],
                          metadata['receipt_module_version'])
+
+    def test_font_docs_evidence_and_recursive_checksums(self):
+        self.assertTrue((PAYLOAD / 'FONT_RELOAD.md').is_file())
+        source = ROOT / 'targets' / TARGET
+        expected = [item for item in source.iterdir()
+                    if item.is_file() and item.suffix in ('.json', '.md')]
+        self.assertTrue(any(item.name.startswith('font-reload') for item in expected))
+        for item in expected:
+            self.assertEqual((PAYLOAD / 'evidence' / item.name).read_bytes(), item.read_bytes())
+        checksums = (PAYLOAD / 'SHA256SUMS').read_text()
+        for line in checksums.splitlines():
+            digest, name = line.split('  ', 1)
+            with self.subTest(file=name):
+                self.assertEqual(hashlib.sha256((PAYLOAD / name).read_bytes()).hexdigest(), digest)
+        self.assertIn('  evidence/', checksums)
+        self.assertIn('  FONT_RELOAD.md', checksums)
 
     def test_existing_output_is_never_overwritten(self):
         marker = self.directory / 'keep'

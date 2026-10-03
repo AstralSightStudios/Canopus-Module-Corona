@@ -1,29 +1,70 @@
-# Experimental Q66 .139 / .155 font reload
+# Font hot reload
 
-This is a shared opt-in implementation for `xiaomi-band-11-4.100.139` and `xiaomi-band-11-4.100.155`, not a production font reload guarantee. Default `.139` and `.155` builds retain the existing registry-only behavior. No automatic page rebuild, GPU wait/reset or global cache drop is added.
+Font hot reload is part of the default Resource Hook module for
+`xiaomi-band-11-4.100.139`, `xiaomi-band-11-4.100.155` and
+`xiaomi-band-10-pro-3.101.043`. There is no experimental compile option or
+registry-only fallback. No automatic page rebuild, GPU wait/reset or global
+cache drop is added.
 
-The [.139 compatibility audit](../targets/xiaomi-band-11-4.100.139/font-reload-compatibility.md) verifies the supplied OTA and loader, 122 native function bodies and shared layouts. Nine exact addresses differ; the transaction algorithm is shared without a blanket relocation rule. `.139` physical-device acceptance remains **NOT_PROBED**.
+The [.139 compatibility audit](../targets/xiaomi-band-11-4.100.139/font-reload-compatibility.md)
+verifies the supplied OTA/loader, native bodies and shared layouts. The
+[10 Pro .043 audit](../targets/xiaomi-band-10-pro-3.101.043/font-reload-audit.md)
+recovers its 45 identities, including startup-copied PSRAM callbacks. Its face
+payload is 24 bytes rather than 28; vector key-drop takes the object in r1.
+These are explicit target contracts, not a blanket relocation delta.
 
-## Device result
+## Device acceptance
 
-On 2026-09-26, the user reported that the current `.155` experimental font-replacement/reload test passed on hardware after the dynamic-wrapper fix. A subsequent attempt to restore the stock fonts returned `-2`, then `-2908` with diagnostics: **USER_REPORTED_FAIL** for restoration, localized to the rejection of an already-cached stock face. Checked stock-face reuse is now implemented, but has not yet been verified on the device. Status: **USER_REPORTED_PASS** for replacement only, not restoration or full hardware/fault acceptance. See the [device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md) for local artifact hashes, the device-driven fixes and untested cases. GPU recovery, framework restart, custom owners and endurance/memory-pressure testing remain outside this report.
+The user reports that font reload has passed physical-device acceptance on
+**all three supported firmware targets** and requests its promotion to the
+ordinary build. Status: **USER_REPORTED_PASS** for the normal font-reload
+workflow. This is a user report, not an independently instrumented GPU, OOM,
+restart or endurance test. No per-target artifact hashes or step-by-step
+acceptance log were supplied with the latest report.
+
+The earlier [.155 device report](../targets/xiaomi-band-11-4.100.155/font-reload-device-report.md)
+preserves historical replacement successes and stock-restoration errors
+(`-2` / `-2908`) that motivated checked stock-face reuse. Those checkpoints
+are not the current normal-workflow acceptance status; the latest report
+does not separately enumerate each restoration/fault scenario.
 
 ## Build and target approval
 
 ```sh
-RH_EXPERIMENTAL_FONT_RELOAD=1 sh scripts/build.sh xiaomi-band-11-4.100.139
-# Or select xiaomi-band-11-4.100.155.
+sh scripts/build.sh xiaomi-band-11-4.100.139
+sh scripts/build.sh xiaomi-band-11-4.100.155
+sh scripts/build.sh xiaomi-band-10-pro-3.101.043
+
+# Signed normal installer; repeat --target for a multi-device bundle:
+python3 scripts/build-watchface.py --target xiaomi-band-10-pro-3.101.043
 ```
 
-The experimental ELF is `build/resource-hook-font-experimental.elf`, with descriptor build ID `resource-hook-0.3.0-font-exp`. It does not overwrite the default `build/resource-hook.elf`. Other targets and values besides `0`/`1` are rejected. `build-install-payload.sh` refuses the experimental option, including when invoked by the release-delivery builder.
+Every build emits `build/resource-hook.elf` with build ID
+`resource-hook-0.3.0` and includes the checked font transaction.
+The ordinary signed payload/delivery builders include it too. Old experimental
+environment variables are no longer used. Installation still leaves the
+module disabled until explicitly enabled; promoting fonts does not restart
+the framework or automatically activate an installed module.
 
-The selected Canopus target pack must allow the exact native font functions used by `src/font_reload.c`. The normal verifier is still mandatory: an existing pack that only approves the image adapter will reject the new absolute addresses. An ELF produced before that rejection is **not a verified/installable delivery**. Do not disable verification or broaden the allowed address ranges to get a green build. The original pack's target ID and AP SHA256 are checked before compilation.
+The selected Canopus target pack must allow the exact native font functions.
+Strict verification is mandatory: an ELF rejected by an outdated pack is
+**not an installable delivery**. Do not bypass verification or broaden address
+ranges. Target ID and AP SHA256 are checked before compilation.
 
-The adjacent `Canopus-Private` packs were updated with user permission: 42 exact restricted symbol records per target, `EVID-FONT-4139-001` / `EVID-FONT-4155-001`, and normally generated C/Rust metadata. They remain `STATIC_RECOVERED / PENDING`, not public-callable or device approval. No address range was broadened. Both experimental ELFs pass the unchanged strict verifier. A temporary `.139` pack copy with the allocator's exact record removed rejects the experimental ELF; the earlier `.155` negative check is preserved.
+The adjacent packs retain the previously approved restricted records:
+`EVID-FONT-4139-001` / `EVID-FONT-4155-001`, and 41 additional .043 font
+records under `EVID-FONT-1043-001` with its existing cache-release record
+reused. The .043 startup-copy execution range
+`0x1c000000..0x1c080500` is declared separately from unchanged XIP ranges;
+its preexisting POSIX-open callback `0x1c057c51` has an exact record.
+Removed-record negative tests still reject unknown calls. Normal C/Rust
+metadata generation and the verifier are unchanged. Module device acceptance
+does not silently promote private-ABI records from `STATIC_RECOVERED/PENDING`
+to public-callable or independently device-approved symbols.
 
 ## What the transaction does
 
-- Capture original registered family paths before the first experimental change. Later mappings are always resolved from this baseline, including rule removal and restoration of stock paths.
+- Capture original registered family paths before the first change. Later mappings are always resolved from this baseline, including rule removal and restoration of stock paths.
 - Validate the bounded manager, wrapper, face-cache, draw-unit, pending-array and owner layouts. Busy drawing/cache references return a retry without changing live fonts.
 - Check file fingerprints and prepare the whole affected set using checked native allocations. Avoid the unsafe native wrapper/cache constructors and registry remove/add sequence. The FreeType parser and audited cache leaves are reused.
 - Revalidate immediately before publishing. Replace backing records and the callback/metrics/descriptor portion of existing wrappers; preserve each wrapper's address, fallback chain, user data, record and list links.
@@ -34,7 +75,7 @@ Preparation and publication happen within one serialized UI timer callback, neve
 
 ## Resource and support limits
 
-- Only the fingerprinted `.139` / `.155` standard managed outline-FreeType paths are supported. Each affected family must have an auditable active or idle descriptor at its first change (or an already audited scalar exemplar from this module lifetime).
+- Only the fingerprinted Band 11 `.139` / `.155` and Band 10 Pro `.043` standard managed outline-FreeType paths are supported. Each affected family must have an auditable active or idle descriptor at its first change (or an already audited scalar exemplar from this module lifetime).
 - Unknown font callbacks/backends, unregistered/app-owned font copies, custom text caches, canvas pixels and separately uploaded paths are not supported.
 - Use a **new immutable destination filename/directory for every font generation**. Keep files unchanged and available. Overwriting `themes/current/font.ttf` is not supported. Non-stock generation paths cannot be selected again after leaving them; restoration of unchanged stock files is supported.
 - Existing non-stock target faces outside the current preparation transaction are still refused. An unchanged, fingerprint-verified stock face may be borrowed through a new native cache reference after checking its canonical interned pathname, style/mode key, existing positive ownership, FreeType face and both child caches. Child-cache holds remain busy/retry. Existing caches and other consumers' references are never overwritten or forcibly retired; new staged descriptors may also share a face with each other.
@@ -44,17 +85,17 @@ Preparation and publication happen within one serialized UI timer callback, neve
 
 For example, change a mapping destination from `themes/font-g1/` to `themes/font-g2/`, with the same font-relative paths in each immutable directory, then write a new reload-request revision. Removing that mapping restores the captured stock path. Do not reuse `font-g1` in this module lifetime.
 
-The shared opt-in font adapter is independent of Manager. Manager no longer bundles the Fusion Pixel test font or exposes font-replacement, restore, or settings-icon test controls. To exercise the adapter, a separate trusted tool must write an immutable font generation, update exact-file mappings, and send a reload request; the default module does not execute this adapter.
+The font adapter is independent of Manager and runs in the default module. Manager no longer bundles the Fusion Pixel test font or exposes test controls. A font resource pack or another trusted tool must publish immutable font generations, update mappings and send the ordinary reload request. Promotion does not add a new font-testing UI or permit in-place file overwrites.
 
 ## Safety boundary
 
-This option assumes a healthy, serialized standard graphics pipeline. Empty software queues do **not** prove GPU completion after a timeout or reset. Host tests cannot establish this hardware property. Do not enable the experiment where GPU recovery, custom asynchronous consumers or arbitrary cross-thread UI calls must be supported.
+The implementation assumes a healthy, serialized standard graphics pipeline. Empty software queues do **not** prove GPU completion after a timeout or reset. Neither host tests nor the reported normal-path acceptance establish this hardware property. GPU recovery, custom asynchronous consumers and arbitrary cross-thread UI calls remain unsupported.
 
 The adapter detects changed native roots/registry identities and irreversibly disables itself. A failure after publication while refreshing owners also latches it disabled: a same-mapping retry must not falsely report success without refreshing the remaining owners. Already published fonts stay live; recovery requires a clean module/UI lifetime. Module reactivation after its driver callback has been reset also calls `rh_font_reload_disable()` before further font work. This is a conservative restart latch, **not a complete firmware lifecycle hook**: equal reused addresses are not an epoch, and unobserved teardown is unsupported. No prepared native objects are intentionally retained across timer callbacks.
 
-## Experimental status
+## Runtime status
 
-Default builds retain RHQ1 **v5 / 40 bytes** unchanged. The experimental build emits **v6 / 48 bytes**:
+All current builds emit RHQ1 **v6 / 48 bytes**. Its first 40 bytes preserve the historical v5 field offsets; clients must check version/length and supply a 48-byte buffer:
 
 | Offset | Field |
 | --- | --- |
@@ -130,26 +171,41 @@ A compatible controller must precreate `internal://files/control.response` to re
 
 ```text
 resource-hook-reload-v1<TAB>ng.lst.corona<TAB><revision><LF>
-RHRS1<TAB><5-or-6><TAB><signed-result><TAB><refresh-pending><TAB><families-changed-this-request><LF>
+RHRS1<TAB>6<TAB><signed-result><TAB><refresh-pending><TAB><families-changed-this-request><LF>
 <unsigned-decimal-FNV1a-of-the-first-two-lines-including-LFs><LF>
 ```
 
 The checksum detects torn/partial writes, not malicious changes. The module retries failed/short writes without rerunning a completed font transaction, and avoids rewriting unchanged results. Configuration failures use `-2101` (allocation), `-2102` (open), `-2103` (parse/read), and QuickApp materialization errors `-2104` / `-2105`. A polling client should ignore wrong revisions, invalid checksums and unsupported schemas, and must not report success if no valid result arrives. A negative result with nonzero changed count means publication occurred but refresh failed.
 
-The legacy v1 reload request and RHRS1 v5/v6 receipt schema remain unchanged on the control paths. Manager now sends reload v2 and reads RHRS2 snapshots containing active rule count and configuration state without a follow-up query; negative font results do not imply configuration failure. Its initial RHST1 status query is memory-only and does not execute font transactions. Manager and the module must be upgraded together; see [MODULE_CONTROL.md](MODULE_CONTROL.md).
+The legacy v1 reload request is still accepted and current modules emit RHRS1 v6. Parsers may continue accepting historical v5 receipts. Manager now sends reload v2 and reads RHRS2 snapshots containing active rule count and configuration state without a follow-up query; negative font results do not imply configuration failure. Its initial RHST1 status query is memory-only and does not execute font transactions. Manager and the module must be upgraded together; see [MODULE_CONTROL.md](MODULE_CONTROL.md).
 
 ## Verification
+
+Default-build promotion checkpoint: all three targets pass the ordinary host /
+ASan / UBSan transaction matrix and strict ELF validation. Each normal signed
+payload passes 14 delivery identity/tamper/metadata checks. The installer/target
+contract suite passes 10 checks, and the seven allowlist checks include removed
+allocator and metrics-destroy records on every target. Prebuilt-artifact bypass
+is no longer accepted: the installer always rebuilds and verifies the exact
+staged ELF before signing. The `.139` / `.155` signed module rebind suite passes
+18 checks per target with synthetic empty audited font roots, while native font
+probes pass 24 / 24 / 19 checks respectively. Manager's full host suite passes.
+These results remain separate from physical-device acceptance reported above.
+The normal multi-device signed package is
+`dist/module-installer-resource-hook-0.3.0-all/`.
 
 `cd manager && npm test` checks reusable file functions (text/binary/range/metadata operations, missing-file semantics, native callback failures and synchronous exceptions) and Interconnect handshake, path validation, transfer, resume, and completion behavior. Manager uses a native scrolling list, 18–24 px high-contrast text and 48 px full-width buttons; physical-device readability still requires acceptance.
 
 `build.sh` runs the existing host suite plus:
 
-- `tests/test_module.c --experimental-fonts` in separately compiled `.139` / `.155` opt-in binaries: timer-only execution, busy retry, mapping-bank lifetime, permanent-error completion, same-config explicit retry, stock-removal dispatch, v6 capacity/status, and restart latch.
-- `tests/test_font_reload.c`: both exact address selections execute the actual transaction code against a 32-bit memory model with native leaves injected, including 13 single-family and 15 two-family allocation-failure positions and rollback, wrapper/fallback preservation, idle paths, file immutability, busy holds and owner deletion.
-- `scripts/test-host.sh`: ASan/UBSan matrix covering both targets with opt-in absent, explicitly disabled, and enabled. `tests/test_font_reload_targets.py` independently checks all 45 preprocessed native address identities against the binary audit, including the nine target differences and Thumb bits, and confirms default stubs and release rejection.
+- `tests/test_module.c --font-reload` in ordinary `.139` / `.155` / `.043` binaries: timer-only execution, busy retry, mapping-bank lifetime, permanent-error completion, same-config explicit retry, stock-removal dispatch, v6 capacity/status, and restart latch.
+- `tests/test_font_reload.c`: all three exact address selections execute the actual transaction code against a 32-bit memory model with native leaves injected, including 13 single-family and 15 two-family allocation-failure positions and rollback, wrapper/fallback preservation, idle paths, file immutability, busy holds and owner deletion.
+- `scripts/test-host.sh`: ASan/UBSan matrix covering all three targets with the default font transaction. `tests/test_font_reload_targets.py` independently checks all 45 preprocessed native address identities against the target audits, including PSRAM callback addresses, Thumb bits and the `.043` ABI parameters, and confirms always-on native identities, removal of experimental gates and per-device installer isolation.
 
 `tests/firmware_font_barrier_155.py` retains its historical filename but separately executes 24 selected native probes on each exact target. `tests/firmware_font_compatibility.py` validates the binary comparison evidence; 16 guard tests reject wrong fingerprints, unknown targets, unmapped addresses and missing/tampered direct-target proofs. An additional 70 direct targets have bounded local proofs; 606 transitive callsites and the assertion handler beyond its entry block remain explicitly unverified (`LIMITED`), not a whole-program equivalence claim. Neither suite runs the complete real FreeType parser or GPU, and neither is an on-device font reload acceptance test. The separate user-reported normal-path device pass is recorded above; repeated switching, memory-pressure behavior, comprehensive visual layout and graphics-recovery validation remain required.
 
-Integration results after unification: all four default/opt-in × `.139`/`.155` builds pass strict target verification. Under identical ARM compiler flags, the original and shared `.155` font objects have byte-identical `.text` (8,304 bytes), `.bss` (42,660 bytes), and `.rel.text` (440 bytes). Each exact AP passes 24 native font probes and 19 image regression probes. Static verification covers 122 function bodies / 9,494 instructions per target, six data records, and the supplied `.139` OTA/loader provenance. Host sanitizer tests additionally cover the post-commit traversal-overflow latch and reject a misleading same-mapping success afterward. These results do not replace `.139` device acceptance or `.155` stock-restore acceptance.
+Historical promotion baseline for Band 10 Pro `.043`: the pre-promotion three-target host/sanitizer matrix and 10 target/installer contract tests passed. `build/firmware-tests/bin/python tests/firmware_font_1043.py` passes 19 checks (14 selected-native probes and 5 evidence guards), including 24-byte face ownership, vector-drop r1 ABI, failed-create cleanup and zero/one-child face destruction with documented modeled lower leaves. Both `.043` default and opt-in ELFs pass the unchanged strict verifier. Temporary packs missing the allocator, PSRAM metrics-destroy or POSIX-open exact symbol reject their ELF probes. Real `.043` signed packaging and mixed `.155`/`.043` per-device packaging both pass byte/signature checks. These are not real FreeType-parser, GPU or physical-device acceptance tests.
+
+Historical Band 11 integration results after unification: all four default/opt-in × `.139`/`.155` builds pass strict target verification. Under identical ARM compiler flags, the original and shared `.155` font objects have byte-identical `.text` (8,304 bytes), `.bss` (42,660 bytes), and `.rel.text` (440 bytes). Each exact AP passes 24 native font probes and 19 image regression probes. Static verification covers 122 function bodies / 9,494 instructions per target, six data records, and the supplied `.139` OTA/loader provenance. Host sanitizer tests additionally cover the post-commit traversal-overflow latch and reject a misleading same-mapping success afterward. These static/native checkpoints are separate from the latest user-reported acceptance and do not independently establish stock-restore or fault coverage.
 
 One optional dependency check remains blocked by an existing issue: `generate_band11_native_config.py --check` requires `errno_location` to be `restricted`, while the unchanged record is `managed`. No unrelated symbol policy or native-profile generation was changed to suppress that error; it does not block the direct-call module build/ELF verification.

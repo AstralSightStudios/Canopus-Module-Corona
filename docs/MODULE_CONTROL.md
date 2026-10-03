@@ -119,12 +119,12 @@ RHRS2<TAB>1<TAB><signed reloadResult><TAB><0|1 refreshPending><TAB><unsigned cha
 ```
 
 Framing is the same three-line, exactly 256-byte, zero-padded FNV-1a record
-specified above. `RHRS2`'s schema version is always `1`, including experimental
-font builds. `reloadResult`, `refreshPending` and `changed` retain v1 reload
-semantics; `changed` counts font families changed by this request, not rules.
-Nonexperimental builds retain result `0` / changed `0` for accepted reloads,
-even when refresh is pending. Experimental builds can return result `1` while
-pending and a negative font result after completion.
+specified above. `RHRS2`'s schema version remains `1`. All current builds include
+font reload: `reloadResult` can be `1` while its font stage is pending and negative
+on font failure. `refreshPending` and `changed` retain v1 reload semantics;
+`changed` counts committed font families changed by this request, not rules.
+Historical registry-only modules reported result `0` / changed `0` for accepted
+reloads even when refresh was pending; consumers may still accept those receipts.
 
 The added status fields come only from memory, captured together with pending
 and active count under the IRQ lock. Formatting and all file I/O happen after
@@ -153,8 +153,8 @@ The legacy request remains unchanged:
 resource-hook-reload-v1<TAB>[ng.lst.corona<TAB>]<revision><LF>
 ```
 
-The existing RHRS1 v5/v6 receipt remains unchanged, including its request echo,
-checksum and 256-byte zero padding:
+Current modules emit RHRS1 v6. Its framing, request echo, checksum and 256-byte
+zero padding are unchanged; parsers may also accept historical v5 receipts:
 
 ```text
 <reload-request-line><LF>
@@ -164,9 +164,10 @@ RHRS1<TAB><5-or-6><TAB><signed-result><TAB><refresh-pending><TAB><families-chang
 
 For v1, only the filenames changed; the original revision validation and
 package-optional form are preserved (no new 64-character revision limit).
-The descriptor query's RHQ1 v5 (40 bytes) / v6
-(48 bytes, experimental fonts) ABI is also unchanged. See [INSTALL.md](INSTALL.md)
-and [FONT_RELOAD_EXPERIMENT.md](FONT_RELOAD_EXPERIMENT.md) for reload semantics.
+The descriptor query now always emits RHQ1 v6 (48 bytes), preserving historical
+v5 field offsets in the first 40 bytes. A caller must provide 48 writable bytes;
+a 40-byte buffer is rejected without a partial write. See [INSTALL.md](INSTALL.md)
+and [FONT_RELOAD.md](FONT_RELOAD.md) for reload semantics.
 
 Only the latest observed valid request owns the shared response slot, across
 status, v1 reload and v2 reload. Delayed completion or refresh retries must not

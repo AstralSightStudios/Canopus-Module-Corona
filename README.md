@@ -46,9 +46,9 @@
 
 | 设备型号 | 固件版本 | 验证状态 | 图片重定向 | 快应用图标 | 日历动态图标 | 字体热重载 |
 |---|---|---|:---:|:---:|:---:|:---:|
-| **Xiaomi Band 11** | `4.100.155` | **实机已验证** | ✅ | ✅ | ✅ | ⚠️ 实验性 |
-| **Xiaomi Band 11** | `4.100.139` | 仿真验证 (默认) | ✅ | ✅ | ✅ | ⚠️ 实验性 |
-| **Xiaomi Band 10 Pro** | `3.101.043` | 仿真验证 | ✅ | ✅ | ✅ | ❌ |
+| **Xiaomi Band 11** | `4.100.155` | 实机通过（用户反馈） | ✅ | ✅ | ✅ | ✅ |
+| **Xiaomi Band 11** | `4.100.139` | 实机通过（用户反馈，默认目标） | ✅ | ✅ | ✅ | ✅ |
+| **Xiaomi Band 10 Pro** | `3.101.043` | 实机通过（用户反馈） | ✅ | ✅ | ✅ | ✅ |
 
 > **注意：** 各固件目标使用独立的 ELF、内存布局和地址白名单，**严禁混用**。  
 > 升级说明：本模块与旧版 `resource_hook` / `manager_resource_hook` 不兼容。安装前请先停用并完整重启手环。
@@ -62,6 +62,7 @@
 - **动态图标支持**：
   - **快应用包名图标**：支持 `@quickapp-icon/<package>` 声明，UI 线程只读查询真实应用注册记录并精准映射。
   - **原生日历图标**：命中日历背景或字体时安全调度系统级日历 BIN 图标重生成。
+- **字体热重载**：三个目标默认启用受检查的字体事务，保留现有字体 wrapper、fallback 与原厂路径基线，支持字体切换和规则移除后的原厂恢复。需使用不可变字体代次；GPU 故障恢复、框架重启及自定义字体 owner 不在支持范围内。
 - **优雅的配置与控制通道**：模块与 Manager 通过 `control.request` / `control.response` 进行全异步双向通信，无需重启手环即可无感热更新规则。
 - **独立容错与启动诊断**：配置缺失或语法错误自动退回 pass-through 零规则模式，绝不阻断系统启动；启动各阶段独立记入 `/data/offlinelog/resource-hook-startup.log`。
 
@@ -101,6 +102,9 @@
 sh scripts/build.sh xiaomi-band-11-4.100.155
 sh scripts/build.sh xiaomi-band-10-pro-3.101.043
 
+# Signed normal installer (font reload is included by default)
+python3 scripts/build-watchface.py --target xiaomi-band-10-pro-3.101.043
+
 # 2. 运行宿主单测 (包含紧凑算法差分与边界测试)
 python3 tests/test_delivery.py
 
@@ -126,7 +130,7 @@ python3 scripts/build-delivery.py dist/0.3.0-155 --target xiaomi-band-11-4.100.1
 - 🩺 [启动诊断日志与错误排查](docs/STARTUP_DIAGNOSTICS.md)
 - ⚙️ [底层生命周期边界、内存基准与固件仿真](docs/LIFECYCLE_AND_INTERNALS.md)
 - 📅 [原生日历图标动态重载机制](docs/CALENDAR_RELOAD.md)
-- 🔤 [实验性字体热重载说明与安全限制](docs/FONT_RELOAD_EXPERIMENT.md)
+- 🔤 [字体热重载、实机验收与安全限制](docs/FONT_RELOAD.md)
 - 🎨 [资源图片转换与解包工具说明](tools/RESOURCE_IMAGE.md)
 
 ---

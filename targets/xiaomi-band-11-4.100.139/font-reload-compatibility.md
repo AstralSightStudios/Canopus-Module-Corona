@@ -1,10 +1,19 @@
 # Q66 .139 compatibility with the checked .155 font transaction
 
+## Current device status
+
+The user now reports normal font-reload acceptance on all three supported
+firmwares, including `.139`: **USER_REPORTED_PASS**. The checked transaction is
+part of the ordinary build; no experimental gate or default stub remains.
+The report does not provide per-artifact hashes or independent GPU/fault/restore
+traces. See [the current font contract](../../docs/FONT_RELOAD.md). The binary
+findings below remain static evidence, separate from that user report.
+
 ## Decision
 
 **The same restricted prepare / validate / commit / retire / refresh algorithm is compatible with this exact .139 AP, after the explicit address substitutions below.** No native layout change or different ownership algorithm was found. This is a binary/native-instruction compatibility finding, **not physical-device acceptance**, a GPU-completion guarantee, or permission to remove the existing healthy, serialized UI / immutable-generation / no-restart restrictions.
 
-The original `src/font_reload_155.c` contract contains 45 native address identities: **36 remain identical; nine must change** (six code/callback addresses and three class addresses). A blanket relocation is incorrect. In particular, the unchanged outline-release callback calls a relocated cache-release function. Runtime integration now uses `src/font_reload.c` for both targets, with the differences selected in `include/resource_hook_target.h`. The opt-in gate remains; only its former `.155` restriction is removed. Default builds retain the stub.
+The original `src/font_reload_155.c` contract contains 45 native address identities: **36 remain identical; nine must change** (six code/callback addresses and three class addresses). A blanket relocation is incorrect. In particular, the unchanged outline-release callback calls a relocated cache-release function. Runtime integration now uses `src/font_reload.c` for both targets, with the differences selected in `include/resource_hook_target.h`. The original integration retained an opt-in gate and default stub. Both have now been removed following the all-target user-reported acceptance; the audited transaction is the default.
 
 See [machine-readable evidence](font-reload-compatibility.json), and the original [.155 investigation](../xiaomi-band-11-4.100.155/font-reload-investigation.md) and [.155 evidence](../xiaomi-band-11-4.100.155/evidence.json). This is a separate document; the pre-existing `.139/ui-reload-audit.md` edits were not modified.
 
@@ -164,6 +173,6 @@ Expected static output: `PASS 122 function bodies / 9494 instructions, 6 data re
 - `scripts/test-host.sh` passes the two-target ASan/UBSan matrix for default, explicit-disable, and experimental modes. `tests/test_font_reload_targets.py` independently binds the preprocessed implementation's 45 identities to this binary audit, rather than only testing a model against the same macros.
 - Each target passes 19 image-adapter regression probes; font unification does not change the image algorithm.
 - With user approval, the adjacent `.139` target pack adds 42 exact restricted records under `EVID-FONT-4139-001`, plus generated C/Rust metadata. Existing records cover the other three identities. All remain `STATIC_RECOVERED / PENDING`; address ranges and verifier policy are unchanged. Removing the allocator's record from a temporary pack copy causes the experimental ELF to fail strict verification.
-- Experimental ELF snapshots are `build/resource-hook-font-experimental-139.elf` and `build/resource-hook-font-experimental-155.elf`. They are development artifacts, not signed installer packages. The existing experimental watchface builder remains `.155`-only.
+- Experimental ELF snapshots are `build/resource-hook-font-experimental-139.elf` and `build/resource-hook-font-experimental-155.elf`. They are development artifacts, not signed installer packages. These historical artifact names predate the current normal `scripts/build-watchface.py`, which supports all three exact targets.
 
 No `.139` physical-device acceptance was performed.

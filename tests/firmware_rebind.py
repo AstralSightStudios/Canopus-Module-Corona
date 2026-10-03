@@ -25,6 +25,7 @@ PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
 APP_ROOT = '/data/quickapp/files/ng.lst.corona/'
 CONFIG_PATH = APP_ROOT + 'mappings.tsv'
 THEME_ROOT = APP_ROOT + 'themes/'
+STARTUP_LOG_PATH = '/data/offlinelog/resource-hook-startup.log'
 
 
 class Rebind(unittest.TestCase):
@@ -54,11 +55,11 @@ class Rebind(unittest.TestCase):
         m.disk[CONFIG_PATH] = '/resource/\tthemes/current/\n'.encode()
         m.disk[THEME_ROOT + 'current/a.bin'] = b'mapped file'
         # The bootstrap VFS deliberately accepts only Supervisor-owned paths.
-        # Extend it locally for the module's app-scoped files, retaining the
-        # same descriptor, partial-read/write and close/commit model.
+        # Extend it locally for app-scoped files and the exact startup log,
+        # retaining the same descriptor, partial-read/write and close/commit model.
         def opened():
             path = m.string(m.reg(0))
-            if not path.startswith(APP_ROOT):
+            if not path.startswith(APP_ROOT) and path != STARTUP_LOG_PATH:
                 return m.open()
             if m.reg(1) & 4:
                 data = bytearray()
@@ -94,6 +95,33 @@ class Rebind(unittest.TestCase):
         self.fail_timer_period = None
         self.bind(0xc3abd20, self.create_timer)
         self.bind(0xc3abe70, self.delete_timer)
+        self.empty_font_roots()
+
+    def empty_font_roots(self):
+        """Synthetic empty audited roots, not an intercepted font adapter.
+
+        The real signed rh_font_reload validates these roots/registry and returns
+        zero changes. No native font parse, GPU work or device coverage is claimed;
+        nonempty font ownership is exercised by the separate firmware font probes.
+        RH_FW_FR_OUTLINE_EVENT is shared by the exact .139/.155 target header.
+        """
+        m = self.m
+        ui, manager, context = 0x3c7d4000, 0x3c7d0000, 0x3c7d5000
+        ft, face_cache = 0x3c7d6000, 0x3c7d7000
+        for address, size in ((ui, 64), (manager, 1024), (context, 32),
+                              (ft, 4), (face_cache, 64)):
+            m.uc.mem_write(address, bytes(size))
+        m.word(fw(0x200bd1e8), ui)
+        m.word(ui + 28, manager)
+        m.word(manager, 48)          # empty active-record list
+        m.word(manager + 12, 40)     # empty wrapper list
+        m.word(manager + 24, 8)      # empty {family, path} registry
+        m.word(fw(0x200bd3ec), context)
+        m.word(context, ft)          # nonnull FT-library identity
+        m.word(context + 4, 8)       # empty context list
+        m.word(context + 16, 0x0c3981d1)  # RH_FW_FR_OUTLINE_EVENT
+        m.word(context + 20, 256)    # audited mmax range 1..1024
+        m.word(context + 24, face_cache)
 
     def bind(self, addr, callback):
         hook(self.m, addr, callback)
@@ -153,9 +181,27 @@ class Rebind(unittest.TestCase):
 
     def status_words(self):
         m, writer, output = self.m, 0x3c730000, 0x3c731000
-        m.uc.mem_write(writer, struct.pack('<6I', output, 40, 0, 0, 1, 1))
+        m.uc.mem_write(writer, struct.pack('<6I', output, 48, 0, 0, 1, 1))
         self.assertEqual(m.call(m.word(self.descriptor + 140), writer), 0)
-        return struct.unpack('<10I', m.uc.mem_read(output, 40))
+        return struct.unpack('<12I', m.uc.mem_read(output, 48))
+
+    def finish_refresh(self):
+        # activate() may retire image caches but cannot run the font/UI stage.
+        self.assertEqual(self.status_words()[10:], (1, 1))
+        self.tick()
+        self.assertEqual(self.status_words()[8:], (0, 0, 0, 0))
+
+    def response_fields(self, signal):
+        receipt = self.m.disk[APP_ROOT + 'control.response']
+        self.assertEqual(len(receipt), 256)
+        rows = receipt.rstrip(b'\0').splitlines(keepends=True)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0], signal)
+        checksum = 2166136261
+        for byte in rows[0] + rows[1]:
+            checksum = ((checksum ^ byte) * 16777619) & 0xffffffff
+        self.assertEqual(rows[2], str(checksum).encode() + b'\n')
+        return rows[1].rstrip(b'\n').split(b'\t')
 
     def restore(self):
         return self.command(0x4351000a)
@@ -251,26 +297,67 @@ class Rebind(unittest.TestCase):
         self.assertIsNotNone(self.descriptor)
         callback = m.word(self.descriptor + 140)
         writer, output = 0x3c730000, 0x3c731000
-        m.uc.mem_write(writer, struct.pack('<6I', output, 40, 0, 0, 1, 1))
+        m.uc.mem_write(writer, struct.pack('<6I', output, 48, 0, 0, 1, 1))
         self.assertEqual(m.call(callback, writer), 0)
-        # 10 u32: magic, status version 5, installed, rule count, redirected,
-        # fallback, image-cache retirements, full-screen redraws, page rebuilds,
-        # font retargets (the last four 0 here: this boot fixture has no image
-        # cache, no display, no page stack and no font manager).
-        self.assertEqual(struct.unpack('<10I', m.uc.mem_read(output, 40)),
-                         (0x31514852, 5, 1, 1, 0, 0, 0, 0, 0, 0))
-        self.assertEqual(m.word(writer + 8), 40)
+        # RHQ1 v6: previous ten counters, font result and font pending.
+        # No display/caches yet: the scheduled UI stage remains pending.
+        self.assertEqual(struct.unpack('<12I', m.uc.mem_read(output, 48)),
+                         (0x31514852, 6, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1))
+        self.assertEqual(m.word(writer + 8), 48)
         self.assertEqual(m.word(writer + 16), 2)
         self.assertEqual(m.word(writer + 20), 2)
-        m.uc.mem_write(output, b'x' * 40)
-        m.uc.mem_write(writer, struct.pack('<6I', output, 39, 0, 0, 1, 1))
-        self.assertEqual(m.call(callback, writer), 0xffffffff)
-        self.assertEqual(bytes(m.uc.mem_read(output, 40)), b'x' * 40)
-        self.assertEqual(m.word(writer + 8), 0)
+        for capacity, used, state, buffer in ((0, 0, 1, output),
+                (39, 0, 1, output), (40, 0, 1, output), (47, 0, 1, output),
+                (48, 1, 1, output), (48, 49, 1, output),
+                (48, 0, 2, output), (48, 0, 1, 0)):
+            with self.subTest(capacity=capacity, used=used, state=state, buffer=buffer):
+                m.uc.mem_write(output, b'x' * 64)
+                fields = (buffer, capacity, used, 0, state, 1)
+                m.uc.mem_write(writer, struct.pack('<6I', *fields))
+                self.assertEqual(m.call(callback, writer), 0xffffffff)
+                self.assertEqual(bytes(m.uc.mem_read(output, 64)), b'x' * 64)
+                self.assertEqual(struct.unpack('<6I', m.uc.mem_read(writer, 24)), fields)
+        self.assertEqual(m.call(callback, 0), 0xffffffff)
+        self.tick()  # no display: still pending, not a fabricated font success
+        self.assertEqual(self.status_words()[10:], (1, 1))
+        self.graphics()
+        self.finish_refresh()
+
+    def test_reload_and_status_receipts_track_pending_ui_completion(self):
+        m, disp = self.m, self.graphics()
+        self.assertEqual(self.restore(), (5, 0))
+        self.finish_refresh()
+        signal = b'resource-hook-reload-v2\tng.lst.corona\tfont-ui-1\n'
+        m.disk[APP_ROOT + 'control.request'] = signal
+        m.disk[APP_ROOT + 'control.response'] = bytes(256)
+        m.disk[CONFIG_PATH] = b'/resource/\tthemes/next/\n'
+        m.word(disp + 696, 0)  # accept map, but cannot run the UI stages yet
+        self.tick(1000)
+        self.assertEqual(self.status_words()[10:], (1, 1))
+        self.assertEqual(self.response_fields(signal),
+                         [b'RHRS2', b'1', b'1', b'1', b'0', b'running', b'0', b'1'])
+        status = b'resource-hook-status-v1\tng.lst.corona\tfont-ui-status\n'
+        m.disk[APP_ROOT + 'control.request'] = status
+        self.tick(1000)
+        self.assertEqual(self.response_fields(status),
+                         [b'RHST1', b'1', b'running', b'0', b'1', b'1'])
+        m.word(disp + 696, disp + 0x800)
+        self.finish_refresh()
+        self.assertEqual(self.response_fields(status),
+                         [b'RHST1', b'1', b'running', b'0', b'1', b'0'])
+        self.assertEqual(self.status_words()[6:10],
+                         (2 * self.retirement_round, 2, 0, 0))
+        m.disk[APP_ROOT + 'control.request'] = signal
+        self.tick(1000)
+        self.assertEqual(self.response_fields(signal),
+                         [b'RHRS2', b'1', b'0', b'0', b'0', b'running', b'0', b'1'])
 
     def test_activate_completes_supported_targeted_retirement(self):
         self.graphics()
         self.assertEqual(self.restore(), (5, 0))
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 0))
+        self.assertEqual(self.timer_creates, {50: 1, 1000: 1})
+        self.finish_refresh()
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_full_redraw_is_recognised_on_a_rotated_display(self):
@@ -281,6 +368,7 @@ class Rebind(unittest.TestCase):
         disp = self.graphics()
         m.word(disp + 756, 2)            # rotated 90/270
         self.assertEqual(self.restore(), (5, 0))
+        self.finish_refresh()
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
         self.assertEqual(m.word(disp + 604), 1)
         # Clipped with the accessors, so the axes are swapped in raw-field terms.
@@ -307,10 +395,12 @@ class Rebind(unittest.TestCase):
         m = self.m
         disp = self.graphics()
         self.assertEqual(self.restore(), (5, 0))
+        self.finish_refresh()
         self.assertEqual(self.status_words()[7], 1)
         self.assertEqual(m.word(disp + 604), 1)
         self.assertEqual(struct.unpack('<4i', m.uc.mem_read(disp + 60, 16)), (0, 0, 191, 489))
-        self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
+        self.assertEqual(self.timer_creates, {50: 1, 1000: 1})
+        self.assertEqual(self.timer_deletes, {50: 1, 1000: 0})
 
     def test_missing_screen_not_confused_with_nonzero_dpi(self):
         disp = self.graphics()
@@ -365,16 +455,27 @@ class Rebind(unittest.TestCase):
 
     def test_watch_timer_failure_does_not_undo_completed_refresh(self):
         self.graphics()
+        # Test a resident rebind: Supervisor retains BOOT_RESIDENT after a
+        # rebind error and can retry. Initial activation failure instead marks
+        # the slot FAILED, which RESTORE intentionally does not reactivate.
+        self.assertEqual(self.restore(), (5, 0))
+        self.finish_refresh()
+        old_watcher, = self.timers_for(1000)
         self.fail_timer_period = 1000
         state, error = self.restore()
         self.assertEqual(state, 6)
         self.assertNotEqual(error, 0)
         self.assertNotEqual(self.m.word(0x200bd3c4), 0xc3a6195)
-        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
-        self.assertEqual(self.timer_creates, {50: 0, 1000: 0})
+        self.finish_refresh()
+        self.assertEqual(self.status_words()[6:8], (2 * self.retirement_round, 2))
+        self.assertEqual(self.timer_creates, {50: 2, 1000: 1})
         self.fail_timer_period = None
         self.assertEqual(self.restore(), (5, 0))
-        self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
+        self.finish_refresh()
+        self.assertEqual(self.status_words()[6:8], (3 * self.retirement_round, 3))
+        self.assertEqual(self.timer_creates, {50: 3, 1000: 2})
+        self.tick(1000, timer=old_watcher)
+        self.assertEqual(len(self.timers_for(1000)), 1)
 
     def test_held_cache_entry_retired_then_freed_on_last_release(self):
         m = self.m
@@ -430,6 +531,7 @@ class Rebind(unittest.TestCase):
         m.call(fw(0xc8b9790), cache)
         self.assertEqual(m.word(entry + 4), 0)
         self.assertEqual(freed, [data, data])  # payload callback, allocation free
+        self.finish_refresh()
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
 
     def test_missing_config_keeps_empty_hook_and_watcher_resident(self):
@@ -442,7 +544,7 @@ class Rebind(unittest.TestCase):
         self.assertEqual(self.restore(), (5, 0))
         resident_hook = m.word(0x200bd3c4)
         self.assertNotEqual(resident_hook, 0xc3a6195)
-        self.assertEqual(self.status_words()[2:], (1, 0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(self.status_words()[2:], (1, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
         # Creating config alone does not mutate the locked snapshot on rebind.
         # A control-file revision makes the already resident hook adopt it.
@@ -457,17 +559,40 @@ class Rebind(unittest.TestCase):
         self.assertEqual(m.word(0x200bd3c4), resident_hook)
         self.assertEqual(self.status_words()[3], 1)
         self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
+        self.assertEqual(self.status_words()[8:], (0, 0, 0, 0))
+        self.assertEqual(self.response_fields(m.disk[APP_ROOT + 'control.request']),
+                         [b'RHRS1', b'6', b'0', b'0', b'0'])
 
     def test_config_open_io_failure_is_not_noop(self):
         del self.m.disk[CONFIG_PATH]
         errno_cell = 0x3c732000
         self.m.word(errno_cell, 5)
         self.bind(0xc349538, lambda: errno_cell)
-        state, error = self.restore()
-        self.assertEqual(state, 6)
-        self.assertNotEqual(error, 0)
-        self.assertEqual(self.m.word(0x200bd3c4), 0xc3a6195)
-        self.assertEqual(self.timer_creates, {50: 0, 1000: 0})
+        # prepare() deliberately leaves a repairable pass-through resident.
+        # Unlike ENOENT this must latch/report the I/O error, not claim a no-op.
+        self.assertEqual(self.restore(), (5, 0))
+        resident_hook = self.m.word(0x200bd3c4)
+        self.assertNotEqual(resident_hook, 0xc3a6195)
+        self.assertEqual(self.status_words()[2:], (1, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(self.timer_creates, {50: 0, 1000: 1})
+        self.assertIn(b'config.fallback rc=-2005 errno=5', self.m.disk[STARTUP_LOG_PATH])
+        signal = b'resource-hook-status-v1\tng.lst.corona\tconfig-io-error\n'
+        self.m.disk[APP_ROOT + 'control.request'] = signal
+        self.m.disk[APP_ROOT + 'control.response'] = bytes(256)
+        self.tick(1000)
+        self.assertEqual(self.response_fields(signal),
+                         [b'RHST1', b'1', b'config_error', b'-2005', b'0', b'0'])
+        # A normal revision repairs the same resident hook and clears the error.
+        self.m.disk[CONFIG_PATH] = b'/resource/\tthemes/current/\n'
+        repaired = b'resource-hook-reload-v2\tng.lst.corona\tconfig-io-repaired\n'
+        self.m.disk[APP_ROOT + 'control.request'] = repaired
+        self.graphics()
+        self.tick(1000)
+        self.assertEqual(self.m.word(0x200bd3c4), resident_hook)
+        self.assertEqual(self.status_words()[3], 1)
+        self.assertEqual(self.status_words()[6:8], (self.retirement_round, 1))
+        self.assertEqual(self.response_fields(repaired),
+                         [b'RHRS2', b'1', b'0', b'0', b'0', b'running', b'0', b'1'])
 
     def test_unknown_slot_is_not_overwritten(self):
         self.assertEqual(self.restore(), (5, 0))

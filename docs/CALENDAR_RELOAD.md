@@ -110,12 +110,13 @@ Native generation has **no reliable success return ABI**. In particular, Band 11
 writes the system file nontransactionally and ignores its writer return; storage
 or allocation failures can leave an incomplete/missing output. A completed stage
 means native work was requested, not verified pixels, successful file writing or
-resource adoption. Status ABI remains RHQ1 v5 (v6 for experimental fonts); no
+resource adoption. Status ABI is RHQ1 v6 in all current builds; no
 calendar-success counter is invented.
 
-Default font retargeting does not replace retained font wrappers. Generating a
-calendar after that stage does not certify adoption of a new font; experimental
-font transactions retain their existing healthy-UI/device restrictions. The
+Default font transactions now replace audited retained font wrappers before
+calendar generation. A completed calendar stage does not independently certify
+font or pixel adoption; the [font contract](FONT_RELOAD.md) retains its healthy-UI,
+immutable-generation and unsupported-recovery restrictions. The
 rendering flag is not a general GPU-idle proof. The module adds no forced GPU
 wait/reset, global animation teardown or full UI restart.
 

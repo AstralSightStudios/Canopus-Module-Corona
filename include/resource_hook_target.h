@@ -10,6 +10,48 @@
  * targets/xiaomi-band-10-pro-3.101.043/ui-reload-audit.md. */
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 /* Exact Xiaomi Band 10 Pro 3.101.043 identities. */
+/* Font callbacks use their exact startup-copied PSRAM identities. */
+#define RH_FW_FR_METRICS 0x1c056e15u
+#define RH_FW_FR_OUTLINE 0x1c0572a5u
+#define RH_FW_FR_GLYPH_RELEASE 0x1c057289u
+#define RH_FW_FR_CONTEXT_SLOT 0x20103374u
+#define RH_FW_FR_DRAW_SLOT 0x201032a4u
+#define RH_FW_FR_VECTOR_SLOT 0x2013eae0u
+#define RH_FW_FR_ALLOC 0x0c16daa8u
+#define RH_FW_FR_FREE 0x0c16dae4u
+#define RH_FW_FR_OUTLINE_EVENT 0x1c046d09u
+#define RH_FW_FR_FACE_COMPARE 0x1c05682du
+#define RH_FW_FR_FACE_CREATE 0x1c056719u
+#define RH_FW_FR_FACE_DESTROY 0x1c0566edu
+#define RH_FW_FR_METRICS_COMPARE 0x1c056f05u
+#define RH_FW_FR_METRICS_CREATE 0x1c056d25u
+#define RH_FW_FR_METRICS_DESTROY 0x1c056d19u
+#define RH_FW_FR_OUTLINE_COMPARE 0x1c057259u
+#define RH_FW_FR_OUTLINE_CREATE 0x1c057635u
+#define RH_FW_FR_OUTLINE_DESTROY 0x1c057331u
+#define RH_FW_FR_INITIALIZED_SLOT 0x20103178u
+#define RH_FW_FR_STYLE_ENABLED_SLOT 0x2010319cu
+#define RH_FW_FR_DISPLAY_LIST 0x2010317cu
+#define RH_FW_FR_VG_DISPATCH 0x1c045361u
+#define RH_FW_FR_GLYPH_PENDING_FREE 0x1c046cfdu
+#define RH_FW_FR_IMAGE_PENDING_FREE 0x1c04d259u
+#define RH_FW_FR_GRADIENT_PENDING_FREE 0x1c0493bdu
+#define RH_FW_FR_VG_SLOT 0x2013eadcu
+#define RH_FW_FR_SW_DISPATCH 0x1c03debdu
+#define RH_FW_FR_CACHE_INIT 0x0c272d38u
+#define RH_FW_FR_DROP_FACE_ID 0x0c163be8u
+#define RH_FW_FR_CACHE_ACQUIRE 0x0c1666d0u
+#define RH_FW_FR_CACHE_ACQUIRE_CREATE 0x0c166740u
+#define RH_FW_FR_FT_MUL_FIX 0x0c33d8bcu
+#define RH_FW_FR_LIST_REMOVE 0x0c169ce8u
+#define RH_FW_FR_FACE_SIZE 24u
+#define RH_FW_FR_VECTOR_DROP_SECOND_ARG 1
+#define RH_FW_VECTOR_CLASS 0x2cdba868u
+#define RH_FW_VECTOR_COMPARE 0x0ca657edu
+#define RH_FW_VECTOR_DESTROY 0x0ca6581du
+#define RH_FW_VECTOR_DROP 0x0ca65c25u
+#define RH_FW_FONT_SET_PIXEL_SIZE 0x0c33ef59u
+
 #define RH_CALENDAR_BACKGROUND "/resource/app/perpetual_calendar/calendar_background_icon.bin"
 #define RH_CALENDAR_OUTPUT "/resource/app/perpetual_calendar/launcher.bin"
 #define RH_CALENDAR_APP_ID "com.xiaomi.miwear.perpetual_calendar"
@@ -91,6 +133,42 @@
 #endif
 
 #if !(defined(RH_TARGET_1043) && RH_TARGET_1043)
+/* Shared .139/.155 font transaction identities, independently byte-audited. */
+#define RH_FW_FR_FACE_SIZE 28u
+#define RH_FW_FR_VECTOR_DROP_SECOND_ARG 0
+#define RH_FW_FR_METRICS 0x0c396b5du
+#define RH_FW_FR_OUTLINE 0x0c3a7c45u
+#define RH_FW_FR_GLYPH_RELEASE 0x0c3a0993u
+#define RH_FW_FR_CONTEXT_SLOT 0x200bd3ecu
+#define RH_FW_FR_DRAW_SLOT 0x200bd318u
+#define RH_FW_FR_VECTOR_SLOT 0x200d3280u
+#define RH_FW_FR_ALLOC 0x0c3abe20u
+#define RH_FW_FR_FREE 0x0c3abe58u
+#define RH_FW_FR_OUTLINE_EVENT 0x0c3981d1u
+#define RH_FW_FR_FACE_COMPARE 0x0c396785u
+#define RH_FW_FR_FACE_CREATE 0x0c3967b5u
+#define RH_FW_FR_FACE_DESTROY 0x0c396b25u
+#define RH_FW_FR_METRICS_COMPARE 0x0c39fd9bu
+#define RH_FW_FR_METRICS_CREATE 0x0c3a5ef1u
+#define RH_FW_FR_METRICS_DESTROY 0x0c39fd95u
+#define RH_FW_FR_OUTLINE_COMPARE 0x0c39fdcdu
+#define RH_FW_FR_OUTLINE_CREATE 0x0c3a8bb9u
+#define RH_FW_FR_OUTLINE_DESTROY 0x0c3a09f5u
+#define RH_FW_FR_INITIALIZED_SLOT 0x200bd1ecu
+#define RH_FW_FR_STYLE_ENABLED_SLOT 0x200bd210u
+#define RH_FW_FR_DISPLAY_LIST 0x200bd1f0u
+#define RH_FW_FR_VG_DISPATCH 0x0c3913edu
+#define RH_FW_FR_GLYPH_PENDING_FREE 0x0c399b63u
+#define RH_FW_FR_IMAGE_PENDING_FREE 0x0c395be1u
+#define RH_FW_FR_GRADIENT_PENDING_FREE 0x0c395bd1u
+#define RH_FW_FR_VG_SLOT 0x200d327cu
+#define RH_FW_FR_SW_DISPATCH 0x0c3948adu
+#define RH_FW_FR_CACHE_INIT 0x0c3a9e48u
+#define RH_FW_FR_DROP_FACE_ID 0x0c39a424u
+#define RH_FW_FR_CACHE_ACQUIRE 0x0c3a3860u
+#define RH_FW_FR_CACHE_ACQUIRE_CREATE 0x0c3a7b78u
+#define RH_FW_FR_FT_MUL_FIX 0x0c424304u
+#define RH_FW_FR_LIST_REMOVE 0x0c3a46dcu
 /* Native launcher calendar generation/publication have the same entries in
  * both exact APs; snapshot leaves/literals are individually target-specific. */
 #define RH_CALENDAR_BACKGROUND "/resource/app/perpetual_calendar/launcher_icon.bin"

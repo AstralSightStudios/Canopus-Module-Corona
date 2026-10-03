@@ -1,5 +1,6 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_quickapp.h"
+#include "resource_hook_font_reload.h"
 #include "canopus_abi.h"
 #include "canopus_module_registration.h"
 #include <assert.h>
@@ -89,7 +90,6 @@ int rh_platform_refresh_calendar(void) {
     calendar_calls++;
     return calendar_rc;
 }
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
 static unsigned font_calls, font_disabled, font_changes;
 static int font_rc;
 static char last_font_path[RH_PATH];
@@ -102,7 +102,6 @@ int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
     return font_disabled ? -2099 : font_rc;
 }
 void rh_font_reload_disable(void) { assert(!locked); font_disabled++; }
-#endif
 static int backend(void *d, const char *p, int mode) {
     assert(d == &driver && mode == 2);
     assert(!strcmp(p, backend_expected));
@@ -456,15 +455,11 @@ static int test_control_status(const char *startup) {
     assert(!active_timers(1000u) && !result_writes);
     assert(d->activate(NULL) == 0);
     fail_open = 0;
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     font_rc = -2090; /* A font-refresh rejection is not a config error. */
-#endif
     fire_timers(50u);
     timers = timers_created; draws = redraws;
     query_status("resource-hook-status-v1\tng.lst.corona\tfirst._-0\n", 0, count, 0);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     font_rc = 0;
-#endif
     assert(timers_created == timers && redraws == draws && active_timers(1000u) == 1);
     writes = result_writes;
     fire_timers(1000u);
@@ -589,11 +584,7 @@ static int test_control_reload_status(void) {
         "resource-hook-reload-v2\tng.lst.corona\tid\nextra\n",
         "resource-hook-reload-v2\tng.lst.corona\t\200\n"
     };
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     const int pending_result = 1;
-#else
-    const int pending_result = 0;
-#endif
     assert(d->activate(NULL) == 0);
     fire_timers(50u);
     control_config = config;
@@ -617,11 +608,7 @@ static int test_control_reload_status(void) {
     strcpy(longest, "resource-hook-reload-v1\t"); i = (unsigned)strlen(longest);
     memset(longest + i, 'y', 127u - i); strcpy(longest + 127u, "\n");
     control_signal = longest; fire_timers(1000u);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     assert_result(longest, "RHRS1\t6\t0\t0\t0\n");
-#else
-    assert_result(longest, "RHRS1\t5\t0\t0\t0\n");
-#endif
     writes = result_writes; longest[127] = 'y'; strcpy(longest + 128u, "\n");
     fire_timers(1000u); assert(result_writes == writes);
 
@@ -637,16 +624,10 @@ static int test_control_reload_status(void) {
     opens = control_opens; writes = result_writes;
     fire_timers(1000u);
     assert(control_opens == opens && result_writes == writes);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     font_rc = -2090;
-#endif
     redraw_ready = 1; fire_timers(50u);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     assert_reload_status(-2090, 0, 0, 0, 2); /* Font failure is still running. */
     font_rc = 0;
-#else
-    assert_reload_status(0, 0, 0, 0, 2);
-#endif
     /* Failed config keeps the active count; no status round trip is needed. */
     control_signal = "resource-hook-reload-v2\tng.lst.corona\tbad-config\n";
     control_config = "/resource/\t/outside/\n";
@@ -669,11 +650,7 @@ static int test_control_reload_status(void) {
     redraw_ready = 1; fire_timers(50u);
     assert(!memcmp(saved, result_record, sizeof(saved)));
     fire_timers(1000u); fire_timers(50u);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     assert_result(control_signal, "RHRS1\t6\t0\t0\t0\n");
-#else
-    assert_result(control_signal, "RHRS1\t5\t0\t0\t0\n");
-#endif
     opens = control_opens; allocs = allocations; draws = redraws; writes = result_writes;
     fire_timers(1000u);
     assert(control_opens == opens && allocations == allocs && redraws == draws && result_writes == writes);
@@ -738,7 +715,6 @@ static int test_control_reload_status(void) {
     control_signal = "resource-hook-reload-v2\tng.lst.corona\tclear\n";
     control_config = ""; fire_timers(1000u); fire_timers(50u);
     assert_reload_status(0, 0, 0, 0, 0);
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
     /* Exercise maximum-width numeric serialization with the longest v2 ID. */
     strcpy(longest, "resource-hook-reload-v2\tng.lst.corona\t");
     i = (unsigned)strlen(longest);
@@ -751,7 +727,6 @@ static int test_control_reload_status(void) {
     longest[i] = 'w'; control_config = ""; font_rc = INT32_MIN;
     fire_timers(1000u); fire_timers(50u);
     assert_reload_status(INT32_MIN, 0, 0, 0, 0);
-#endif
     assert(!persistent_allocs && allocations == frees && !locked);
     assert(active_timers(1000u) == 1 && !active_timers(50u));
     puts("control reload v2 snapshots, validation, v1 compatibility, retries and ownership passed");
@@ -1069,7 +1044,6 @@ static int test_startup_fallback_then_reload(const char *fault) {
     printf("startup fallback (%s), Manager repair and last-known-good passed\n", fault);
     return 0;
 }
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
 static void font_status(int32_t result, uint32_t pending, uint32_t changed) {
     struct canopus_status_writer_v1 w;
     unsigned char status[48];
@@ -1081,10 +1055,10 @@ static void font_status(int32_t result, uint32_t pending, uint32_t changed) {
     assert(!canopus_status_writer_init(&w, status, 47));
     assert(canopus_module_descriptor.query(&w) == -1 && !w.used);
 }
-static int test_experimental_font_integration(void) {
+static int test_font_integration(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned before;
-    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0-font-exp"));
+    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
     font_status(0, 0, 0);
     font_rc = 1;
     assert(d->activate(NULL) == 0);
@@ -1164,10 +1138,9 @@ static int test_experimental_font_integration(void) {
     font_status(-2099, 0, 6);
     assert(!retargets && !locked);
     assert(allocations == frees + persistent_allocs);
-    puts("experimental font scheduling, busy retry, error status, restore and restart latch passed");
+    puts("font scheduling, busy retry, error status, restore and restart latch passed");
     return 0;
 }
-#endif
 static void test_relative_config(void) {
     static const char portable[] =
         "/resource/\tthemes/current/\r\n"
@@ -1516,10 +1489,8 @@ int main(int argc, char **argv) {
         return test_compact_snapshots();
     if (argc == 2 && !strcmp(argv[1], "--startup-diagnostics"))
         return test_startup_diagnostics();
-#if defined(RH_EXPERIMENTAL_FONT_RELOAD) && RH_EXPERIMENTAL_FONT_RELOAD
-    if (argc == 2 && !strcmp(argv[1], "--experimental-fonts"))
-        return test_experimental_font_integration();
-#endif
+    if (argc == 2 && !strcmp(argv[1], "--font-reload"))
+        return test_font_integration();
     if (argc == 2 && !strcmp(argv[1], "--empty-startup"))
         return test_empty_startup_then_theme_reload();
     if (argc == 3 && !strcmp(argv[1], "--startup-fallback"))
@@ -1528,7 +1499,7 @@ int main(int argc, char **argv) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     struct canopus_status_writer_v1 w;
     unsigned char status[48];
-    unsigned before;
+    unsigned before, fonts_before;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 #define EXPECTED_FILES_ROOT "/data/files/ng.lst.corona/"
 #define FOREIGN_THEME_ROOT "/data/quickapp/files/ng.lst.corona/themes/"
@@ -1555,6 +1526,7 @@ int main(int argc, char **argv) {
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
     assert(!strcmp((const char *)d->module_id, "corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
+    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-10-pro-3.101.043"));
 #elif defined(RH_TARGET_155) && RH_TARGET_155
@@ -1566,11 +1538,12 @@ int main(int argc, char **argv) {
     assert(d->query(NULL) == -1);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w));
-    assert(w.used == 40 && u32(status) == 0x31514852u && u32(status + 4) == 5);
+    assert(w.used == 48 && u32(status) == 0x31514852u && u32(status + 4) == 6);
     assert(u32(status + 8) == 0 && u32(status + 12) == 0 && u32(status + 24) == 0 &&
-           u32(status + 28) == 0 && u32(status + 32) == 0 && u32(status + 36) == 0);
+           u32(status + 28) == 0 && u32(status + 32) == 0 && u32(status + 36) == 0 &&
+           u32(status + 40) == 0 && u32(status + 44) == 0);
     assert(d->query(&w) == -1);
-    assert(!canopus_status_writer_init(&w, status, 39));
+    assert(!canopus_status_writer_init(&w, status, 47));
     memset(status, 0xab, sizeof(status));
     assert(d->query(&w) == -1 && w.used == 0 && status[0] == 0xab);
 
@@ -1644,15 +1617,24 @@ int main(int argc, char **argv) {
     image_cache_ready = 1;
     redraw_ready = 1;
     slot = backend;
-    assert(d->activate(NULL) == 0 && slot != backend && image_drops == 1 && redraws == 1);
+    fonts_before = font_calls;
+    assert(d->activate(NULL) == 0 && slot != backend && image_drops == 1 && !redraws);
+    assert(font_calls == fonts_before && font_disabled == 1 && active_timers(50u) == 1);
+    font_status(-2014, 1, 0);
+    fire_timers(50u);
+    assert(redraws == 1 && font_calls == fonts_before + 1 && !active_timers(50u));
+    font_status(-2099, 0, 0);
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
     assert(d->prepare(NULL) == -2004 && config_opens == before);
     fail_open = 1;
-    assert(d->activate(NULL) == 0 && config_opens == before && image_drops == 2 && redraws == 2);
+    assert(d->activate(NULL) == 0 && config_opens == before && image_drops == 2 && redraws == 1);
+    fire_timers(50u);
+    assert(redraws == 2 && !active_timers(50u));
     slot = backend;
     assert(d->activate(NULL) == 0 && slot != backend && config_opens == before);
-    assert(image_drops == 3 && redraws == 3);
-    fire_timers(50u);  /* a retry that completed manually self-deletes on its next tick */
+    assert(image_drops == 3 && redraws == 2 && active_timers(50u) == 1);
+    fire_timers(50u);
+    assert(redraws == 3);
     assert(!active_timers(50u));
     assert(d->stop(NULL) == CANOPUS_RESULT_REBOOT_REQUIRED);
     assert(d->deactivate(NULL) == CANOPUS_RESULT_REBOOT_REQUIRED);
@@ -1664,7 +1646,8 @@ int main(int argc, char **argv) {
     assert(u32(status + 24) == image_drops && image_drops == 3);
     assert(u32(status + 28) == redraws && redraws == 3);
     assert(u32(status + 32) == rebuilds && rebuilds == 0);
-    assert(u32(status + 36) == retargets && retargets == 1);
+    assert(u32(status + 36) == 0 && !retargets);
+    assert((int32_t)u32(status + 40) == -2099 && !u32(status + 44));
     /* Busy UI: requests coalesce and the cache isn't touched mid-render. */
     redraw_ready = 0;
     assert(d->activate(NULL) == 0 && active_timers(50u) == 1);
@@ -1696,8 +1679,11 @@ int main(int argc, char **argv) {
     fire_timers(1000u);
     /* Unsupported-target adapters complete a repaint, never claim retirement. */
     unsupported = 1;
-    assert(d->activate(NULL) == 0 && !active_timers(50u));
-    assert(image_drops == 5 && redraws == 6 && metadata_refreshes == before + 1);
+    assert(d->activate(NULL) == 0 && active_timers(50u) == 1);
+    assert(image_drops == 5 && redraws == 5 && metadata_refreshes == before + 1);
+    fire_timers(50u);
+    assert(image_drops == 5 && redraws == 6 && metadata_refreshes == before + 1 &&
+           !active_timers(50u));
     unsupported = 0;
     fire_timers(1000u);
     /* OOM remains visible, but doesn't remove the resident redirect. */
