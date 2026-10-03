@@ -201,9 +201,9 @@ export default {
 .resource-path {
   width: 172px;
   color: #FFFFFF;
-  font-size: 32px;
-  font-weight: bold;
-  lines: 1;
+  font-size: 28px;
+  font-weight: normal;
+  lines: 0;
   text-overflow: ellipsis;
 }
 
