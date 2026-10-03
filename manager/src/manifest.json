@@ -1,11 +1,13 @@
 {
   "package": "ng.lst.corona",
   "name": "Corona",
-  "versionName": "1.2.3",
-  "versionCode": 6,
+  "versionName": "1.2.4",
+  "versionCode": 7,
   "minPlatformVersion": 1010,
   "icon": "/common/logo.png",
-  "deviceTypeList": ["watch"],
+  "deviceTypeList": [
+    "watch"
+  ],
   "features": [
     {
       "name": "system.app"
