@@ -3,7 +3,7 @@
 <template>
   <div class="page" ontouchstart="preserveForUser">
     <div class="time-section">
-      <time-banner title="Corona" flat="true" />
+      <time-banner title="Corona" />
     </div>
 
     <list class="card-list">
@@ -101,6 +101,7 @@ export default {
       if (this.pageActive && revision === this.statusReadRevision)
         this.applyModuleOutcome({ status: null, reason: "read_error" })
     }
+    
   },
 
   applyModuleOutcome(outcome) {
@@ -131,6 +132,11 @@ export default {
       this.moduleDescription = "请稍后重载"
       this.moduleIcon = ""
     }
+    /*
+    this.moduleState="running"
+    this.moduleTitle= "正在工作"
+    this.moduleDescription= "已加载3条规则"
+    this.moduleIcon= "/common/images/status-running.png" */
   },
 
   preserveForUser() {
@@ -222,7 +228,7 @@ export default {
   position: relative;
   width: 100%;
   height: 100px;
-  border-radius: 22px;
+  border-radius: 32px;
   overflow: hidden;
   background-color: #262626;
 }
@@ -313,7 +319,7 @@ export default {
   height: 83px;
   margin-bottom: 10px;
   background-color: #262626;
-  border-radius: 30px;
+  border-radius: 32px;
   align-items: center;
 }
 
@@ -368,7 +374,7 @@ export default {
   }
 }
 
-@media (width: 160) {
+@media (width>= 160) {
   .module-status-copy {
     top: 12px;
     width: 183px;

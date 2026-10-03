@@ -24,6 +24,7 @@
       </div>
       <div class="bottom-spacer"></div>
     </scroll>
+    <img if="{{loaded && !rows.length}}" class="empty-img" src="/common/images/none.png" />
   </div>
 </template>
 
@@ -78,6 +79,7 @@ export default {
   private: {
     headerTitle: "< 资源管理",
     rows: [],
+    loaded: false,
     statusText: "正在读取资源包…",
     loadError: false,
     loadVersion: 0,
@@ -134,6 +136,7 @@ export default {
 
   async loadThemes() {
     const version = ++this.loadVersion
+    this.loaded = false
     this.statusText = "正在读取资源包…"
     this.loadError = false
     try {
@@ -172,7 +175,7 @@ export default {
         isSystem: true,
         name: "系统样式",
         metaLine: "设备内置样式",
-        description: "系统默认资源",
+        description: "长按拖动排序",
         descriptionPreview: ""
       } : byId[orderId]).filter(Boolean)
       if (version !== this.loadVersion || !this.visible) return
@@ -180,6 +183,7 @@ export default {
       this.scrollOffset = 0
       this.renderRows()
       this.statusText = ""
+      this.loaded = true
     } catch (_error) {
       if (version !== this.loadVersion || !this.visible) return
       this.rows = []
@@ -365,12 +369,15 @@ export default {
   width: 100%;
   height: 100%;
   background-color: #000000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .header {
   position: absolute;
   left: 0;
-  top: 12px;
+  top: 0px;
   width: 100%;
   height: 77px;
   flex-direction: column;
@@ -383,23 +390,22 @@ export default {
   top: 96px;
   width: 100%;
   height: 372px;
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 3px;
+  padding-right: 3px;
   flex-direction: column;
 }
 
 .resource-row {
-  width: 196px;
-  height: 140px;
+  width: 206px;
   flex-shrink: 0;
 }
 
 .resource-item {
-  width: 196px;
-  height: 132px;
+  width: 206px;
+  height: auto;
   margin-bottom: 8px;
-  padding-left: 12px;
-  border-radius: 24px;
+  padding: 10px 14px;
+  border-radius: 28px;
   background-color: #262626;
   align-items: center;
 }
@@ -417,9 +423,8 @@ export default {
 .theme-name {
   width: 172px;
   color: #FFFFFF;
-  font-size: 35px;
+  font-size: 32px;
   font-weight: bold;
-  line-height: 40px;
   lines: 1;
   text-overflow: ellipsis;
 }
@@ -427,7 +432,7 @@ export default {
 .theme-meta {
   width: 172px;
   margin-top: 3px;
-  color: #BBBBBB;
+  color: rgba(255, 255, 255, 0.60);
   font-size: 18px;
   line-height: 22px;
   lines: 1;
@@ -437,7 +442,7 @@ export default {
 .description-preview {
   width: 172px;
   margin-top: 4px;
-  color: #BBBBBB;
+  color: rgba(255, 255, 255, 0.60);
   font-size: 16px;
   line-height: 19px;
   lines: 2;
@@ -460,6 +465,11 @@ export default {
   display: none;
 }
 
+.empty-img {
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
 /* 212x520 template: use aspect ratio because media-query widths are in dp. */
 @media (aspect-ratio: 53/130) {
   .resource-list {
@@ -474,7 +484,7 @@ export default {
   }
 }
 
-@media (width: 160) {
+@media (width>= 160) {
   .header {
     top: 0px;
     height: 60px;
@@ -483,6 +493,8 @@ export default {
   .resource-list {
     top: 60px;
     height: 408px;
+    padding-left: 6px;
+  padding-right: 6px;
   }
 
   .resource-row,
@@ -491,7 +503,8 @@ export default {
   }
 
   .resource-item {
-    padding-right: 12px;
+    padding: 14px 20px;
+    border-radius: 32px;
   }
 
   .resource-copy,

@@ -7,6 +7,8 @@ npm install
 npm run start
 ```
 
+开发构建也会压缩 JavaScript 并缩短局部变量名，保留日志和源码映射。未压缩的大型页面包可能在 Vela 模拟器加载阶段触发 `OutOfMemory`，随后框架报告 `TypeError: not a function`。
+
 ### 2. 构建
 
 ```
