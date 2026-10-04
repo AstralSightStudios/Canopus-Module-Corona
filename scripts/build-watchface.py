@@ -19,7 +19,7 @@ if not DEFAULT_CANOPUS.is_dir():
     DEFAULT_CANOPUS = ROOT.parent / 'Canopus-Private'
 CANOPUS = Path(os.environ.get('CANOPUS_ROOT', DEFAULT_CANOPUS)).resolve()
 DEFAULT_TARGETS = ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155']
-TARGETS = DEFAULT_TARGETS + ['xiaomi-band-10-pro-3.101.043']
+TARGETS = DEFAULT_TARGETS + ['xiaomi-band-10-pro-3.101.043', 'xiaomi-band-11-4.100.177']
 DEFAULT_CERTS = [
     Path.home() / 'develop/Astrobox-certs/module-installer-ed25519.pem.zip',
     Path.home() / 'develop/AstroBox-Certs/module-installer-ed25519.pem.zip',
@@ -209,6 +209,8 @@ def main():
         for device_name, device_targets in groups.items():
             device = generated / device_name
             verify_watchface(device, device_targets, modules, receipts)
+            font_status = ('NOT_PROBED' if 'xiaomi-band-11-4.100.177' in device_targets
+                           else 'USER_REPORTED_PASS')
             target_versions = ', '.join(t.rsplit('-', 1)[1] for t in device_targets)
             device_docs = device / 'docs/README.md'
             device_docs.write_text(
@@ -219,13 +221,13 @@ def main():
                 'Requires a Canopus Supervisor whose Ed25519 trust key matches this receipt. '
                 'Opening the watchface installs the module; it does not enable/restart the framework.\n\n'
                 'Use Manager 1.2.2 or newer for transaction acknowledgements; install it separately. '
-                'Font reload: USER_REPORTED_PASS on all supported targets. This new artifact: '
+                f'Font reload: {font_status}. This new artifact: '
                 'NOT_PROBED on hardware. GPU recovery and framework restart safety remain '
                 'unsupported. Never force-release native font caches.\n')
             manifest_path = device / 'build/manifest.json'
             manifest = json.loads(manifest_path.read_text())
             manifest['font_reload'] = True
-            manifest['font_reload_device_status'] = 'USER_REPORTED_PASS'
+            manifest['font_reload_device_status'] = font_status
             manifest['gpu_recovery'] = 'UNSUPPORTED'
             manifest['framework_restart_safety'] = 'UNSUPPORTED'
             manifest['module_build_id'] = 'resource-hook-0.3.0'
@@ -256,7 +258,7 @@ def main():
             f'(public SHA-256 `{public_fingerprint}`). The public key matches the '
             'Supervisor trust key. Private signing material is not included.\n\n'
             'Manager 1.2.2 or newer is recommended for revision-matched transaction '
-            'results. Font reload: USER_REPORTED_PASS on all supported targets (user report). '
+            'results. Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new package is NOT_PROBED on hardware. GPU recovery and framework '
             'restart safety remain unsupported.\n')
         shutil.copyfile(ROOT / 'docs/FONT_RELOAD.md', package / 'docs/FONT_RELOAD.md')
@@ -277,7 +279,7 @@ def main():
                       f'- `{name}/build/manifest.json`: target, resource hashes and signer identity.\n'
                       for name in groups) +
             '- `SHA256SUMS`: package file checksums.\n\n'
-            'Font reload: USER_REPORTED_PASS on all supported targets (user report). '
+            'Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new artifact is NOT_PROBED. GPU recovery and framework restart safety '
             'remain unsupported. Do not use on other firmware targets.\n')
         target_details = {}
@@ -296,7 +298,8 @@ def main():
             'signer_public_key_sha256': public_fingerprint,
             'signer_certificate_archive': cert.name,
             'hardware_status': 'NOT_PROBED',
-            'font_reload': True, 'font_reload_device_status': 'USER_REPORTED_PASS',
+            'font_reload': True, 'font_reload_device_status': (
+                'NOT_PROBED' if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
         }
         if len(targets) == 1:
@@ -333,7 +336,7 @@ def main():
         elf_sha = hashlib.sha256((output / target.rsplit('-', 1)[0] / f'resource-hook-{target}.bin').read_bytes()).hexdigest()
         print(f'ELF SHA-256 ({target}): {elf_sha}')
     print(f'Supervisor-matched AstroBox signing key SHA-256: {public_fingerprint}')
-    print('Private key excluded. Font reload: USER_REPORTED_PASS on supported targets.')
+    print('Private key excluded. Font reload: legacy user reports; .177 NOT_PROBED.')
     print('New artifact: NOT_PROBED. GPU recovery/restart safety unsupported.')
 
 

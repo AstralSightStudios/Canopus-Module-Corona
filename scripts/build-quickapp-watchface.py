@@ -28,6 +28,7 @@ TARGET_GROUPS = {
     'band11': ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155'],
     'band10pro': ['xiaomi-band-10-pro-3.101.043'],
 }
+# .177 remains explicit build/watchface-only until native/device delivery gates pass.
 ALL_TARGETS = ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155', 'xiaomi-band-10-pro-3.101.043']
 verify_watchface = runpy.run_path(str(ROOT / 'scripts/build-watchface.py'))['verify_watchface']
 

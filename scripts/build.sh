@@ -9,6 +9,7 @@ fi
 TARGET_ID=${1:-xiaomi-band-11-4.100.139}
 case "$TARGET_ID" in
     xiaomi-band-11-4.100.139) TARGET_DEFINE=; NATIVE_PLATFORM=platform_band11 ;;
+    xiaomi-band-11-4.100.177) TARGET_DEFINE=-DRH_TARGET_177=1; NATIVE_PLATFORM=platform_band11 ;;
     xiaomi-band-11-4.100.155) TARGET_DEFINE=-DRH_TARGET_155=1; NATIVE_PLATFORM=platform_band11 ;;
     xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1; NATIVE_PLATFORM=platform_band10pro ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
@@ -59,5 +60,5 @@ done
     "$ROOT/build/control.o" -o "$ROOT/build/resource-hook.elf"
 "$CANOPUS_CLI" verify "$ROOT/build/resource-hook.elf" \
     --target "$TARGET_ID" --targets-dir "$SDK/targets"
-printf 'Built resource-hook.elf for %s. Font reload: USER_REPORTED_PASS on supported targets; this artifact: NOT_PROBED.\n' "$TARGET_ID"
+printf 'Built resource-hook.elf for %s. Static/build verification only; this artifact and .177 device behavior: NOT_PROBED.\n' "$TARGET_ID"
 printf 'GPU recovery and framework restart safety remain unsupported.\n'

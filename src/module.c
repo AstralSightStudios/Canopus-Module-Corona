@@ -15,6 +15,8 @@
 #define RH_RELOAD_POLL_MS 1000u
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 #define RH_TARGET_ID "xiaomi-band-10-pro-3.101.043"
+#elif defined(RH_TARGET_177) && RH_TARGET_177
+#define RH_TARGET_ID "xiaomi-band-11-4.100.177"
 #elif defined(RH_TARGET_155) && RH_TARGET_155
 #define RH_TARGET_ID "xiaomi-band-11-4.100.155"
 #else

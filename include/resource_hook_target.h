@@ -8,6 +8,14 @@
  * targets/xiaomi-band-11-4.100.139/ui-reload-audit.md,
  * targets/xiaomi-band-11-4.100.155/ui-reload-audit.md, and
  * targets/xiaomi-band-10-pro-3.101.043/ui-reload-audit.md. */
+#if ((defined(RH_TARGET_177) && RH_TARGET_177) + \
+     (defined(RH_TARGET_155) && RH_TARGET_155) + \
+     (defined(RH_TARGET_1043) && RH_TARGET_1043)) > 1
+#error "Select exactly one Resource Hook target"
+#endif
+#if defined(RH_TARGET_177) && RH_TARGET_177
+#include "resource_hook_target_177.h"
+#else
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 /* Exact Xiaomi Band 10 Pro 3.101.043 identities. */
 /* Font callbacks use their exact startup-copied PSRAM identities. */
@@ -211,4 +219,5 @@
 #define RH_FW_TIMER_DELETE        0x0c3abe71u
 #endif
 
+#endif /* .177 versus legacy targets */
 #endif

@@ -1,6 +1,8 @@
 #!/bin/sh
 # Host models only: no device/GPU acceptance or private-checkout writes.
 set -eu
+# Exact .177 pack/fingerprint checks are also available via tests/test_target_177.py;
+# they require the reviewed private pack and AP, unlike portable host suites.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus"}
 if [ -z "${CANOPUS_ROOT:-}" ] && [ ! -d "$SDK" ]; then

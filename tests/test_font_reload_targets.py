@@ -121,7 +121,9 @@ class FontTargetContract(unittest.TestCase):
 class InstallerContract(unittest.TestCase):
     def test_defaults_stay_dual_band11(self):
         self.assertEqual(INSTALLER['DEFAULT_TARGETS'], list(TARGET_IDS[:2]))
-        self.assertEqual(INSTALLER['TARGETS'], list(TARGET_IDS))
+        self.assertEqual(INSTALLER['TARGETS'], list(TARGET_IDS) + ['xiaomi-band-11-4.100.177'])
+        self.assertEqual(INSTALLER['device_groups'](['xiaomi-band-11-4.100.177']),
+                         {'xiaomi-band-11': ['xiaomi-band-11-4.100.177']})
         prefix = 'module-installer-resource-hook-0.3.0-'
         name = INSTALLER['default_output_name']
         self.assertEqual(name(TARGET_IDS[:2]), prefix + 'band11')
