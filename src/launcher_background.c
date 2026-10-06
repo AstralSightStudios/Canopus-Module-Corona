@@ -1,10 +1,12 @@
 #include "resource_hook_background.h"
 
 static int bytes_equal(const char *a, const char *b, uint32_t size) {
+    return rh_bytes_equal(a, b, size);
+}
+
+static void set_special(char *out, const char *special, uint32_t size) {
     uint32_t i;
-    for (i = 0; i < size; i++)
-        if (a[i] != b[i]) return 0;
-    return 1;
+    for (i = 0; i < size; i++) out[i] = special[i];
 }
 
 static int validate_and_prefix_image(const char *image, uint32_t length, char *out) {
@@ -123,6 +125,8 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
             uint32_t val_len = line_end - (line_start + sizeof(k_launcher) - 1u);
             if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
                 staged.launcher[0] = 0;
+            } else if (val_len == 4u && bytes_equal(val, "blur", 4u)) {
+                set_special(staged.launcher, RH_BG_BLUR, sizeof(RH_BG_BLUR));
             } else if (validate_and_prefix_image(val, val_len, staged.launcher)) {
                 return -1;
             }
@@ -133,6 +137,8 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
             uint32_t val_len = line_end - (line_start + sizeof(k_control) - 1u);
             if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
                 staged.control_center[0] = 0;
+            } else if (val_len == 4u && bytes_equal(val, "blur", 4u)) {
+                set_special(staged.control_center, RH_BG_BLUR, sizeof(RH_BG_BLUR));
             } else if (validate_and_prefix_image(val, val_len, staged.control_center)) {
                 return -1;
             }
@@ -143,6 +149,8 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
             uint32_t val_len = line_end - (line_start + sizeof(k_notify) - 1u);
             if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
                 staged.notifications[0] = 0;
+            } else if (val_len == 4u && bytes_equal(val, "blur", 4u)) {
+                set_special(staged.notifications, RH_BG_BLUR, sizeof(RH_BG_BLUR));
             } else if (validate_and_prefix_image(val, val_len, staged.notifications)) {
                 return -1;
             }

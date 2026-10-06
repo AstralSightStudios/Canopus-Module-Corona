@@ -138,7 +138,7 @@ function backgroundThemes(config: string): string[] {
 export function resolveBackgroundTarget(
   themesHighToLow: ThemeRules[],
   target: "launcher" | "controlCenter" | "notifications"
-): { themeId: string; image: string } | null {
+): { themeId: string; image?: string; mode: "image" | "blur" | "system" } | null {
   const winner = themesHighToLow.find(theme => {
     if (theme.active === false) return false;
     const bg = theme.manifest.backgrounds?.[target] ||
@@ -147,20 +147,22 @@ export function resolveBackgroundTarget(
   });
   const bg = winner?.manifest.backgrounds?.[target] ||
     (target === "launcher" ? winner?.manifest.launcherBackground : undefined);
-  if (winner && bg?.mode === "image") {
-    return { themeId: winner.themeId, image: bg.image };
+  if (winner && bg) {
+    if (bg.mode === "image") return { themeId: winner.themeId, image: bg.image, mode: "image" };
+    if (bg.mode === "blur") return { themeId: winner.themeId, mode: "blur" };
+    return { themeId: winner.themeId, mode: "system" };
   }
   return null;
 }
 
 export function serializeBackgrounds(themesHighToLow: ThemeRules[]): string {
-  const launcher = resolveBackgroundTarget(themesHighToLow, "launcher");
-  const control = resolveBackgroundTarget(themesHighToLow, "controlCenter");
-  const notify = resolveBackgroundTarget(themesHighToLow, "notifications");
-  const lStr = launcher ? `launcher=themes/${launcher.themeId}/${launcher.image}\n` : "launcher=system\n";
-  const cStr = control ? `control_center=themes/${control.themeId}/${control.image}\n` : "control_center=system\n";
-  const nStr = notify ? `notifications=themes/${notify.themeId}/${notify.image}\n` : "notifications=system\n";
-  return `version=1\n${lStr}${cStr}${nStr}`;
+  const format = (target: "launcher" | "controlCenter" | "notifications", key: string): string => {
+    const res = resolveBackgroundTarget(themesHighToLow, target);
+    if (res?.mode === "image" && res.image) return `${key}=themes/${res.themeId}/${res.image}\n`;
+    if (res?.mode === "blur") return `${key}=blur\n`;
+    return `${key}=system\n`;
+  };
+  return `version=1\n${format("launcher", "launcher")}${format("controlCenter", "control_center")}${format("notifications", "notifications")}`;
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
@@ -529,7 +531,7 @@ export async function regenerateActiveMappings(
   plan.backgrounds = serializeBackgrounds(themesHighToLow);
   for (const target of ["launcher", "controlCenter", "notifications"] as const) {
     const bg = resolveBackgroundTarget(themesHighToLow, target);
-    if (bg) {
+    if (bg?.mode === "image" && bg.image) {
       if (snapshot) {
         if (!snapshot.themes.get(bg.themeId)!.files.some(asset => asset.relativePath === bg.image))
           throw new Error(`backgrounds.${target}.image 不存在于资源包文件中`);

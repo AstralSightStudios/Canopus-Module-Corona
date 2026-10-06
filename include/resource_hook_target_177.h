@@ -70,6 +70,19 @@
 #define RH_LB_NOTIFY_CONTAINER_SLOT 0x200c633cu
 #define RH_LB_NOTIFY_LIST_SLOT 0x200c6240u
 #define RH_LB_NOTIFY_LIST_CLASS 0x2ca3bab0u
+/* Exact .177 display event list API and frame/visibility consumers. */
+#define RH_LB_DISPLAY_EVENT_ADD 0x0c3a3ec1u
+#define RH_LB_DISPLAY_EVENT_REMOVE 0x0c381e67u
+#define RH_LB_LAYOUT_UPDATE 0x0c383f01u
+#define RH_LB_VISIBLE_AREA 0x0c381d4du
+#define RH_LB_GPU_FINISH 0x0c91e58du
+#define RH_LB_DCACHE_SYNC 0x0c92e5f5u
+#define RH_LB_DCACHE_INVALIDATE 0x0c721249u
+#define RH_LB_MEMORY_BARRIER() __asm__ volatile("dsb sy" ::: "memory")
+#define RH_LB_SNAPSHOT_TAKE 0x0c5f126du
+#define RH_LB_SNAPSHOT_FREE 0x0c8f29edu
+#define RH_LB_DRAW_BUF_CREATE 0x0c386c15u
+#define RH_LB_DRAW_BUF_HANDLERS 0x200bd18cu
 #define RH_FW_OBJECT_STYLE_GET 0x0c380165u
 #define RH_FW_OBJECT_STYLE_REFRESH 0x0c382879u
 #define RH_FW_OBJECT_TREE_WALK 0x0c38151du

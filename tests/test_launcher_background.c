@@ -155,6 +155,11 @@ static void test_multi_background(void) {
         "version=1\n"
         "control_center=themes/b/c.bin\n"
         "launcher=system\n";
+    static const char multi_blur[] =
+        "version=1\n"
+        "launcher=blur\n"
+        "control_center=blur\n"
+        "notifications=blur\n";
     struct rh_backgrounds out;
     memset(&out, 0xa5, sizeof(out));
     assert(!rh_backgrounds_parse(multi_all, (uint32_t)strlen(multi_all), &out));
@@ -167,6 +172,12 @@ static void test_multi_background(void) {
     assert(out.launcher[0] == 0);
     assert(!strcmp(out.control_center + strlen(RH_APP_FILES_ROOT), "themes/b/c.bin"));
     assert(out.notifications[0] == 0);
+
+    memset(&out, 0xa5, sizeof(out));
+    assert(!rh_backgrounds_parse(multi_blur, (uint32_t)strlen(multi_blur), &out));
+    assert(rh_background_is_blur(out.launcher));
+    assert(rh_background_is_blur(out.control_center));
+    assert(rh_background_is_blur(out.notifications));
 
     /* Invalid key rejected */
     assert(rh_backgrounds_parse("version=1\nunknown=themes/a/x.bin\n", 31, &out) < 0);

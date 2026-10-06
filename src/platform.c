@@ -178,15 +178,235 @@ static uint32_t bg_source(uint32_t obj) {
         (uintptr_t)RH_FW_OBJECT_STYLE_GET)(obj, 0, 40u);
 }
 
+#if defined(__arm__) || defined(__thumb__)
+static int s_blur_needed = 1;
+static uint32_t background_display;
+static unsigned background_epoch;
+static int background_frame_valid(uint32_t, unsigned);
+#endif
+
 static void bg_set(uint32_t obj, uint32_t source) {
     ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t))
         (uintptr_t)RH_LB_STYLE_SET)(obj, 40u, source, 0);
 }
 
+#if defined(__arm__) || defined(__thumb__)
+static void downsample_4x_and_darken(const uint16_t *src, uint32_t src_stride_px, uint16_t *dst) {
+    uint32_t y, x;
+    for (y = 0; y < 130u; ++y) {
+        for (x = 0; x < 53u; ++x) {
+            uint16_t p = src[(y * 4u + 1u) * src_stride_px + (x * 4u + 1u)];
+            uint32_t r = ((p >> 11) & 0x1Fu) * 7u / 10u;
+            uint32_t g = ((p >> 5)  & 0x3Fu) * 7u / 10u;
+            uint32_t b = (p         & 0x1Fu) * 7u / 10u;
+            dst[y * 53u + x] = (uint16_t)((r << 11) | (g << 5) | b);
+        }
+    }
+}
+
+static void fast_box_blur_53x130(uint16_t *src, uint16_t *tmp) {
+    uint32_t y, x;
+    int d;
+    for (y = 0; y < 130u; ++y) {
+        for (x = 0; x < 53u; ++x) {
+            uint32_t r_sum = 0, g_sum = 0, b_sum = 0, count = 0;
+            for (d = -2; d <= 2; ++d) {
+                int nx = (int)x + d;
+                if (nx >= 0 && nx < 53) {
+                    uint16_t p = src[y * 53u + (uint32_t)nx];
+                    r_sum += (p >> 11) & 0x1Fu;
+                    g_sum += (p >> 5)  & 0x3Fu;
+                    b_sum += p         & 0x1Fu;
+                    ++count;
+                }
+            }
+            tmp[y * 53u + x] = (uint16_t)(((r_sum / count) << 11) |
+                                         ((g_sum / count) << 5)  |
+                                          (b_sum / count));
+        }
+    }
+    for (x = 0; x < 53u; ++x) {
+        for (y = 0; y < 130u; ++y) {
+            uint32_t r_sum = 0, g_sum = 0, b_sum = 0, count = 0;
+            for (d = -2; d <= 2; ++d) {
+                int ny = (int)y + d;
+                if (ny >= 0 && ny < 130) {
+                    uint16_t p = tmp[(uint32_t)ny * 53u + x];
+                    r_sum += (p >> 11) & 0x1Fu;
+                    g_sum += (p >> 5)  & 0x3Fu;
+                    b_sum += p         & 0x1Fu;
+                    ++count;
+                }
+            }
+            src[y * 53u + x] = (uint16_t)(((r_sum / count) << 11) |
+                                         ((g_sum / count) << 5)  |
+                                          (b_sum / count));
+        }
+    }
+}
+
+static void bilinear_upscale_4x(const uint16_t *src, uint16_t *dst, uint32_t dst_stride_px) {
+    uint32_t sy, sx, dy, dx;
+    for (sy = 0; sy < 130u; ++sy) {
+        uint32_t sy1 = (sy + 1u < 130u) ? sy + 1u : sy;
+        for (sx = 0; sx < 53u; ++sx) {
+            uint32_t sx1 = (sx + 1u < 53u) ? sx + 1u : sx;
+            uint16_t p00 = src[sy  * 53u + sx];
+            uint16_t p10 = src[sy  * 53u + sx1];
+            uint16_t p01 = src[sy1 * 53u + sx];
+            uint16_t p11 = src[sy1 * 53u + sx1];
+
+            uint32_t r00 = (p00 >> 11) & 0x1Fu, g00 = (p00 >> 5) & 0x3Fu, b00 = p00 & 0x1Fu;
+            uint32_t r10 = (p10 >> 11) & 0x1Fu, g10 = (p10 >> 5) & 0x3Fu, b10 = p10 & 0x1Fu;
+            uint32_t r01 = (p01 >> 11) & 0x1Fu, g01 = (p01 >> 5) & 0x3Fu, b01 = p01 & 0x1Fu;
+            uint32_t r11 = (p11 >> 11) & 0x1Fu, g11 = (p11 >> 5) & 0x3Fu, b11 = p11 & 0x1Fu;
+
+            for (dy = 0; dy < 4u; ++dy) {
+                uint32_t wy1 = dy, wy0 = 4u - dy;
+                uint32_t r0 = (r00 * wy0 + r01 * wy1) >> 2;
+                uint32_t g0 = (g00 * wy0 + g01 * wy1) >> 2;
+                uint32_t b0 = (b00 * wy0 + b01 * wy1) >> 2;
+                uint32_t r1 = (r10 * wy0 + r11 * wy1) >> 2;
+                uint32_t g1 = (g10 * wy0 + g11 * wy1) >> 2;
+                uint32_t b1 = (b10 * wy0 + b11 * wy1) >> 2;
+
+                uint32_t y = sy * 4u + dy;
+                for (dx = 0; dx < 4u; ++dx) {
+                    uint32_t wx1 = dx, wx0 = 4u - dx;
+                    uint32_t r = (r0 * wx0 + r1 * wx1) >> 2;
+                    uint32_t g = (g0 * wx0 + g1 * wx1) >> 2;
+                    uint32_t b = (b0 * wx0 + b1 * wx1) >> 2;
+                    uint32_t x = sx * 4u + dx;
+                    dst[y * dst_stride_px + x] = (uint16_t)((r << 11) | (g << 5) | b);
+                }
+            }
+        }
+    }
+}
+
+static uint32_t g_blur_draw_buf;
+static int g_blur_valid;
+static int g_blur_updating;
+static uint32_t g_blur_pending_snapshot;
+static uint16_t g_blur_small_a[53 * 130];
+static uint16_t g_blur_small_b[53 * 130];
+
+/* The fixed-size kernels require a full-screen, unpacked RGB565 draw buffer.
+ * Reject malformed metadata before reading or writing its pixel storage. */
+static int blur_pixels(uint32_t buf, uint16_t **pixels, uint32_t *stride_px) {
+    uint32_t stride, data;
+    if (!buf || *(volatile const uint8_t *)(uintptr_t)(buf + 1u) != 18u ||
+        *(volatile const uint16_t *)(uintptr_t)(buf + 4u) != 212u ||
+        *(volatile const uint16_t *)(uintptr_t)(buf + 6u) != 520u) return 0;
+    stride = *(volatile const uint16_t *)(uintptr_t)(buf + 8u);
+    /* +16 is the aligned pixel pointer used by native goto_xy and GPU draws.
+     * +20 is the raw allocation retained only for eventual destruction. */
+    data = load32(buf + 16u);
+    if (stride < 424u || (stride & 1u) || !data || (data & 1u) ||
+        load32(buf + 12u) < stride * 520u) return 0;
+    *pixels = (uint16_t *)(uintptr_t)data;
+    *stride_px = stride / 2u;
+    return 1;
+}
+
+static void blur_cache_sync(void) {
+    RH_LB_MEMORY_BARRIER();
+    ((void (*)(unsigned))(uintptr_t)RH_LB_DCACHE_SYNC)(1u);
+    RH_LB_MEMORY_BARRIER();
+}
+
+static void blur_cache_invalidate(uint32_t buf) {
+    /* The ROM range invalidator may invalidate the entire D-cache for a large
+     * frame. Write back unrelated dirty data first, then discard stale lines. */
+    blur_cache_sync();
+    ((void (*)(unsigned, uint32_t, uint32_t))(uintptr_t)RH_LB_DCACHE_INVALIDATE)
+        (1u, load32(buf + 16u), load32(buf + 12u));
+    RH_LB_MEMORY_BARRIER();
+}
+
+static int rh_platform_update_blur(void) {
+    uint32_t snap = 0, frame_display = background_display;
+    unsigned frame_epoch = background_epoch;
+    uint16_t *src_data, *dst_data;
+    uint32_t src_stride_px, dst_stride_px;
+    int success = 0;
+
+    /* Snapshot rendering dispatches LVGL events too. Never recursively mutate
+     * the shared scratch buffers or acquire a second snapshot while updating. */
+    if (g_blur_updating || !background_frame_valid(frame_display, frame_epoch)) return 0;
+    g_blur_updating = 1;
+    /* REFR_START precedes new draw tasks. Finish already queued VG-Lite work
+     * before writing a source that the preceding frame might still consume. */
+    if (((int (*)(void))(uintptr_t)RH_LB_GPU_FINISH)() != 0 ||
+        !background_frame_valid(frame_display, frame_epoch)) goto done;
+    if (g_blur_pending_snapshot) {
+        ((void (*)(uint32_t))(uintptr_t)RH_LB_SNAPSHOT_FREE)(g_blur_pending_snapshot);
+        g_blur_pending_snapshot = 0;
+    }
+    if (!g_blur_draw_buf) {
+        g_blur_draw_buf = ((uint32_t (*)(void *, int, int, int, int))(uintptr_t)RH_LB_DRAW_BUF_CREATE)
+            ((void *)(uintptr_t)RH_LB_DRAW_BUF_HANDLERS, 212, 520, 18, 0);
+    }
+    if (!blur_pixels(g_blur_draw_buf, &dst_data, &dst_stride_px)) goto done;
+
+    blur_cache_sync();
+    snap = ((uint32_t (*)(void))(uintptr_t)RH_LB_SNAPSHOT_TAKE)();
+    if (!snap) goto done;
+    /* Native task completion can mean command submission, not GPU idle.
+     * Never read or release GPU-owned snapshot pixels after a failed fence. */
+    if (((int (*)(void))(uintptr_t)RH_LB_GPU_FINISH)() != 0) {
+        g_blur_pending_snapshot = snap;
+        snap = 0;
+        goto done;
+    }
+    if (!background_frame_valid(frame_display, frame_epoch) ||
+        !blur_pixels(snap, &src_data, &src_stride_px)) goto done;
+    blur_cache_invalidate(snap);
+
+    downsample_4x_and_darken(src_data, src_stride_px, g_blur_small_a);
+    ((void (*)(uint32_t))(uintptr_t)RH_LB_SNAPSHOT_FREE)(snap);
+    snap = 0;
+
+    fast_box_blur_53x130(g_blur_small_a, g_blur_small_b);
+    fast_box_blur_53x130(g_blur_small_a, g_blur_small_b);
+    if (!background_frame_valid(frame_display, frame_epoch)) goto done;
+    bilinear_upscale_4x(g_blur_small_a, dst_data, dst_stride_px);
+    blur_cache_sync();
+    /* Allocation alone is not a usable background. Publish only filled pixels;
+     * on refresh failure keep both the last good pixels and the dirty flag. */
+    g_blur_valid = 1;
+    s_blur_needed = 0;
+    success = 1;
+done:
+    if (snap) ((void (*)(uint32_t))(uintptr_t)RH_LB_SNAPSHOT_FREE)(snap);
+    g_blur_updating = 0;
+    return success;
+}
+
+static uint32_t rh_platform_get_blur_draw_buf(void) {
+    return g_blur_valid ? g_blur_draw_buf : 0;
+}
+#endif
+
+#if defined(__arm__) || defined(__thumb__)
+static uint32_t current_bg_source(unsigned type) {
+    const char *path = bg_paths[type][bg_path_index];
+    if (rh_background_is_blur(path)) {
+        return rh_platform_get_blur_draw_buf();
+    }
+    return (uint32_t)(uintptr_t)path;
+}
+#endif
+#if !defined(__arm__) && !defined(__thumb__)
+static uint32_t current_bg_source(unsigned type) {
+    return (uint32_t)(uintptr_t)bg_paths[type][bg_path_index];
+}
+#endif
+
 static int stage_one_path(const char *path) {
     uint32_t header[3] = {0, 0, 0};
     uint32_t cache;
-    if (!path[0]) return 0;
+    if (!path[0] || rh_background_is_blur(path)) return 0;
     /* An explicit reload may replace bytes at the same filename. Drop only
      * that key before preflight so a cached header cannot mask a bad update. */
     cache = load32(RH_FW_HEADER_CACHE_SLOT);
@@ -210,28 +430,222 @@ int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
     return stage_one_path(bg->notifications);
 }
 
+#if defined(__arm__) || defined(__thumb__)
+static int background_refreshing;
+static uint32_t background_frame_display;
+static int background_retry;
+static int background_wake_pending;
+static uint32_t last_bg_objects[7];
+static unsigned last_bg_visible[7];
+
+static unsigned background_type(unsigned i) { return i < 4u ? 0u : i == 4u ? 1u : 2u; }
+static uint32_t background_object(unsigned i) {
+    uint32_t obj;
+    if (i < 4u) return launcher_list(i);
+    if (i == 4u) return control_center_container();
+    if (i == 5u) return notify_container();
+    obj = load32(RH_LB_NOTIFY_LIST_SLOT);
+    return obj && load32(obj) == RH_LB_NOTIFY_LIST_CLASS ? obj : 0;
+}
+
+/* Establish membership from the live registry before dereferencing any saved
+ * display identity, including during default-display changes or deletion. */
+static int background_display_live(uint32_t display) {
+    uint32_t p, prev = 0, count = 0;
+    int found = 0;
+    if (!display || load32(RH_FW_FR_DISPLAY_LIST) != 792u) return 0;
+    for (p = load32(RH_FW_FR_DISPLAY_LIST + 4u); p; p = load32(p + 796u)) {
+        if (++count > 4u || load32(p + 792u) != prev) return 0;
+        if (p == display) found = 1;
+        prev = p;
+    }
+    return load32(RH_FW_FR_DISPLAY_LIST + 8u) == prev && found;
+}
+
+static int background_frame_valid(uint32_t display, unsigned epoch) {
+    return display && display == background_display && epoch == background_epoch &&
+        display == load32(RH_FW_DISPLAY_SLOT) && background_display_live(display);
+}
+
+static int backgrounds_release_pending(void) {
+    if (!g_blur_pending_snapshot) return 1;
+    if (g_blur_updating || ((int (*)(void))(uintptr_t)RH_LB_GPU_FINISH)() != 0) return 0;
+    ((void (*)(uint32_t))(uintptr_t)RH_LB_SNAPSHOT_FREE)(g_blur_pending_snapshot);
+    g_blur_pending_snapshot = 0;
+    return 1;
+}
+
+static void backgrounds_wake_display(uint32_t);
+
+static void backgrounds_reset_visibility(void) {
+    unsigned i;
+    for (i = 0; i < 7u; ++i) {
+        last_bg_objects[i] = 0;
+        last_bg_visible[i] = 0;
+    }
+}
+
+static void on_background_refresh(void *event) {
+    uint32_t display = *(const uint32_t *)event;
+    unsigned code = *(const uint16_t *)((const unsigned char *)event + 8u);
+    unsigned i, visible_blur = 0, epoch = background_epoch;
+    static const unsigned screen_offsets[5] = {696u, 700u, 708u, 712u, 716u};
+    if (display != background_display) return;
+    if (code == 36u) { /* Display delete, before event list/native storage free. */
+        background_display = 0;
+        ++background_epoch;
+        background_retry = 0;
+        background_wake_pending = 0;
+        backgrounds_reset_visibility();
+        s_blur_needed = 1;
+        return;
+    }
+    if (background_refreshing || g_blur_updating ||
+        !background_frame_valid(display, epoch)) return;
+    if (code == 53u) { /* REFR_READY: invalidations now belong to the next frame. */
+        if (background_retry || background_wake_pending) backgrounds_wake_display(display);
+        return;
+    }
+    if (code != 52u) return;
+    background_refreshing = 1;
+    background_frame_display = display;
+    background_retry = 0;
+    background_wake_pending = 0;
+    if (!backgrounds_release_pending()) {
+        background_retry = 1;
+        goto done;
+    }
+    if (!background_frame_valid(display, epoch)) goto done;
+    /* Native REFR_START precedes native layout. Settle the same five screen
+     * roots first so visibility uses this frame's coordinates and clipping. */
+    for (i = 0; i < 5u; ++i) {
+        uint32_t screen = load32(display + screen_offsets[i]);
+        if (screen) ((void (*)(uint32_t))(uintptr_t)RH_LB_LAYOUT_UPDATE)(screen);
+        if (!background_frame_valid(display, epoch)) goto done;
+    }
+    for (i = 0; i < 7u; ++i) {
+        unsigned type = background_type(i), visible = 0;
+        uint32_t obj = bg_active[type] ? background_object(i) : 0;
+        int32_t area[4] = {0, 0, 211, 519};
+        if (obj) visible = ((int (*)(uint32_t, int32_t *))
+            (uintptr_t)RH_LB_VISIBLE_AREA)(obj, area) != 0;
+        if (visible && rh_background_is_blur(bg_paths[type][bg_path_index])) {
+            visible_blur = 1;
+            if (!last_bg_visible[i] || last_bg_objects[i] != obj ||
+                bg_source(obj) != current_bg_source(type)) s_blur_needed = 1;
+        }
+        last_bg_objects[i] = obj;
+        last_bg_visible[i] = visible;
+    }
+    if (visible_blur && (s_blur_needed || !g_blur_valid))
+        background_retry = !rh_platform_update_blur();
+    if (!background_frame_valid(display, epoch)) goto done;
+    /* Rediscover after snapshot rendering: never dereference an object retained
+     * across a native operation that can synchronously dispatch other events. */
+    for (i = 0; i < 7u; ++i) {
+        unsigned type = background_type(i);
+        uint32_t obj, source;
+        if (!bg_active[type]) continue;
+        obj = background_object(i);
+        source = current_bg_source(type);
+        if (source && obj && bg_source(obj) != source) bg_set(obj, source);
+        if (!background_frame_valid(display, epoch)) goto done;
+    }
+done:
+    background_frame_display = 0;
+    background_refreshing = 0;
+}
+
+static void backgrounds_wake_display(uint32_t display) {
+    int32_t area[4] = {0, 0, 211, 519};
+    /* A reentrant configuration change must be reissued at REFR_READY, not
+     * lost when the interrupted frame clears its invalid-area collection. */
+    if (background_refreshing && display == background_frame_display) {
+        background_wake_pending = 1;
+        return;
+    }
+    background_wake_pending = 0;
+    /* RH_FW_INVALIDATE_AREA is _lv_inv_area(display, area), NOT the object
+     * wrapper at 0x0c382198. Keep the existing display-based redraw ABI. */
+    ((void (*)(uint32_t, const int32_t *))
+        (uintptr_t)RH_FW_INVALIDATE_AREA)(display, area);
+}
+
+static void backgrounds_watch_display(void) {
+    uint32_t display = load32(RH_FW_DISPLAY_SLOT);
+    int active = bg_active[0] || bg_active[1] || bg_active[2];
+    /* Fault retirement is independent of panel visibility/configuration. This
+     * maintenance never generates pixels; only a successful fence releases
+     * a snapshot pinned by an earlier GPU failure. */
+    (void)backgrounds_release_pending();
+    if (background_display && (background_display != display || !active)) {
+        /* Failed registry validation is NOT successful unregistration. Keep
+         * ownership unresolved instead of adding duplicates if it recovers. */
+        if (!background_display_live(background_display)) return;
+        ((int (*)(uint32_t, void (*)(void *), void *))
+            (uintptr_t)RH_LB_DISPLAY_EVENT_REMOVE)(background_display, on_background_refresh, 0);
+        background_display = 0;
+        ++background_epoch;
+        background_retry = 0;
+        background_wake_pending = 0;
+        backgrounds_reset_visibility();
+    }
+    if (!active) return;
+    if (!background_display_live(display)) return;
+    if (background_display && background_wake_pending && !background_refreshing)
+        backgrounds_wake_display(background_display);
+    if (!background_display) {
+        /* One callback per live display, never one callback per widget/style.
+         * Filter ALL|PREPROCESS handles deletion and precedes ordinary callbacks. */
+        if (((void *(*)(uint32_t, void (*)(void *), uint32_t, void *))
+             (uintptr_t)RH_LB_DISPLAY_EVENT_ADD)(display + 736u, on_background_refresh, 0x8000u, 0)) {
+            background_display = display;
+            ++background_epoch;
+            backgrounds_reset_visibility();
+            /* Adding to a generic event list does not wake an idle refresh
+             * timer. Invalidate the active screen once to deliver first setup. */
+            backgrounds_wake_display(display);
+        }
+    }
+}
+#endif
+
 void rh_platform_backgrounds_poll(void) {
+#if defined(__arm__) || defined(__thumb__)
+    /* Configuration watcher only maintains the display subscription. No panel
+     * presence/visibility scan, snapshot or style mutation is timer-driven. */
+    backgrounds_watch_display();
+#endif
+#if !defined(__arm__) && !defined(__thumb__)
     unsigned i;
     if (bg_active[0]) {
-        uint32_t source = (uint32_t)(uintptr_t)bg_paths[0][bg_path_index];
+        uint32_t source = current_bg_source(0);
         for (i = 0; i < 4; ++i) {
             uint32_t list = launcher_list(i);
-            if (list && bg_source(list) != source) bg_set(list, source);
+            if (source && list && bg_source(list) != source) {
+                bg_set(list, source);
+            }
         }
     }
     if (bg_active[1]) {
         uint32_t cc = control_center_container();
-        uint32_t source = (uint32_t)(uintptr_t)bg_paths[1][bg_path_index];
-        if (cc && bg_source(cc) != source) bg_set(cc, source);
+        uint32_t source = current_bg_source(1);
+        if (source && cc && bg_source(cc) != source) {
+            bg_set(cc, source);
+        }
     }
     if (bg_active[2]) {
         uint32_t ntf = notify_container();
         uint32_t list = load32(RH_LB_NOTIFY_LIST_SLOT);
-        uint32_t source = (uint32_t)(uintptr_t)bg_paths[2][bg_path_index];
-        if (ntf && bg_source(ntf) != source) bg_set(ntf, source);
-        if (list && load32(list) == RH_LB_NOTIFY_LIST_CLASS && bg_source(list) != source)
+        uint32_t source = current_bg_source(2);
+        if (source && ntf && bg_source(ntf) != source) {
+            bg_set(ntf, source);
+        }
+        if (source && list && load32(list) == RH_LB_NOTIFY_LIST_CLASS && bg_source(list) != source) {
             bg_set(list, source);
+        }
     }
+#endif
 }
 
 int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
@@ -251,7 +665,12 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
         if (list) {
             uint32_t s = bg_source(list);
             if (s == (uint32_t)(uintptr_t)bg_paths[0][0] ||
-                s == (uint32_t)(uintptr_t)bg_paths[0][1]) bg_set(list, 0);
+                s == (uint32_t)(uintptr_t)bg_paths[0][1]
+#if defined(__arm__) || defined(__thumb__)
+                || (g_blur_draw_buf && s == g_blur_draw_buf &&
+                    !rh_background_is_blur(new_paths[0]))
+#endif
+                ) bg_set(list, 0);
         }
     }
     {
@@ -259,21 +678,38 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
         if (cc) {
             uint32_t s = bg_source(cc);
             if (s == (uint32_t)(uintptr_t)bg_paths[1][0] ||
-                s == (uint32_t)(uintptr_t)bg_paths[1][1]) bg_set(cc, 0);
+                s == (uint32_t)(uintptr_t)bg_paths[1][1]
+#if defined(__arm__) || defined(__thumb__)
+                || (g_blur_draw_buf && s == g_blur_draw_buf &&
+                    !rh_background_is_blur(new_paths[1]))
+#endif
+                ) bg_set(cc, 0);
         }
     }
     {
         uint32_t ntf = notify_container();
-        uint32_t list = load32(RH_LB_NOTIFY_LIST_SLOT);
+        uint32_t list;
         if (ntf) {
             uint32_t s = bg_source(ntf);
             if (s == (uint32_t)(uintptr_t)bg_paths[2][0] ||
-                s == (uint32_t)(uintptr_t)bg_paths[2][1]) bg_set(ntf, 0);
+                s == (uint32_t)(uintptr_t)bg_paths[2][1]
+#if defined(__arm__) || defined(__thumb__)
+                || (g_blur_draw_buf && s == g_blur_draw_buf &&
+                    !rh_background_is_blur(new_paths[2]))
+#endif
+                ) bg_set(ntf, 0);
         }
+        /* A container setter can synchronously delete/rebuild its sibling. */
+        list = load32(RH_LB_NOTIFY_LIST_SLOT);
         if (list && load32(list) == RH_LB_NOTIFY_LIST_CLASS) {
             uint32_t s = bg_source(list);
             if (s == (uint32_t)(uintptr_t)bg_paths[2][0] ||
-                s == (uint32_t)(uintptr_t)bg_paths[2][1]) bg_set(list, 0);
+                s == (uint32_t)(uintptr_t)bg_paths[2][1]
+#if defined(__arm__) || defined(__thumb__)
+                || (g_blur_draw_buf && s == g_blur_draw_buf &&
+                    !rh_background_is_blur(new_paths[2]))
+#endif
+                ) bg_set(list, 0);
         }
     }
 
@@ -282,7 +718,7 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     /* Retire old paths from image caches */
     for (k = 0; k < 3; ++k) {
         const char *old = bg_paths[k][bg_path_index];
-        if (old[0]) {
+        if (old[0] && !rh_background_is_blur(old)) {
             if (header_cache && (!cache_valid(header_cache, RH_FW_HEADER_CACHE_CLASS) ||
                 retire_cache(header_cache, 0, 0, old))) return -2145;
             if (image_cache && (!cache_valid(image_cache, RH_FW_IMAGE_CACHE_CLASS) ||
@@ -299,7 +735,19 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
         bg_active[k] = new_paths[k][0] != 0;
     }
     bg_path_index = next;
+#if defined(__arm__) || defined(__thumb__)
+    ++background_epoch;
+    background_retry = 0;
+    backgrounds_reset_visibility();
+    s_blur_needed = rh_background_is_blur(new_paths[0]) ||
+                    rh_background_is_blur(new_paths[1]) ||
+                    rh_background_is_blur(new_paths[2]);
+#endif
     rh_platform_backgrounds_poll();
+#if defined(__arm__) || defined(__thumb__)
+    if (background_display && background_display_live(background_display))
+        backgrounds_wake_display(background_display);
+#endif
     return 0;
 }
 

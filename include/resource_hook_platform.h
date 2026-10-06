@@ -43,8 +43,9 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *,
 int rh_platform_calendar_affected(const struct rh_mapping_view *,
                                   const struct rh_mapping_view *);
 int rh_platform_refresh_calendar(void);
-/* Experimental .177 only. All calls are serialized by the existing UI watcher.
- * Stage validates/decodes once; commit/poll touch launcher, control and notify views. */
+/* Experimental .177 only. UI-owner-only, outside the IRQ lock. The watcher
+ * stages/commits configuration and maintains one display subscription; native
+ * refresh events own visibility, pixel generation and background attachment. */
 struct rh_backgrounds;
 int rh_platform_backgrounds_stage(const struct rh_backgrounds *);
 int rh_platform_backgrounds_commit(const struct rh_backgrounds *);

@@ -110,6 +110,53 @@ async function main() {
   }
 
   {
+    const base = { format: 'canopus-resource-pack', formatVersion: 1,
+      themeId: 'blur', name: 'blur', mappings: [] };
+    const parse = value => pack.parseResourcePackManifest(JSON.stringify(value));
+    for (const key of ['control_center', 'unknown', 'Launcher', '__proto__']) {
+      for (const backgrounds of [{ [key]: 'blur' }, { launcher: 'blur', [key]: 'blur' }])
+        assert.throws(() => parse({ ...base, backgrounds }), /backgrounds.*格式无效/,
+          `unknown backgrounds key ${key} must not be silently dropped`);
+    }
+    assert.deepEqual(parse({ ...base, backgrounds: {} }).backgrounds, {});
+    const expected = {
+      launcher: { mode: 'blur' }, controlCenter: { mode: 'blur' }, notifications: { mode: 'blur' }
+    };
+    const expectedCfg = 'version=1\nlauncher=blur\ncontrol_center=blur\nnotifications=blur\n';
+    for (const backgrounds of [expected,
+      { launcher: 'blur', controlCenter: 'blur', notifications: 'blur' },
+      { launcher: { mode: 'blur' }, controlCenter: 'blur', notifications: { mode: 'blur' } }]) {
+      const manifest = parse({ ...base, backgrounds });
+      const roundtrip = parse(manifest);
+      assert.deepEqual(manifest.backgrounds, expected);
+      assert.deepEqual(roundtrip, manifest, 'all-three blur normalization roundtrips');
+      pack.validateResourcePackFiles(roundtrip, []);
+      const theme = { themeId: 'blur', manifest: roundtrip, files: [] };
+      assert.equal(activation.serializeBackgrounds([theme]), expectedCfg);
+      const file = makeFileApi();
+      const snapshot = { installedThemeIds: ['blur'], themes: new Map([['blur', theme]]) };
+      const plan = await activation.regenerateActiveMappings(['blur', systemId], 'blur', file, {}, snapshot);
+      assert.equal(plan.backgrounds, expectedCfg);
+      assert.equal(file.text.get('internal://files/backgrounds.cfg'), expectedCfg,
+        'publication keeps blur for all three native CFG keys');
+    }
+    // Keep documented system/image strings and the legacy launcher alias working.
+    const shorthand = parse({ ...base, backgrounds: {
+      launcher: 'assets/bg.bin', controlCenter: 'system', notifications: 'blur'
+    } });
+    assert.deepEqual(shorthand.backgrounds, {
+      launcher: { mode: 'image', image: 'assets/bg.bin' },
+      controlCenter: { mode: 'system' }, notifications: { mode: 'blur' }
+    });
+    assert.deepEqual(parse(shorthand), shorthand);
+    for (const launcherBackground of ['blur', { mode: 'blur' }, 'system', 'assets/bg.bin']) {
+      const legacy = parse({ ...base, launcherBackground });
+      assert.deepEqual(legacy.backgrounds.launcher, legacy.launcherBackground);
+      assert.deepEqual(parse(legacy), legacy);
+    }
+  }
+
+  {
     const file = makeFileApi();
     const bg = 'internal://files/backgrounds.cfg';
     const imageManifest = { format: 'canopus-resource-pack', formatVersion: 1,

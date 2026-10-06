@@ -51,6 +51,18 @@ class Target177(unittest.TestCase):
             0x0c542384: (30, '0fb05bc295311d9f17f22c605982fb4896382f30c611ddf0e7772301eace738f'),
             0x0c542744: (66, '3bc557becdf5340550356ab76b7d3539f28bf8dad3698c915cf1676d488b3fb3'),
             0x0c386de2: (1056, 'add4cedc6c19ace4b701fd844109dfa436403278929d20f5000f9731bbfe567a'),
+            0x0c3a3ec0: (68, 'a498eba8b0b9075ddc6f9e549336cd23315d45399d17e2ed6ebb2b76bf627e07'),
+            0x0c381e66: (72, 'b48003ab99a6895cbcf7e65f7983f903a0b28062e4b6310bc72e0716b682afb4'),
+            0x0c381d4c: (218, 'bd0cc1f042f941a3335cc26df6c56162c108d773222770c1c52a985ae4c69319'),
+            0x0c383f00: (56, '324435ff22516191c749e69e1f7eb04a6ac5386551579c39e78d27ff9ed12148'),
+            0x0c91e58c: (94, '566f5d7dc2d19222bc4f3f7eddeb65a4fdab7d5b3882c1cf8fe77916a34fccb0'),
+            0x0c92e5f4: (20, 'e151f6c922c49f59976e22d90c2488ec5ee0fce08ffe19d909002a796933cc84'),
+            0x0c721248: (8, '1c1b157c1c2bdd78f2f21b23e585316448b4d47d83e16f5f4b80e3c5b187e91a'),
+            0x0c3894d0: (1816, 'ce13f06888614813801e2d848ce8e92d1792599030f6270b5a66bd23a00b3570'),
+            0x0c38928c: (570, 'b3480293da196336dc2ade3da1292b4342fa5193b43001932f4d97782ca7033d'),
+            0x0c386c14: (178, 'ba3c620812042fb1c6955fcf594a67a024b08fedaecb9cc1f21fcbb32fd00c41'),
+            0x0c386904: (106, 'e9fc0c738f391473a8d6e90d9a5ee1fe10422c394aab03c90c8d6a915c9510bb'),
+            0x0c384528: (196, 'f8af3d771a661d93a5c21871532fb59cad700ec8976089609368a67da2ea02ed'),
         }
         for address, (size, expected) in witnesses.items():
             offset = address - 0x0c0c0000
@@ -61,6 +73,12 @@ class Target177(unittest.TestCase):
         macros = (ROOT / 'include/resource_hook_target_177.h').read_text()
         for name, address in {
             'STYLE_SET': 0x0c383435,
+            'DISPLAY_EVENT_ADD': 0x0c3a3ec1, 'DISPLAY_EVENT_REMOVE': 0x0c381e67,
+            'LAYOUT_UPDATE': 0x0c383f01, 'VISIBLE_AREA': 0x0c381d4d,
+            'GPU_FINISH': 0x0c91e58d, 'DCACHE_SYNC': 0x0c92e5f5,
+            'DCACHE_INVALIDATE': 0x0c721249,
+            'SNAPSHOT_TAKE': 0x0c5f126d, 'SNAPSHOT_FREE': 0x0c8f29ed,
+            'DRAW_BUF_CREATE': 0x0c386c15, 'DRAW_BUF_HANDLERS': 0x200bd18c,
             'LIST_CLASS': 0x2ca435bc, 'BASE_CLASS': 0x2ca3bad4,
             'MAIN_ROOT_SLOT': 0x200c5f10, 'MAIN_CACHE_SLOT': 0x200c5f0c,
             'MORE_ROOT_SLOT': 0x200c5adc, 'MORE_CACHE_SLOT': 0x200c5ad8,
@@ -72,6 +90,39 @@ class Target177(unittest.TestCase):
             value = re.search(r'#define RH_LB_' + name + r' (0x[0-9a-f]+)u', macros)
             self.assertIsNotNone(value)
             self.assertEqual(int(value[1], 16), address)
+
+    def test_background_refresh_records_remain_private_and_unprobed(self):
+        target = 'xiaomi-band-11-4.100.177'
+        evidence_id = 'EVID-RESOURCE-BACKGROUND-REFRESH-177-001'
+        roles = {
+            'background_event_list_add': 0x0c3a3ec0,
+            'background_display_event_remove': 0x0c381e66,
+            'background_visible_area': 0x0c381d4c,
+            'background_layout_update': 0x0c383f00,
+            'background_gpu_finish': 0x0c91e58c,
+            'background_dcache_sync': 0x0c92e5f4,
+            'background_dcache_invalidate': 0x0c721248,
+        }
+        for role, entry in roles.items():
+            with self.subTest(role=role):
+                path = PACK / 'symbols' / f'{target}.private_abi.{role}.json'
+                record = json.loads(path.read_text())
+                self.assertEqual(int(record['entry_address'], 16), entry)
+                self.assertEqual(int(record['callable_address'], 16), entry | 1)
+                self.assertEqual(record['target_id'], target)
+                self.assertEqual(record['policy'], 'restricted')
+                self.assertEqual(record['approval_state'], 'PENDING')
+                self.assertEqual(record['status'], 'STATIC_RECOVERED')
+                self.assertEqual(record['proof']['device'], 'not_probed')
+                self.assertEqual(record['proof']['evidence_ids'], [evidence_id])
+                self.assertIn('target-private-ui-owner', record['contexts']['allowed'])
+                self.assertEqual(record['provenance']['firmware_sha256'],
+                    'ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b')
+        evidence = json.loads((PACK / 'evidence' / f'{evidence_id}.json').read_text())
+        self.assertEqual(evidence['verdict'], 'STATIC_RECOVERED')
+        self.assertCountEqual(evidence['candidate_symbols'],
+            [f'{target}.private_abi.{role}' for role in roles])
+        self.assertTrue(any('ROM' in assumption for assumption in evidence['unsafe_assumptions']))
 
     def test_manifest_and_delivery_pin_identity(self):
         import runpy

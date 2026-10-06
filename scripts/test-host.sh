@@ -26,6 +26,7 @@ for target in 139 1043; do
     "$ROOT/build/test_launcher_background_$target"
 done
 CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
+CC="$CC" python3 "$ROOT/tests/test_blur_background_native.py"
 # Compile the actual shared transaction for each exact address selection.
 # Fonts are part of the ordinary runtime; no opt-in or legacy stub matrix.
 for target in 139 155 177 1043; do

@@ -46,7 +46,7 @@ export interface ResourcePackMapping {
   destination: string;
 }
 
-export type BackgroundSetting = { mode: "system" } | { mode: "image"; image: string };
+export type BackgroundSetting = { mode: "system" } | { mode: "blur" } | { mode: "image"; image: string };
 export type LauncherBackground = BackgroundSetting;
 
 export interface BackgroundsDeclaration {
@@ -188,11 +188,16 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
   }
   const mappings = parseMappings(value.mappings, value.quickappIcons, value.themeId);
   function parseBackgroundSetting(val: unknown, themeId: string, label: string): BackgroundSetting {
-    if (typeof val === "string") val = { mode: "image", image: val };
-    if (!isRecord(val) || (val.mode !== "system" && val.mode !== "image") ||
+    if (typeof val === "string") {
+      if (val === "system") return { mode: "system" };
+      if (val === "blur") return { mode: "blur" };
+      val = { mode: "image", image: val };
+    }
+    if (!isRecord(val) || (val.mode !== "system" && val.mode !== "blur" && val.mode !== "image") ||
         Object.keys(val).some(key => key !== "mode" && !(val.mode === "image" && key === "image")))
       throw new Error(`${label} 格式无效`);
     if (val.mode === "system") return { mode: "system" };
+    if (val.mode === "blur") return { mode: "blur" };
     const image = val.image;
     if (typeof image !== "string" || !safeRelativeResourcePath(image) || image.endsWith("/") ||
         isReservedResourcePackPath(image) ||
@@ -203,7 +208,10 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
 
   let backgrounds: BackgroundsDeclaration | undefined;
   if (value.backgrounds !== undefined) {
-    if (!isRecord(value.backgrounds)) throw new Error("backgrounds 格式无效");
+    if (!isRecord(value.backgrounds) ||
+        Object.keys(value.backgrounds).some(key =>
+          key !== "launcher" && key !== "controlCenter" && key !== "notifications"))
+      throw new Error("backgrounds 格式无效");
     backgrounds = {};
     if (value.backgrounds.launcher !== undefined)
       backgrounds.launcher = parseBackgroundSetting(value.backgrounds.launcher, value.themeId, "backgrounds.launcher");
