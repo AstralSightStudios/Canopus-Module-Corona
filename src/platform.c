@@ -226,8 +226,11 @@ void rh_platform_backgrounds_poll(void) {
     }
     if (bg_active[2]) {
         uint32_t ntf = notify_container();
+        uint32_t list = load32(RH_LB_NOTIFY_LIST_SLOT);
         uint32_t source = (uint32_t)(uintptr_t)bg_paths[2][bg_path_index];
         if (ntf && bg_source(ntf) != source) bg_set(ntf, source);
+        if (list && load32(list) == RH_LB_NOTIFY_LIST_CLASS && bg_source(list) != source)
+            bg_set(list, source);
     }
 }
 
@@ -261,10 +264,16 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     }
     {
         uint32_t ntf = notify_container();
+        uint32_t list = load32(RH_LB_NOTIFY_LIST_SLOT);
         if (ntf) {
             uint32_t s = bg_source(ntf);
             if (s == (uint32_t)(uintptr_t)bg_paths[2][0] ||
                 s == (uint32_t)(uintptr_t)bg_paths[2][1]) bg_set(ntf, 0);
+        }
+        if (list && load32(list) == RH_LB_NOTIFY_LIST_CLASS) {
+            uint32_t s = bg_source(list);
+            if (s == (uint32_t)(uintptr_t)bg_paths[2][0] ||
+                s == (uint32_t)(uintptr_t)bg_paths[2][1]) bg_set(list, 0);
         }
     }
 

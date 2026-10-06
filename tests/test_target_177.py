@@ -66,6 +66,8 @@ class Target177(unittest.TestCase):
             'MORE_ROOT_SLOT': 0x200c5adc, 'MORE_CACHE_SLOT': 0x200c5ad8,
             'CONTROL_PRESENTER_SLOT': 0x200c5668,
             'NOTIFY_CONTAINER_SLOT': 0x200c633c,
+            'NOTIFY_LIST_SLOT': 0x200c6240,
+            'NOTIFY_LIST_CLASS': 0x2ca3bab0,
         }.items():
             value = re.search(r'#define RH_LB_' + name + r' (0x[0-9a-f]+)u', macros)
             self.assertIsNotNone(value)
