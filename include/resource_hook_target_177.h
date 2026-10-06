@@ -60,6 +60,14 @@
 /* Experimental launcher/ui background adapter: exact .177 static recovery.
  * See targets/xiaomi-band-11-4.100.177/launcher-background.md. */
 #define RH_LB_STYLE_SET 0x0c383435u
+/* IDA .177: per-object event add forwards r0-r3 to generic list add;
+ * remove takes object + callback. Rectangle init zeros 116 bytes; draw copies
+ * descriptors into native tasks and duplicates filesystem source names.
+ * 0x0c387f78 is LABEL draw, not image draw: deliberately unused. */
+#define RH_LB_OBJECT_EVENT_ADD 0x0c37fbedu
+#define RH_LB_OBJECT_EVENT_REMOVE 0x0c37fc33u
+#define RH_LB_RECT_INIT 0x0c38e03du
+#define RH_LB_RECT_DRAW 0x0c38e47du
 #define RH_LB_LIST_CLASS 0x2ca435bcu
 #define RH_LB_BASE_CLASS 0x2ca3bad4u
 #define RH_LB_MAIN_ROOT_SLOT 0x200c5f10u

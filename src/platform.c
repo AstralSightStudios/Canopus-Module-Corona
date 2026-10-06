@@ -125,8 +125,9 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     return retire_cache(data, 4u, mapping, 0);
 }
 #if defined(RH_TARGET_177) && RH_TARGET_177
-/* Native background style for launcher, control center, and notifications.
- * Property 40 is set directly on native list / container objects. */
+/* Screen-fixed native backgrounds for launcher, control center, and
+ * notifications. ARM ownership maps replace scrolling property-40 images
+ * with per-object DRAW_MAIN_END callbacks, before native child traversal. */
 static char bg_paths[3][2][RH_PATH];
 static unsigned bg_path_index;
 static unsigned bg_active[3];
@@ -173,7 +174,27 @@ static uint32_t notify_container(void) {
     return container && load32(container) == RH_LB_BASE_CLASS ? container : 0;
 }
 
+#if defined(__arm__) || defined(__thumb__)
+struct screen_background { uint32_t obj, source, original; };
+static struct screen_background screen_backgrounds[7];
+static void on_screen_background(void *event);
+static struct screen_background *screen_background_find(uint32_t obj) {
+    unsigned i;
+    for (i = 0; i < 7u; ++i)
+        if (screen_backgrounds[i].obj == obj) return &screen_backgrounds[i];
+    return 0;
+}
+#endif
+
 static uint32_t bg_source(uint32_t obj) {
+#if defined(__arm__) || defined(__thumb__)
+    struct screen_background *owned = screen_background_find(obj);
+    if (owned) {
+        uint32_t native = ((uint32_t (*)(uint32_t, uint32_t, uint32_t))
+            (uintptr_t)RH_FW_OBJECT_STYLE_GET)(obj, 0, 40u);
+        return native ? native : owned->source;
+    }
+#endif
     return ((uint32_t (*)(uint32_t, uint32_t, uint32_t))
         (uintptr_t)RH_FW_OBJECT_STYLE_GET)(obj, 0, 40u);
 }
@@ -186,6 +207,51 @@ static int background_frame_valid(uint32_t, unsigned);
 #endif
 
 static void bg_set(uint32_t obj, uint32_t source) {
+#if defined(__arm__) || defined(__thumb__)
+    /* Control Center retains its original container-relative rendering. */
+    if (obj == control_center_container()) {
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t))
+            (uintptr_t)RH_LB_STYLE_SET)(obj, 40u, source, 0);
+        return;
+    }
+    struct screen_background *owned = screen_background_find(obj);
+    unsigned i;
+    if (!owned && source) {
+        for (i = 0; i < 7u; ++i) if (!screen_backgrounds[i].obj) {
+            owned = &screen_backgrounds[i];
+            owned->original = bg_source(obj);
+            /* A recreated widget may inherit our descriptor/style value; it
+             * is not a system source and must never be restored on teardown. */
+            if (owned->original == source) owned->original = 0;
+            /* Publish before registration; DELETE retires the identity before
+             * native storage can be reused. One ALL callback per owned object. */
+            owned->obj = obj;
+            if (!((void *(*)(uint32_t, void (*)(void *), uint32_t, void *))
+                (uintptr_t)RH_LB_OBJECT_EVENT_ADD)(obj, on_screen_background, 0, 0)) {
+                *owned = (struct screen_background){0, 0, 0};
+                return;
+            }
+            break;
+        }
+    }
+    if (!owned && source) return;
+    if (owned && !source) {
+        uint32_t original = owned->original;
+        uint32_t native = ((uint32_t (*)(uint32_t, uint32_t, uint32_t))
+            (uintptr_t)RH_FW_OBJECT_STYLE_GET)(obj, 0, 40u);
+        /* Do not erase a system style installed while we owned the callback. */
+        if (native && native != owned->source) original = native;
+        ((int (*)(uint32_t, void (*)(void *)))
+            (uintptr_t)RH_LB_OBJECT_EVENT_REMOVE)(obj, on_screen_background);
+        *owned = (struct screen_background){0, 0, 0};
+        source = original;
+    } else if (owned) {
+        owned->source = source;
+        /* Keep our source in the identity map, NOT property 40: native image
+         * centering follows scrolling coords and would submit duplicate tasks. */
+        source = 0;
+    }
+#endif
     ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t))
         (uintptr_t)RH_LB_STYLE_SET)(obj, 40u, source, 0);
 }
@@ -386,6 +452,37 @@ done:
 static uint32_t rh_platform_get_blur_draw_buf(void) {
     return g_blur_valid ? g_blur_draw_buf : 0;
 }
+
+static void on_screen_background(void *event) {
+    uint32_t obj = *(const uint32_t *)event;
+    unsigned code = *(const uint16_t *)((const unsigned char *)event + 8u);
+    struct screen_background *owned = screen_background_find(obj);
+    uint32_t descriptor[29]; /* Native lv_draw_rect_dsc_t: 116 bytes. */
+    int32_t area[4] = {0, 0, 211, 519};
+    uint32_t layer;
+    /* Event +0 is current target, +4 is original target. Never paint (or
+     * retire ownership) for a descendant's bubbled event. */
+    if (!owned || obj != *((const uint32_t *)event + 1)) return;
+    if (code == 36u) {
+        *owned = (struct screen_background){0, 0, 0};
+        return;
+    }
+    /* DRAW_MAIN_END is after the object's native black/fill/border, but
+     * before children. The native renderer has already installed obj ∩ layer
+     * clipping. Full-screen GLOBAL coords stay fixed even on offscreen layers;
+     * the GPU consumer alone subtracts the layer origin. */
+    if (code != 25u || g_blur_updating || !owned->source) return;
+    layer = *(const uint32_t *)((const unsigned char *)event + 16u);
+    if (!layer) return;
+    ((void (*)(void *))(uintptr_t)RH_LB_RECT_INIT)(descriptor);
+    ((unsigned char *)descriptor)[32] = 0; /* No rectangle fill. */
+    descriptor[12] = owned->source; /* bg_image_src at +48. */
+    ((void (*)(uint32_t, const void *, const int32_t *))
+        (uintptr_t)RH_LB_RECT_DRAW)(layer, descriptor, area);
+    /* Native rectangle submission copies the descriptor and duplicates file
+     * names for deferred tasks. Blur draw buffers retain the existing GPU
+     * fence/cache lifetime; no pointer to this stack descriptor escapes. */
+}
 #endif
 
 #if defined(__arm__) || defined(__thumb__)
@@ -548,7 +645,13 @@ static void on_background_refresh(void *event) {
         if (!bg_active[type]) continue;
         obj = background_object(i);
         source = current_bg_source(type);
-        if (source && obj && bg_source(obj) != source) bg_set(obj, source);
+        if (source && obj &&
+            ((type != 1u && !screen_background_find(obj)) || bg_source(obj) != source)) {
+            bg_set(obj, source);
+            /* A failed registration leaves native styles untouched. Retry on
+             * the next native frame rather than silently reporting success. */
+            if (type != 1u && !screen_background_find(obj)) background_retry = 1;
+        }
         if (!background_frame_valid(display, epoch)) goto done;
     }
 done:
@@ -667,6 +770,7 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
             if (s == (uint32_t)(uintptr_t)bg_paths[0][0] ||
                 s == (uint32_t)(uintptr_t)bg_paths[0][1]
 #if defined(__arm__) || defined(__thumb__)
+                || (screen_background_find(list) && !new_paths[0][0])
                 || (g_blur_draw_buf && s == g_blur_draw_buf &&
                     !rh_background_is_blur(new_paths[0]))
 #endif
@@ -680,6 +784,7 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
             if (s == (uint32_t)(uintptr_t)bg_paths[1][0] ||
                 s == (uint32_t)(uintptr_t)bg_paths[1][1]
 #if defined(__arm__) || defined(__thumb__)
+                || (screen_background_find(cc) && !new_paths[1][0])
                 || (g_blur_draw_buf && s == g_blur_draw_buf &&
                     !rh_background_is_blur(new_paths[1]))
 #endif
@@ -697,6 +802,9 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
                 || (g_blur_draw_buf && s == g_blur_draw_buf &&
                     !rh_background_is_blur(new_paths[2]))
 #endif
+#if defined(__arm__) || defined(__thumb__)
+                || (screen_background_find(ntf) && !new_paths[2][0])
+#endif
                 ) bg_set(ntf, 0);
         }
         /* A container setter can synchronously delete/rebuild its sibling. */
@@ -708,6 +816,7 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
 #if defined(__arm__) || defined(__thumb__)
                 || (g_blur_draw_buf && s == g_blur_draw_buf &&
                     !rh_background_is_blur(new_paths[2]))
+                || (screen_background_find(list) && !new_paths[2][0])
 #endif
                 ) bg_set(list, 0);
         }

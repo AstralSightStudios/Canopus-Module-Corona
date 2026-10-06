@@ -73,6 +73,8 @@ class Target177(unittest.TestCase):
         macros = (ROOT / 'include/resource_hook_target_177.h').read_text()
         for name, address in {
             'STYLE_SET': 0x0c383435,
+            'OBJECT_EVENT_ADD': 0x0c37fbed, 'OBJECT_EVENT_REMOVE': 0x0c37fc33,
+            'RECT_INIT': 0x0c38e03d, 'RECT_DRAW': 0x0c38e47d,
             'DISPLAY_EVENT_ADD': 0x0c3a3ec1, 'DISPLAY_EVENT_REMOVE': 0x0c381e67,
             'LAYOUT_UPDATE': 0x0c383f01, 'VISIBLE_AREA': 0x0c381d4d,
             'GPU_FINISH': 0x0c91e58d, 'DCACHE_SYNC': 0x0c92e5f5,
@@ -123,6 +125,28 @@ class Target177(unittest.TestCase):
         self.assertCountEqual(evidence['candidate_symbols'],
             [f'{target}.private_abi.{role}' for role in roles])
         self.assertTrue(any('ROM' in assumption for assumption in evidence['unsafe_assumptions']))
+
+    def test_screen_background_abi_records(self):
+        roles = {
+            'background_object_event_add': (0x0c37fbec, 38, '5c7523af00abf015e2d3359ef9fc2b5114df295d9fd04a6efd1d7064c7c987d0'),
+            'background_object_event_remove': (0x0c37fc32, 62, '0a0881f3bf438263211967761aa5dc17e547592ebecb702725e2284287f3f5ce'),
+            'background_rect_init': (0x0c38e03c, 186, 'ee8fa724993a662037349d1c043e900f8ec4269cbdc0a59ce5096d537d3c076c'),
+            'background_rect_draw': (0x0c38e47c, 1246, '6b9094a17eadea647f445ac1680191cf4edb3561e675f5686413bc1e172c31dd'),
+        }
+        data = (ROOT.parent.parent / 'mifw/analysis-q66-177/177/vela_ap.bin').read_bytes()
+        evidence_id = 'EVID-RESOURCE-BACKGROUND-SCREEN-177-001'
+        for role, (entry, size, digest) in roles.items():
+            record = json.loads((PACK / 'symbols' /
+                f'xiaomi-band-11-4.100.177.private_abi.{role}.json').read_text())
+            self.assertEqual(int(record['entry_address'], 16), entry)
+            self.assertEqual(int(record['callable_address'], 16), entry | 1)
+            self.assertEqual(record['proof']['evidence_ids'], [evidence_id])
+            self.assertEqual(record['proof']['device'], 'not_probed')
+            self.assertIn('target-private-ui-owner', record['contexts']['allowed'])
+            offset = entry - 0x0c0c0000
+            self.assertEqual(hashlib.sha256(data[offset:offset + size]).hexdigest(), digest)
+        evidence = json.loads((PACK / 'evidence' / f'{evidence_id}.json').read_text())
+        self.assertEqual(len(evidence['candidate_symbols']), 4)
 
     def test_manifest_and_delivery_pin_identity(self):
         import runpy

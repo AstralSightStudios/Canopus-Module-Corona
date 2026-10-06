@@ -125,11 +125,50 @@ static uint32_t native_child(uint32_t root, int index) {
     else { assert(root == 0x2500u); i = 4; }
     return objects[i].present ? objects[i].id : 0;
 }
+static void (*object_callbacks[7])(void *);
+static uint32_t logical_background_source(uint32_t id);
+static void delete_background_identity(unsigned i) {
+    if (object_callbacks[i]) {
+        uint32_t event[7] = {objects[i].id, objects[i].id, 36u, 0, 0, 0, 0};
+        object_callbacks[i](event);
+        object_callbacks[i] = 0;
+    }
+}
+static int fail_object_event;
+static void *native_object_event(uint32_t id, void (*callback)(void *),
+                                 uint32_t filter, void *data) {
+    unsigned i = (unsigned)(object(id) - objects);
+    assert(!object_callbacks[i] && !filter && !data);
+    if (fail_object_event) return 0;
+    object_callbacks[i] = callback;
+    return &object_callbacks[i];
+}
+static int native_object_remove(uint32_t id, void (*callback)(void *)) {
+    unsigned i = (unsigned)(object(id) - objects);
+    assert(object_callbacks[i] == callback);
+    object_callbacks[i] = 0;
+    return 1;
+}
+static void native_rect_init(void *p) {
+    memset(p, 0, 116);
+    ((unsigned char *)p)[32] = 255;
+    ((unsigned char *)p)[59] = 255;
+}
+static unsigned rectangle_draws;
+static void native_rect_draw(uint32_t layer, const void *descriptor, const int32_t *area) {
+    const uint32_t *p = descriptor;
+    assert(layer == 0x9900u && p[12]);
+    assert(!((const unsigned char *)p)[32]);
+    assert(area[0] == 0 && area[1] == 0 && area[2] == 211 && area[3] == 519);
+    ++rectangle_draws;
+}
 static uint32_t native_get(uint32_t id, uint32_t part, uint32_t property) {
     assert(part == 0 && property == 40u);
     ++getters;
     ++object(id)->gets;
-    return object(id)->source;
+    unsigned i = (unsigned)(object(id) - objects);
+    return object_callbacks[i] && object(id)->source == logical_background_source(id)
+        ? 0 : object(id)->source;
 }
 static void native_set(uint32_t id, uint32_t property, uint32_t source,
                        uint32_t selector) {
@@ -138,8 +177,9 @@ static void native_set(uint32_t id, uint32_t property, uint32_t source,
     record('P');
     ++setters;
     ++object(id)->sets;
-    object(id)->source = source;
+    object(id)->source = source ? source : logical_background_source(id);
     if (id == objects[5].id && !source && rebuild_notify_list_mode >= 0) {
+        delete_background_identity(6);
         if (!rebuild_notify_list_mode) objects[6].present = 0;
         else {
             objects[6].id += 0x1000u; /* old sibling address is now poisoned */
@@ -284,6 +324,14 @@ static int retire_cache(uint32_t cache, uint32_t offset,
 #undef RH_LB_DRAW_BUF_CREATE
 #undef RH_LB_SNAPSHOT_TAKE
 #undef RH_LB_SNAPSHOT_FREE
+#undef RH_LB_OBJECT_EVENT_ADD
+#undef RH_LB_OBJECT_EVENT_REMOVE
+#undef RH_LB_RECT_INIT
+#undef RH_LB_RECT_DRAW
+#define RH_LB_OBJECT_EVENT_ADD ((uintptr_t)native_object_event)
+#define RH_LB_OBJECT_EVENT_REMOVE ((uintptr_t)native_object_remove)
+#define RH_LB_RECT_INIT ((uintptr_t)native_rect_init)
+#define RH_LB_RECT_DRAW ((uintptr_t)native_rect_draw)
 #define RH_LB_CHILD_GET ((uintptr_t)native_child)
 #define RH_LB_STYLE_SET ((uintptr_t)native_set)
 #define RH_FW_OBJECT_STYLE_GET ((uintptr_t)native_get)
@@ -303,6 +351,10 @@ static int retire_cache(uint32_t cache, uint32_t offset,
 '''
 
 CHECKS = r'''
+static uint32_t logical_background_source(uint32_t id) {
+    struct screen_background *owned = screen_background_find(id);
+    return owned ? owned->source : 0;
+}
 static void put16(uint8_t *p, unsigned offset, uint16_t value) {
     memcpy(p + offset, &value, sizeof(value));
 }
@@ -1057,11 +1109,71 @@ static void test_cache_reopen(void) {
     refresh();
     assert(snapshots == before + 1 && objects[1].source == dst_id);
 }
+static void test_screen_fixed(void) {
+    test_zero_default();
+    unsigned before = setters;
+    refresh();
+    assert(setters == before); /* No duplicate registrations/style submissions. */
+    for (unsigned i = 0; i < 7; ++i) {
+        if (i == 4) {
+            assert(!object_callbacks[i]);
+            assert(native_get(objects[i].id, 0, 40u) == dst_id);
+            continue;
+        }
+        unsigned expected = i > 4 ? i - 1 : i;
+        assert(object_callbacks[i]);
+        assert(native_get(objects[i].id, 0, 40u) == 0); /* Native default disabled. */
+        uint32_t event[7] = {objects[i].id, objects[i].id, 24u, 0, 0x9900u, 0, 0};
+        object_callbacks[i](event);
+        assert(rectangle_draws == expected);
+        event[2] = 25;
+        object_callbacks[i](event);
+        assert(rectangle_draws == expected + 1);
+        event[1] = 0xdeadbeefu; /* Descendant bubbling to current target. */
+        object_callbacks[i](event);
+        assert(rectangle_draws == expected + 1);
+        event[2] = 36;
+        object_callbacks[i](event);
+        assert(screen_background_find(objects[i].id));
+        event[1] = objects[i].id;
+        event[2] = 25;
+        g_blur_updating = 1;
+        object_callbacks[i](event);
+        g_blur_updating = 0;
+        assert(rectangle_draws == expected + 1);
+    }
+    delete_background_identity(5);
+    assert(!screen_background_find(objects[5].id));
+    objects[5].source = 0;
+    fail_object_event = 1;
+    refresh();
+    assert(background_retry && !object_callbacks[5] && !objects[5].source);
+    fail_object_event = 0;
+    refresh();
+    assert(object_callbacks[5] && screen_background_find(objects[5].id));
+    struct rh_backgrounds system = {"", "", ""};
+    assert(!rh_platform_backgrounds_commit(&system));
+    for (unsigned i = 0; i < 7; ++i) {
+        assert(!object_callbacks[i] && !screen_background_find(objects[i].id));
+        assert(!objects[i].source);
+    }
+    /* Independent foreign source survives our temporary ownership. */
+    objects[0].source = FOREIGN;
+    bg_set(objects[0].id, 0x12345678u);
+    bg_set(objects[0].id, 0);
+    assert(objects[0].source == FOREIGN && !object_callbacks[0]);
+    objects[0].source = 0;
+    bg_set(objects[0].id, 0x12345678u);
+    objects[0].source = FOREIGN; /* Native replacement during ownership. */
+    assert(!rh_platform_backgrounds_commit(&system));
+    assert(objects[0].source == FOREIGN && !object_callbacks[0]);
+}
 static void test_identity(unsigned kind) {
     test_zero_default();
     unsigned before = snapshots;
-    if (kind == 0) objects[4].id += 0x1000u; /* different visible identity, same style */
-    else objects[4].source = kind == 1 ? 0 : FOREIGN; /* recycled address/native style */
+    if (kind < 2) delete_background_identity(4);
+    if (kind == 0) objects[4].id += 0x1000u; /* delete/recreate at different address */
+    else objects[4].source = kind == 1 ? 0 : FOREIGN; /* reused address/native style */
     refresh();
     assert(snapshots == before + 1 && !s_blur_needed);
     all_published();
@@ -1132,6 +1244,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "retry-wake")) test_failed_frame_wakes_next_refresh();
     else if (!strcmp(argv[1], "visibility")) { assert(argc == 3); test_visibility((unsigned)atoi(argv[2])); }
     else if (!strcmp(argv[1], "cache-reopen")) test_cache_reopen();
+    else if (!strcmp(argv[1], "screen-fixed")) test_screen_fixed();
     else if (!strcmp(argv[1], "identity")) { assert(argc == 3); test_identity((unsigned)atoi(argv[2])); }
     else if (!strcmp(argv[1], "absent-visible")) test_absent_then_visible();
     else assert(!"unknown case");
@@ -1142,6 +1255,9 @@ int main(int argc, char **argv) {
 
 
 class BlurBackgroundNative(unittest.TestCase):
+    def test_screen_fixed_all_receivers_and_callback_lifecycle(self):
+        self.run_case('screen-fixed')
+
     @classmethod
     def setUpClass(cls):
         source = (ROOT / 'src/platform.c').read_text()

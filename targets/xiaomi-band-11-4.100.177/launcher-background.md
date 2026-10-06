@@ -32,6 +32,32 @@ This adapter assigns native main-part background-image property 40 to the exact
 launcher list, control center container, and notification container. Native
 background drawing remains behind the existing icons and widgets.
 
+## Screen-fixed background experiment
+
+The user reported successful device validation of this rendering path after
+Control Center was restored to container-relative rendering. No captured trace,
+detailed test procedure or frame measurements were supplied; independent GPU
+fault, coherence and performance probes remain NOT_PROBED.
+Launcher and notification receivers register one native object callback each.
+Control Center retains the original container-relative property-40 background
+following user feedback; it does not register a fixed-background callback. Its module-owned image
+source is retained separately while native property 40 is suppressed. Event 25
+(DRAW_MAIN_END) submits a native rectangle background image at global screen area
+`[0, 0, 211, 519]`, after the object's fill and before native child traversal.
+Native object/layer clipping limits the visible panel; the GPU handles layer-origin
+translation. No extra widget, class patch, rotation or scaling compensation is added.
+Notification container/list both use the same screen anchor so list fill cannot hide
+the replacement. Use opaque images for this experiment: transparent file images
+can composite twice where the notification container and list overlap. RGB565 blur
+buffers are opaque. Bubbled child events are ignored by comparing original and
+current event targets. Failed registration leaves native styles intact and retries
+on a later refresh; reload acceptance is not synchronous attachment confirmation. DELETE drops callback identity before object storage reuse, and
+system restoration removes the callback and restores the saved native image source.
+
+Check all three panels, empty/nonempty notifications, interrupted/reversed swipes,
+launcher more-apps and cached reattachment. Landmarks must remain screen-stationary
+with no trails, black strips or wallpaper outside the moving panel boundary.
+
 ## Configuration
 
 Authoritative package declaration in `corona.json`:
