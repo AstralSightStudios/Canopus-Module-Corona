@@ -17,10 +17,21 @@ for test in hook boundaries; do
         "$ROOT/tests/test_$test.c" -o "$ROOT/build/test_$test"
     "$ROOT/build/test_$test"
 done
+for target in 139 1043; do
+    DEFINE=
+    [ "$target" != 1043 ] || DEFINE=-DRH_TARGET_1043=1
+    "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        $DEFINE -I"$ROOT/include" "$ROOT/src/launcher_background.c" \
+        "$ROOT/tests/test_launcher_background.c" -o "$ROOT/build/test_launcher_background_$target"
+    "$ROOT/build/test_launcher_background_$target"
+done
+CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
 # Compile the actual shared transaction for each exact address selection.
 # Fonts are part of the ordinary runtime; no opt-in or legacy stub matrix.
-for target in 139 155 1043; do
-    if [ "$target" = 1043 ]; then
+for target in 139 155 177 1043; do
+    if [ "$target" = 177 ]; then
+        TARGET_DEFINE=-DRH_TARGET_177=1
+    elif [ "$target" = 1043 ]; then
         TARGET_DEFINE=-DRH_TARGET_1043=1
     elif [ "$target" = 155 ]; then
         TARGET_DEFINE=-DRH_TARGET_155=1
@@ -39,8 +50,12 @@ for target in 139 155 1043; do
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         $TARGET_DEFINE -I"$ROOT/include" -I"$SDK/sdk/c" \
         "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+        "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
+    if [ "$target" = 177 ]; then
+        "$ROOT/build/test_module_${target}" --launcher-background
+    fi
     "$ROOT/build/test_module_${target}" --font-reload
     "$ROOT/build/test_module_${target}"
     "$ROOT/build/test_module_${target}" --empty-startup

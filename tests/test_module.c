@@ -41,6 +41,33 @@ struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 static int calendar_mode, calendar_rc;
+#if defined(RH_TARGET_177) && RH_TARGET_177
+#define BACKGROUND_CONFIG_PATH RH_APP_FILES_ROOT "launcher-background.cfg"
+static const char *background_config; /* Missing in all legacy scenarios. */
+static unsigned background_position, background_opens, background_reads, background_closes;
+static unsigned background_stages, background_commits, background_polls;
+static int background_stage_rc;
+static char staged_background[RH_PATH], committed_background[RH_PATH];
+int rh_platform_launcher_background_stage(const char *path) {
+    assert(!locked && in_ui_timer && path && strlen(path) < RH_PATH);
+    background_stages++;
+    if (background_stage_rc) return background_stage_rc; /* e.g. image_info failure */
+    strcpy(staged_background, path);
+    return 0;
+}
+int rh_platform_launcher_background_commit(const char *path) {
+    assert(!locked && in_ui_timer && path && strlen(path) < RH_PATH);
+    /* ENOENT selects system without calling stage. */
+    assert(!path[0] || !strcmp(path, staged_background));
+    background_commits++;
+    strcpy(committed_background, path);
+    return 0;
+}
+void rh_platform_launcher_background_poll(void) {
+    assert(!locked && in_ui_timer);
+    background_polls++;
+}
+#endif
 static int quickapp_mode, quickapp_result, reenter_lookup;
 static unsigned quickapp_lookups, quickapp_owner_calls, quickapp_restores;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
@@ -158,6 +185,14 @@ int rh_platform_open(const char *path, int mode) {
         result_position=0; return 14;
     }
     assert(mode == 1);
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    if (!strcmp(path, BACKGROUND_CONFIG_PATH)) {
+        background_opens++;
+        background_position = 0;
+        if (!background_config) { open_errno = RH_ENOENT; return -1; }
+        return 16;
+    }
+#endif
     if (!strcmp(path, RH_CONTROL_REQUEST_PATH)) {
         signal_opens++;
         signal_position = 0;
@@ -204,6 +239,13 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     }
     if (fd == 11) { data = input; cursor = &position; }
     else if (fd == 12) { data = control_signal; cursor = &signal_position; }
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    else if (fd == 16) {
+        assert(background_config);
+        background_reads++;
+        data = background_config; cursor = &background_position;
+    }
+#endif
     else { assert(fd == 13); data = control_config; cursor = &control_position; }
     remaining = (unsigned)strlen(data) - *cursor;
     if (size > 3u) size = 3u;
@@ -255,6 +297,9 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
 void rh_platform_close(int fd) {
     assert(!locked);
     if(fd==14 || fd==15) return;
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    if (fd == 16) { background_closes++; return; }
+#endif
     assert(fd == registration_fd || fd == 11 || fd == 12 || fd == 13); closes++;
 }
 void *rh_platform_alloc(uint32_t size) {
@@ -568,6 +613,107 @@ static void assert_reload_status(int result, unsigned pending, unsigned changed,
              result, pending, changed, error ? "config_error" : "running", error, count);
     assert_result(control_signal, row);
 }
+#if defined(RH_TARGET_177) && RH_TARGET_177
+static void assert_background_map_unchanged(const struct temp_allocation *original) {
+    assert(original && original->live && persistent_allocs == 1u);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+}
+static int test_launcher_background(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    const struct temp_allocation *original = NULL;
+    unsigned i, opens, reads, stages, commits, polls, writes;
+    unsigned drops, metadata, fonts, draws;
+    background_config = "version=1\nmode=image\nimage=themes/current/start.bin\n";
+    control_config = config;
+    assert(d->activate(NULL) == 0);
+    assert(active_timers(1000u) == 1u && !background_opens && !background_commits);
+    fire_timers(50u);
+    fire_timers(1000u); /* Startup config is applied by the existing UI watcher. */
+    assert(background_opens == 1u && background_closes == 1u && background_reads);
+    assert(background_stages == 1u && background_commits == 1u && background_polls == 1u);
+    assert(!strcmp(committed_background, RH_THEME_ROOT "current/start.bin"));
+    for (i = 0; i < allocations; i++)
+        if (temp_allocations[i].live) { assert(!original); original = &temp_allocations[i]; }
+    assert_background_map_unchanged(original);
+    drops = image_drops; metadata = metadata_refreshes; fonts = font_calls; draws = redraws;
+    opens = background_opens; reads = background_reads;
+    query_status("resource-hook-status-v1\tng.lst.corona\tbackground-startup\n", 0, 1, 0);
+    assert(background_opens == opens && background_reads == reads);
+
+    /* Same mapping, different background: no map publication or generic refresh. */
+    background_config = "version=1\nmode=image\nimage=themes/current/next.bin\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbackground-image\n";
+    fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(background_opens == opens + 1u && background_stages == 2u && background_commits == 2u);
+    assert(!strcmp(committed_background, RH_THEME_ROOT "current/next.bin"));
+    assert_background_map_unchanged(original);
+    opens = background_opens; reads = background_reads; polls = background_polls;
+    stages = background_stages; commits = background_commits; writes = result_writes;
+    background_config = "malformed but not a new revision\n";
+    for (i = 0; i < 3u; i++) fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(background_opens == opens && background_reads == reads && result_writes == writes);
+    assert(background_stages == stages && background_commits == commits && background_polls == polls + 3u);
+    assert(!strcmp(committed_background, RH_THEME_ROOT "current/next.bin"));
+
+    background_config = "version=1\nmode=system\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbackground-system\n";
+    fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(!committed_background[0] && background_stages == stages + 1u && background_commits == commits + 1u);
+    assert_background_map_unchanged(original);
+
+    background_config = "version=1\nmode=image\nimage=themes/current/next.bin\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbackground-restore\n";
+    fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(!strcmp(committed_background, RH_THEME_ROOT "current/next.bin"));
+    stages = background_stages; commits = background_commits;
+
+    /* Reject even a changed candidate map before publishing it or the background. */
+    control_config = "/resource/\tthemes/other/\n";
+    background_config = "version=1\nmode=image\nimage=themes/current/../bad.bin\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbackground-malformed\n";
+    fire_timers(1000u);
+    assert_reload_status(-2142, 0, 0, -2142, 1);
+    assert(background_stages == stages && background_commits == commits);
+    assert(!strcmp(committed_background, RH_THEME_ROOT "current/next.bin"));
+    assert_background_map_unchanged(original);
+    opens = background_opens; reads = background_reads;
+    query_status("resource-hook-status-v1\tng.lst.corona\tbackground-invalid-status\n", -2142, 1, 0);
+    assert(background_opens == opens && background_reads == reads);
+
+    /* The adapter reports failed image_info/decode as a negative stage status. */
+    background_config = "version=1\nmode=image\nimage=themes/current/failed.bin\n";
+    background_stage_rc = -2143;
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbackground-stage-failed\n";
+    fire_timers(1000u);
+    assert_reload_status(-2143, 0, 0, -2143, 1);
+    assert(background_stages == stages + 1u && background_commits == commits);
+    assert(!strcmp(committed_background, RH_THEME_ROOT "current/next.bin"));
+    assert_background_map_unchanged(original);
+    opens = background_opens; reads = background_reads;
+    query_status("resource-hook-status-v1\tng.lst.corona\tbackground-stage-status\n", -2143, 1, 0);
+    assert(background_opens == opens && background_reads == reads);
+
+    /* A missing legacy cfg is ENOENT/system, not a parser or stage failure. */
+    background_stage_rc = 0;
+    background_config = NULL;
+    control_config = config;
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tbackground-missing\n";
+    stages = background_stages;
+    fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(!committed_background[0] && background_stages == stages && background_commits == commits + 1u);
+    assert_background_map_unchanged(original);
+    assert(image_drops == drops && metadata_refreshes == metadata && font_calls == fonts && redraws == draws);
+    assert(background_closes + 1u == background_opens); /* Only the missing open has no fd. */
+    assert(active_timers(1000u) == 1u && !active_timers(50u));
+    puts(".177 launcher background startup, same-map reload, failures and unchanged ticks passed");
+    return 0;
+}
+#endif
 static int test_control_reload_status(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned writes, opens, allocs, draws, i;
@@ -1475,6 +1621,10 @@ static int test_quickapp_integration(void) {
 }
 int main(int argc, char **argv) {
     test_relative_config();
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    if (argc == 2 && !strcmp(argv[1], "--launcher-background"))
+        return test_launcher_background();
+#endif
     if (argc == 2 && !strcmp(argv[1], "--control-reload-status"))
         return test_control_reload_status();
     if (argc == 2 && !strcmp(argv[1], "--control-quickapp-status"))
@@ -1529,6 +1679,8 @@ int main(int argc, char **argv) {
     assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-10-pro-3.101.043"));
+#elif defined(RH_TARGET_177) && RH_TARGET_177
+    assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.177"));
 #elif defined(RH_TARGET_155) && RH_TARGET_155
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.155"));
 #else

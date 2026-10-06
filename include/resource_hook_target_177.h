@@ -57,6 +57,15 @@
 #define RH_FW_IMAGE_SET_SRC 0x0c3b2b8du
 #define RH_FW_INVALIDATE_AREA 0x0c382081u
 #define RH_FW_MANAGER_PATH_LIST_HEAD_OFFSET 4u
+/* Experimental launcher background adapter: exact .177 static recovery.
+ * See targets/xiaomi-band-11-4.100.177/launcher-background.md. */
+#define RH_LB_CHILD_GET 0x0c381091u
+#define RH_LB_STYLE_SET 0x0c383435u
+#define RH_LB_LIST_CLASS 0x2ca435bcu
+#define RH_LB_MAIN_ROOT_SLOT 0x200c5f10u
+#define RH_LB_MAIN_CACHE_SLOT 0x200c5f0cu
+#define RH_LB_MORE_ROOT_SLOT 0x200c5adcu
+#define RH_LB_MORE_CACHE_SLOT 0x200c5ad8u
 #define RH_FW_OBJECT_STYLE_GET 0x0c380165u
 #define RH_FW_OBJECT_STYLE_REFRESH 0x0c382879u
 #define RH_FW_OBJECT_TREE_WALK 0x0c38151du

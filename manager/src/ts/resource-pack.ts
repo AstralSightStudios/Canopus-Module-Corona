@@ -46,6 +46,8 @@ export interface ResourcePackMapping {
   destination: string;
 }
 
+export type LauncherBackground = { mode: "system" } | { mode: "image"; image: string };
+
 export interface ResourcePackManifest {
   format: "canopus-resource-pack";
   formatVersion: 1;
@@ -57,6 +59,7 @@ export interface ResourcePackManifest {
   description?: string;
   targets?: string[];
   mappings: ResourcePackMapping[];
+  launcherBackground?: LauncherBackground;
 }
 
 function isRecord(value: unknown): value is { [key: string]: unknown } {
@@ -138,6 +141,7 @@ function parseMappings(value: unknown, quickappIcons: unknown, themeId: string):
 }
 
 function serializeMappings(mappings: ResourcePackMapping[], themeId: string): string {
+  if (!mappings.length) return "# empty mappings\n";
   const destinationRoot = `${THEME_DESTINATION_ROOT}${themeId}/`;
   return mappings.map(rule =>
     `${rule.source}\t${destinationRoot}${rule.destination}\n`).join("");
@@ -175,6 +179,24 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
       requiredText(target, `targets[${index}]`, 128));
   }
   const mappings = parseMappings(value.mappings, value.quickappIcons, value.themeId);
+  let launcherBackground: LauncherBackground | undefined;
+  if (value.launcherBackground !== undefined) {
+    const background = value.launcherBackground;
+    if (!isRecord(background) ||
+        (background.mode !== "system" && background.mode !== "image") ||
+        Object.keys(background).some(key => key !== "mode" &&
+          !(background.mode === "image" && key === "image")))
+      throw new Error("launcherBackground 格式无效");
+    if (background.mode === "system") launcherBackground = { mode: "system" };
+    else {
+      const image = background.image;
+      if (typeof image !== "string" || !safeRelativeResourcePath(image) || image.endsWith("/") ||
+          isReservedResourcePackPath(image) ||
+          !safeThemeDestination(`${THEME_DESTINATION_ROOT}${value.themeId}/${image}`))
+        throw new Error("launcherBackground.image 必须是安全的包内文件路径");
+      launcherBackground = { mode: "image", image };
+    }
+  }
 
   // Consume quickappIcons into canonical mappings only. Re-parsing serialized
   // normalized manifests must neither duplicate rules nor discard pack metadata.
@@ -189,7 +211,8 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     ...(author === undefined ? {} : { author }),
     ...(description === undefined ? {} : { description }),
     ...(targets === undefined ? {} : { targets }),
-    mappings
+    mappings,
+    ...(launcherBackground === undefined ? {} : { launcherBackground })
   };
 }
 
@@ -198,6 +221,9 @@ export function validateResourcePackFiles(
   manifest: ResourcePackManifest,
   relativePaths: string[],
 ): void {
+  if (manifest.launcherBackground?.mode === "image" &&
+      !relativePaths.includes(manifest.launcherBackground.image))
+    throw new Error("launcherBackground.image 不存在于资源包文件中");
   for (const mapping of manifest.mappings) {
     const exists = mapping.destination.endsWith("/")
       ? relativePaths.some(path => path.startsWith(mapping.destination))

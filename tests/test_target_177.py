@@ -38,6 +38,37 @@ class Target177(unittest.TestCase):
                                0x0ca3b4c0: 0x0c69fa6b}.items():
             self.assertEqual(struct.unpack_from('<I', data, address - 0x0c0c0000)[0], value)
 
+    def test_launcher_background_static_witnesses(self):
+        import os
+        path = Path(os.environ.get('RESOURCE_HOOK_FIRMWARE',
+            ROOT.parent.parent / 'mifw/analysis-q66-177/177/vela_ap.bin'))
+        data = path.read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(),
+            'ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b')
+        witnesses = {
+            0x0c381090: (34, '28f095facdda74b2cc04bc2badae8d6da723f564d62da9b2ebaf35dba1e6ebe0'),
+            0x0c383434: (304, '7b050a217e8a5e32d0eb821493d3dc42afd95e1190055a61bcf0e616db6e6c11'),
+            0x0c542384: (30, '0fb05bc295311d9f17f22c605982fb4896382f30c611ddf0e7772301eace738f'),
+            0x0c542744: (66, '3bc557becdf5340550356ab76b7d3539f28bf8dad3698c915cf1676d488b3fb3'),
+            0x0c386de2: (1056, 'add4cedc6c19ace4b701fd844109dfa436403278929d20f5000f9731bbfe567a'),
+        }
+        for address, (size, expected) in witnesses.items():
+            offset = address - 0x0c0c0000
+            self.assertEqual(hashlib.sha256(data[offset:offset + size]).hexdigest(), expected)
+        offset = 0x2ca435bc - 0x2c0c0000
+        self.assertEqual(data[offset:offset + 36].hex(),
+            'd4baa32c4527540c00000000000000000000000000000000d400000008020000c0051000')
+        macros = (ROOT / 'include/resource_hook_target_177.h').read_text()
+        for name, address in {
+            'CHILD_GET': 0x0c381091, 'STYLE_SET': 0x0c383435,
+            'LIST_CLASS': 0x2ca435bc, 'MAIN_ROOT_SLOT': 0x200c5f10,
+            'MAIN_CACHE_SLOT': 0x200c5f0c, 'MORE_ROOT_SLOT': 0x200c5adc,
+            'MORE_CACHE_SLOT': 0x200c5ad8,
+        }.items():
+            value = re.search(r'#define RH_LB_' + name + r' (0x[0-9a-f]+)u', macros)
+            self.assertIsNotNone(value)
+            self.assertEqual(int(value[1], 16), address)
+
     def test_manifest_and_delivery_pin_identity(self):
         import runpy
         targets = runpy.run_path(str(ROOT / 'scripts/verify-payload.py'))['TARGETS']

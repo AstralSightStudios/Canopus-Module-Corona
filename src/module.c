@@ -3,6 +3,7 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_quickapp.h"
 #include "resource_hook_font_reload.h"
+#include "resource_hook_background.h"
 
 #define RH_MODULE_ID "corona"
 #define RH_VERSION "0.3.0"
@@ -33,6 +34,10 @@ static int configured;
 /* Explicit config failures stay latched until a successful publication.
  * Autonomous QuickApp resolution has an independently recoverable error. */
 static int32_t config_error, quickapp_error;
+#if defined(RH_TARGET_177) && RH_TARGET_177
+static int32_t background_error;
+static unsigned background_initialized;
+#endif
 static uint32_t images_dropped;
 static uint32_t redraws;
 /* Reserved RHQ1 v5 field: no forced page rebuilds in the reload path. */
@@ -283,6 +288,26 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
     if (!rc) *used = total;
     return rc;
 }
+#if defined(RH_TARGET_177) && RH_TARGET_177
+static int background_stage(struct rh_launcher_background *candidate) {
+    char data[RH_PATH + 64u];
+    uint32_t used = 0;
+    int rc = read_bounded_file(RH_APP_FILES_ROOT "launcher-background.cfg",
+                               data, sizeof(data), &used);
+    candidate->image[0] = 0;
+    if (rc == 1) return 0; /* Old packages/configs mean system background. */
+    if (rc || rh_launcher_background_parse(data, used, candidate)) return -2142;
+    return rh_platform_launcher_background_stage(candidate->image);
+}
+static void background_start(void) {
+    struct rh_launcher_background candidate;
+    if (background_initialized) return;
+    background_error = background_stage(&candidate);
+    if (!background_error)
+        background_error = rh_platform_launcher_background_commit(candidate.image);
+    background_initialized = 1;
+}
+#endif
 static int valid_reload_signal(const char *signal, uint32_t size) {
     static const char package[] = "ng.lst.corona\t";
     uint32_t i, start = (uint32_t)(sizeof(RH_RELOAD_PREFIX) - 1u);
@@ -399,6 +424,9 @@ static struct control_status_snapshot control_status_snapshot(void) {
     struct control_status_snapshot status;
     uint32_t irq = rh_platform_lock();
     status.error = config_error ? config_error : quickapp_error;
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    if (!status.error) status.error = background_error;
+#endif
     status.count = S.count;
     status.pending = refresh_pending;
     rh_platform_unlock(irq);
@@ -472,6 +500,9 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     struct rh_snapshot *new_declarations = 0, *old_declarations = 0;
     struct rh_mapping_view captured_view;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    struct rh_launcher_background background_candidate;
+#endif
 
     /* Active maps may be empty; NULL is the transparent zero-rule snapshot. */
     irq = rh_platform_lock();
@@ -532,6 +563,16 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         goto done;
     }
 
+    #if defined(RH_TARGET_177) && RH_TARGET_177
+    if (revision) {
+        rc = background_stage(&background_candidate);
+        if (rc) {
+            background_error = rc;
+            publish_result(signal, signal_size, rc, 0, 0);
+            goto done;
+        }
+    }
+#endif
     quickapp_error = 0;
     identical = rh_snapshot_equal(captured, candidate);
     if (identical && !revision) {
@@ -601,6 +642,16 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         }
     }
     rh_platform_unlock(irq);
+    #if defined(RH_TARGET_177) && RH_TARGET_177
+    if (revision) {
+        background_error = rh_platform_launcher_background_commit(background_candidate.image);
+        background_initialized = 1;
+        if (background_error) {
+            publish_result(signal, signal_size, background_error, refresh_pending, 0);
+            goto done;
+        }
+    }
+#endif
     if (revision) remember_reload_signal(signal, signal_size);
     if (refresh_pending) {
         refresh_step(0, 1u);
@@ -632,6 +683,10 @@ static void watch_step(void *timer) {
     }
     control_busy = 1;
     rh_platform_unlock(irq);
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    background_start();
+    rh_platform_launcher_background_poll();
+#endif
     rc = read_bounded_file(RH_CONTROL_REQUEST_PATH, signal, sizeof(signal), &signal_size);
     if (!rc) {
         if (valid_status_signal(signal, signal_size)) kind = RH_REQUEST_STATUS;

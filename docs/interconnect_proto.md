@@ -58,6 +58,10 @@ dark.crpack  (ZIP)
 
 `format`、`formatVersion`、`themeId`、`name`、`mappings` 必填；`version`、`versionCode`、`author`、`description`、`targets` 可选，供发送端和设备 Manager 读取元数据，不参与传输续传或设备兼容性判定。`versionCode` 若存在，必须为 JSON number 类型的非负安全整数（0–9007199254740991）；不接受字符串、null、负数、小数或超出安全整数范围的值。省略时不默认补 0，旧包继续有效。`themeId` 必须符合下方路径约束；`name` 为非空字符串，最多 128 UTF-8 字节；`version` 最多 64 字节，`author` 最多 128 字节，`description` 最多 1 KiB；`targets` 最多 16 项，每项最多 128 字节。v1 不另设 `packageId`：资源官方 ID 始终等于 `themeId`，直接作为协议 `themeId` 和设备主题目录名，不另设 ID 字段。`mappings` 与下述可选 `quickappIcons` 是规范的映射声明来源，合计最多 256 项，顺序即序列化顺序；`source` 是符合模块限制的绝对固件资源路径或有效的 `@quickapp-icon/<package>` 精确图标 key，`destination` 是 ZIP 根目录下的安全相对路径，且必须与包内资源路径相对应。普通路径的目录/文件结尾斜杠类型须相同；快应用语义 key 始终是精确文件规则，包名末尾斜杠不表示目录。Manager 拼接 `themes/<themeId>/` 与 `destination`，生成相对于快应用 `internal://files/` 的目标路径；模块按固件目标补全原生根目录。TSV 不接受绝对目标路径。源路径与补全后的目标路径仍须符合模块的路径及长度限制；Manager 按受支持设备最长原生根目录预检长度。映射字段不得包含 ASCII 控制字节（含 NUL、TAB、CR、LF）或 DEL。允许 `mappings` 为空；只有它与 `quickappIcons` 均为空时，该主题才不产生重定向。Manager 按顺序将每项序列化为 `source<TAB>快应用文件区相对目标路径<LF>`，校验生成结果不超过 32 KiB。接收完成时生成主题目录内的派生 `mappings.tsv`；首页重载时从 manifest 和保存的顺序重新生成活动配置，避免把派生文件当作权威来源。跨包重叠源路径会按优先级静态合并文件；活动规则数仍不超过 256、活动配置不超过 32 KiB。`.crpack` 中不携带 `mappings.tsv`。`targets` 只是作者声明，不能替代固件或资源格式校验。v1 未定义的额外 JSON 字段可忽略；需要改变必填语义时必须提升 `formatVersion`。
 
+### Optional launcher background (experimental .177)
+
+`corona.json` may declare `"launcherBackground": {"mode":"image", "image":"backgrounds/launcher.bin"}` or `{"mode":"system"}`. The image is a safe package-relative existing file; omission inherits. The first declaration above the system-style divider wins as a whole. Background-only packs may use `mappings: []`. Manager preserves this declaration and generates separate `internal://files/launcher-background.cfg` before requesting reload; it never serializes the declaration into TSV. Only the experimental Band 11 .177 module consumes it. See [launcher background evidence and device test guide](../targets/xiaomi-band-11-4.100.177/launcher-background.md).
+
 ### 可选快应用图标声明
 
 ```json

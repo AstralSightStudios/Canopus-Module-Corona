@@ -1,5 +1,7 @@
 # Xiaomi Band 11 4.100.177
 
+Experimental launcher backgrounds: [configuration, static evidence and device test guide](launcher-background.md). The new background-enabled artifact is NOT_PROBED; prior user feedback below applies only to the earlier build.
+
 状态：STATIC_RECOVERED / build verified / device USER_REPORTED_PASS。
 用户反馈：使用提供的 AstroBox Ed25519 证书签名的 .177 表盘安装包实机验证通过。未提供逐功能测试记录；此反馈不代表全部原生生命周期、故障注入或 GPU 安全验证通过。
 

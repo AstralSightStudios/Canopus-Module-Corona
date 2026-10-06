@@ -86,6 +86,62 @@ async function main() {
   ], { stdio: 'inherit' });
   const order = require(path.join(temporary, 'resource-order.js'));
   const activation = require(path.join(temporary, 'resource-activation.js'));
+  const pack = require(path.join(temporary, 'resource-pack.js'));
+  {
+    const make = background => pack.parseResourcePackManifest(JSON.stringify({
+      format: 'canopus-resource-pack', formatVersion: 1, themeId: 'bg', name: 'bg',
+      mappings: [], ...(background === undefined ? {} : { launcherBackground: background })
+    }));
+    const image = make({ mode: 'image', image: 'assets/background.bin' });
+    assert.deepEqual(make().launcherBackground, undefined);
+    for (const background of [null, { mode: 'unknown' }, { mode: 'system', image: 'x' },
+      { mode: 'image', image: '../x' }, { mode: 'image', image: '/x' },
+      { mode: 'image', image: 'x\ny' }, { mode: 'image', image: 'dir/' }])
+      assert.throws(() => make(background));
+    assert.throws(() => pack.validateResourcePackFiles(image, []));
+    pack.validateResourcePackFiles(image, ['assets/background.bin']);
+    const theme = (manifest, active = true) => ({ themeId: 'bg', manifest, files: null, active });
+    assert.equal(activation.serializeLauncherBackground([theme(make()), theme(image)]),
+      'version=1\nmode=image\nimage=themes/bg/assets/background.bin\n');
+    assert.equal(activation.serializeLauncherBackground([theme(make({ mode: 'system' })), theme(image)]),
+      'version=1\nmode=system\n');
+    assert.equal(activation.serializeLauncherBackground([theme(image, false)]),
+      'version=1\nmode=system\n');
+  }
+
+  {
+    const file = makeFileApi();
+    const bg = 'internal://files/launcher-background.cfg';
+    const imageManifest = { format: 'canopus-resource-pack', formatVersion: 1,
+      themeId: 'image', name: 'image', mappings: [],
+      launcherBackground: { mode: 'image', image: 'bg.bin' } };
+    const systemManifest = { ...imageManifest, themeId: 'plain', name: 'plain',
+      launcherBackground: { mode: 'system' } };
+    const snapshot = { installedThemeIds: ['image', 'plain'], themes: new Map([
+      ['image', { themeId: 'image', manifest: imageManifest, files: [{ relativePath: 'bg.bin', sizeBytes: 1 }] }],
+      ['plain', { themeId: 'plain', manifest: systemManifest, files: [] }]
+    ]) };
+    const first = await activation.regenerateActiveMappings(['image', 'plain', systemId], 'bg1', file, {}, snapshot);
+    assert.equal(file.text.get(bg), 'version=1\nmode=image\nimage=themes/image/bg.bin\n');
+    assert.deepEqual(await activation.readProtectedThemeIds(file), ['image']);
+    const cached = await activation.regenerateActiveMappings(['image', 'plain', systemId], 'bg2', file, {}, snapshot);
+    assert.equal(cached, first, 'unchanged background reuses published plan');
+    const second = await activation.regenerateActiveMappings(['plain', 'image', systemId], 'bg3', file, {}, snapshot);
+    assert.equal(second.mappings, first.mappings, 'background-only order change leaves TSV unchanged');
+    assert.equal(file.text.get(bg), 'version=1\nmode=system\n');
+    assert.notEqual(second, first, 'background-only order change must republish');
+    assert.deepEqual(await activation.readProtectedThemeIds(file), ['image'], 'publication is not acknowledgement');
+    await activation.cleanupInactiveGenerations(null, file, second.mappings);
+    assert.deepEqual(await activation.readProtectedThemeIds(file), [], 'successful system switch releases image package');
+    const write = file.writeText;
+    file.writeText = async (uri, text) => { if (uri === bg) throw new Error('write failed'); return write(uri, text); };
+    await assert.rejects(activation.regenerateActiveMappings(['image', 'plain', systemId], 'bg4', file, {}, snapshot));
+    assert.equal(snapshot.activeMappings, undefined, 'failed publication cannot reuse cache');
+    assert.deepEqual(await activation.readProtectedThemeIds(file), ['image'], 'failed switch retains dependencies');
+    file.writeText = write;
+    await activation.regenerateActiveMappings(['image', 'plain', systemId], 'bg5', file, {}, snapshot);
+    assert.equal(file.text.get(bg), first.launcherBackground, 'retry repairs background config');
+  }
 
   {
     const file = makeFileApi();

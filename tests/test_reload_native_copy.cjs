@@ -179,7 +179,7 @@ async function testFreshSnapshots(api, activation) {
   const readsBefore = file.count('read');
   const plan = await activation.regenerateActiveMappings(['top', 'base', '@system', 'below', 'unused'],
     'fresh', file, choices, snapshot);
-  assert.equal(file.count('read') - readsBefore, 2, 'only protection metadata and prior active TSV are read');
+  assert.equal(file.count('read') - readsBefore, 3, 'only protection metadata, prior active TSV and prior launcher background are read');
   assert.match(plan.mappings, /\/resource\/a\.bin\tthemes\/below\/assets\/a\.bin\n/,
     'explicit selection below the system boundary remains available');
   assert.match(plan.mappings, /\/resource\/b\.bin\t@system\n/);
@@ -450,7 +450,7 @@ async function testReadBudget(api, activation) {
   assert.equal(sharedPlan.generation, null);
   for (const id of ids) assert.equal(shared.count('read', manifestUri(id)), 1);
   assert.equal(shared.count('read', inventoryUri), 1);
-  assert.equal(shared.count('read'), 7, 'both names for two manifests, one inventory, protection registry and prior TSV');
+  assert.equal(shared.count('read'), 8, 'both names for two manifests, one inventory, protection registry, prior TSV and prior launcher background');
   for (const method of ['info', 'copy', 'mkdir', 'list']) assert.equal(shared.count(method), 0, method);
   const before = shared.calls.length;
   assert.strictEqual(await activation.regenerateActiveMappings([...ids, '@system'], 'sample2', shared, {}, snapshot),
@@ -464,7 +464,7 @@ async function testReadBudget(api, activation) {
   assert.deepEqual(separatePlan.copies, []);
   for (const id of ids) assert.equal(separate.count('read', manifestUri(id)), 2);
   assert.equal(separate.count('read', inventoryUri), 2);
-  assert.equal(separate.count('read'), 12);
+  assert.equal(separate.count('read'), 13, 'includes prior launcher background protection read');
 
   const choices = { '/resource/icon0.bin': '@system', '/resource/icon1.bin': 'base' };
   const selected = await activation.regenerateActiveMappings([...ids, '@system'], 'choices', shared, choices, snapshot);

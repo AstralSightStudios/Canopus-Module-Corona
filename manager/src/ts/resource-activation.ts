@@ -18,6 +18,8 @@ import {
 } from "./resource-overrides";
 import type { ResourceOverrides, ResourcePackSnapshot } from "./resource-overrides";
 
+export const ACTIVE_LAUNCHER_BACKGROUND_URI = "internal://files/launcher-background.cfg";
+
 export const ACTIVE_MAPPINGS_URI = "internal://files/mappings.tsv";
 export const ACTIVE_GENERATIONS_URI = "internal://files/resource-active-generations.json";
 
@@ -47,6 +49,7 @@ export interface ActiveFileCopy {
 
 export interface ActiveMappingsPlan {
   mappings: string;
+  launcherBackground?: string;
   generation: string | null;
   copies: ActiveFileCopy[];
 }
@@ -120,6 +123,19 @@ export async function readProtectedThemeIds(
   file: Pick<ResourceAssetFileApi, "readOptionalText">,
 ): Promise<string[]> {
   return parseGenerationIndex(await file.readOptionalText(ACTIVE_GENERATIONS_URI)).protectedThemes || [];
+}
+
+function backgroundThemes(config: string): string[] {
+  const match = /^image=themes\/([a-z0-9_-]{1,64})\//m.exec(config);
+  return match ? [match[1]] : [];
+}
+
+export function serializeLauncherBackground(themesHighToLow: ThemeRules[]): string {
+  const winner = themesHighToLow.find(theme => theme.active !== false && theme.manifest.launcherBackground);
+  const background = winner?.manifest.launcherBackground;
+  return background?.mode === "image"
+    ? `version=1\nmode=image\nimage=themes/${winner!.themeId}/${background.image}\n`
+    : "version=1\nmode=system\n";
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
@@ -485,6 +501,18 @@ export async function regenerateActiveMappings(
   }
 
   const plan = planActiveMappings(themesHighToLow, generation, overrides);
+  plan.launcherBackground = serializeLauncherBackground(themesHighToLow);
+  const backgroundWinner = themesHighToLow.find(theme => theme.active !== false && theme.manifest.launcherBackground);
+  if (backgroundWinner?.manifest.launcherBackground?.mode === "image") {
+    const image = backgroundWinner.manifest.launcherBackground.image;
+    if (snapshot) {
+      if (!snapshot.themes.get(backgroundWinner.themeId)!.files.some(asset => asset.relativePath === image))
+        throw new Error("launcherBackground.image 不存在于资源包文件中");
+    } else {
+      const info = await file.readFileInfo(`${THEME_ROOT_URI}${backgroundWinner.themeId}/${image}`);
+      if (info.type !== "file") throw new Error("launcherBackground.image 不是文件");
+    }
+  }
   const previousText = await file.readOptionalText(ACTIVE_GENERATIONS_URI);
   const generationIndex = parseGenerationIndex(previousText);
   if (plan.generation && generationIndex.generations.indexOf(plan.generation) >= 0)
@@ -501,7 +529,9 @@ export async function regenerateActiveMappings(
     const protectedThemes = Array.from(new Set([
       ...(generationIndex.protectedThemes || []),
       ...directlyMappedThemes(previousMappings || ""),
-      ...directlyMappedThemes(plan.mappings)
+      ...directlyMappedThemes(plan.mappings),
+      ...backgroundThemes(await file.readOptionalText(ACTIVE_LAUNCHER_BACKGROUND_URI) || ""),
+      ...backgroundThemes(plan.launcherBackground!)
     ])).sort();
     // Either native write can fail after truncation. Preserve dependencies on
     // disk first, and never reuse a cache that could skip repairing the TSV.
@@ -510,6 +540,7 @@ export async function regenerateActiveMappings(
       generationIndex.protectedThemes = protectedThemes;
       await file.writeText(ACTIVE_GENERATIONS_URI, JSON.stringify(generationIndex));
     }
+    await file.writeText(ACTIVE_LAUNCHER_BACKGROUND_URI, plan.launcherBackground!);
     await file.writeText(ACTIVE_MAPPINGS_URI, plan.mappings);
   } catch (error) {
     if (plan.generation) {
@@ -534,7 +565,7 @@ export async function regenerateActiveMappings(
   // Retain only the latest published plan: acknowledged cleanup may remove any
   // earlier overlay. Signal/receipt failure outside this function does not evict it.
   if (snapshot) snapshot.activeMappings = { key: cacheKey,
-    plan: plan.copies.length ? { mappings: plan.mappings, generation: plan.generation, copies: [] } : plan };
+    plan: plan.copies.length ? { mappings: plan.mappings, launcherBackground: plan.launcherBackground, generation: plan.generation, copies: [] } : plan };
   return plan;
 }
 
@@ -563,7 +594,8 @@ export async function cleanupInactiveGenerations(
     }
   }
   const next: StoredGenerationIndex = { version: 1, generations: retained };
-  const protectedThemes = directlyMappedThemes(mappings || "");
+  const protectedThemes = Array.from(new Set([...directlyMappedThemes(mappings || ""),
+    ...backgroundThemes(await file.readOptionalText(ACTIVE_LAUNCHER_BACKGROUND_URI) || "")])).sort();
   if (protectedThemes.length) next.protectedThemes = protectedThemes;
   const serialized = JSON.stringify(next);
   if ((text !== null || retained.length || protectedThemes.length) && text !== serialized)

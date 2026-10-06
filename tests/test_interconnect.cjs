@@ -56,6 +56,10 @@ function makeNativeApi() {
       options.fail('missing', 301);
     },
     writeText(options) {
+      if (options.text === '') {
+        options.fail('invalid text', 202);
+        return;
+      }
       mutations.push(['writeText', options.uri]);
       text.set(options.uri, options.text);
       options.success();
@@ -201,6 +205,8 @@ async function main() {
   assert.equal(parsedCorona.mappings.length, 1);
   assert.equal(serializeResourcePackMappings(parsedCorona),
     '/resource/icons/\tthemes/dark/icons/\n');
+  assert.equal(serializeResourcePackMappings({ ...parsedCorona, mappings: [] }),
+    '# empty mappings\n');
   const id64 = 'a'.repeat(64);
   const id65 = 'a'.repeat(65);
   const parsed64 = parseResourcePackManifest(JSON.stringify({ ...coronaObject, themeId: id64 }), id64);
@@ -562,6 +568,45 @@ async function main() {
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
+
+  // A package with empty mappings (such as a background-only theme) must complete
+  // transfer and write '# empty mappings\n' without failing on Vela empty-text writeText.
+  const emptyMappingsPack = [
+    { relativePath: 'corona.json', bytes: Buffer.from(JSON.stringify({
+      format: 'canopus-resource-pack', formatVersion: 1, themeId: 'legacy',
+      name: 'Background Only', version: '1.0.0', mappings: [],
+      launcherBackground: { mode: 'image', image: 'bg.bin' }
+    })) },
+    { relativePath: 'bg.bin', bytes: Buffer.from([10, 20, 30]) }
+  ];
+  reply = messages(await deliver('T' + JSON.stringify({
+    operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: emptyMappingsPack.length,
+    totalBytes: emptyMappingsPack.reduce((sum, e) => sum + e.bytes.length, 0)
+  })));
+  assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
+  for (const [fileIndex, entry] of emptyMappingsPack.entries()) {
+    reply = messages(await deliver('T' + JSON.stringify({
+      operation: 'file', themeId: 'legacy', fileIndex,
+      relativePath: entry.relativePath, sizeBytes: entry.bytes.length
+    })));
+    assert(reply.some(packet => packet.operation === 'ack' && packet.fileIndex === fileIndex));
+  }
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'end', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  for (const [fileIndex, entry] of emptyMappingsPack.entries()) {
+    reply = messages(await deliver('P' + JSON.stringify({
+      themeId: 'legacy', fileIndex, sizeBytes: entry.bytes.length,
+      chunkSizeBytes: entry.bytes.length, chunkCount: 1
+    })));
+    assert(reply.some(packet => packet.status === 'ready'));
+    const fileHex = fileIndex.toString(16).padStart(4, '0');
+    assert.deepEqual(await deliver(`F${fileHex}0000${encodeBase91(entry.bytes)}`), [`A${fileHex}0000`]);
+    assert.deepEqual(await deliver(`C${fileHex}`), [`C${fileHex}`]);
+  }
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'legacy' })));
+  assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  assert.equal(native.text.get('internal://files/themes/legacy/mappings.tsv'), '# empty mappings\n');
+  assert(JSON.parse(native.text.get(installedUri)).includes('legacy'));
 
   async function transferCapacityPack(ruleCount) {
     // Mapping-rule capacity remains independent of the number of transferred files.

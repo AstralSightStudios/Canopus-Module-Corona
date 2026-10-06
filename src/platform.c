@@ -123,6 +123,98 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     if (retire_cache(header, 0u, mapping, 0)) return -1;
     return retire_cache(data, 4u, mapping, 0);
 }
+#if defined(RH_TARGET_177) && RH_TARGET_177
+/* Native background style, not an extra child: preserve child[0], scrolling,
+ * hit testing and native list caching. Path storage remains module-resident. */
+static char launcher_paths[2][RH_PATH];
+static unsigned launcher_path_index;
+static unsigned launcher_background_active;
+static const uint32_t launcher_slots[4] = {
+    RH_LB_MAIN_ROOT_SLOT, RH_LB_MAIN_CACHE_SLOT,
+    RH_LB_MORE_ROOT_SLOT, RH_LB_MORE_CACHE_SLOT
+};
+static uint32_t launcher_list(unsigned i) {
+    uint32_t root = load32(launcher_slots[i]);
+    uint32_t list;
+    if (!root) return 0;
+    list = ((uint32_t (*)(uint32_t, int))(uintptr_t)RH_LB_CHILD_GET)(root, 0);
+    return list && load32(list) == RH_LB_LIST_CLASS ? list : 0;
+}
+static uint32_t launcher_source(uint32_t list) {
+    return ((uint32_t (*)(uint32_t, uint32_t, uint32_t))
+        (uintptr_t)RH_FW_OBJECT_STYLE_GET)(list, 0, 40u);
+}
+static void launcher_set(uint32_t list, uint32_t source) {
+    ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t))
+        (uintptr_t)RH_LB_STYLE_SET)(list, 40u, source, 0);
+}
+int rh_platform_launcher_background_stage(const char *path) {
+    uint32_t header[3] = {0, 0, 0};
+    uint32_t cache;
+    if (!path[0]) return 0;
+    /* An explicit reload may replace bytes at the same filename. Drop only
+     * that key before preflight so a cached header cannot mask a bad update. */
+    cache = load32(RH_FW_HEADER_CACHE_SLOT);
+    if (cache && (!cache_valid(cache, RH_FW_HEADER_CACHE_CLASS) ||
+        retire_cache(cache, 0, 0, path))) return -2145;
+    cache = load32(RH_FW_IMAGE_CACHE_SLOT);
+    if (cache && (!cache_valid(cache, RH_FW_IMAGE_CACHE_CLASS) ||
+        retire_cache(cache, 4, 0, path))) return -2145;
+    /* One preflight per activation; never decode/check files in poll or draw. */
+    return ((int (*)(const char *, void *))(uintptr_t)RH_FW_IMAGE_GET_INFO)
+        (path, header) == 1 ? 0 : -2143;
+}
+void rh_platform_launcher_background_poll(void) {
+    unsigned i;
+    if (!launcher_background_active) return;
+    for (i = 0; i < 4; ++i) {
+        uint32_t list = launcher_list(i);
+        uint32_t source = (uint32_t)(uintptr_t)launcher_paths[launcher_path_index];
+        /* Getter handles cached/recreated objects and address reuse. No tree walk. */
+        if (list && launcher_source(list) != source) launcher_set(list, source);
+    }
+}
+int rh_platform_launcher_background_commit(const char *path) {
+    unsigned i, next = launcher_path_index ^ 1u;
+    uint32_t header_cache, image_cache;
+    const char *old = launcher_paths[launcher_path_index];
+    for (i = 0; i < 4; ++i) {
+        uint32_t list = launcher_list(i);
+        if (list) {
+            uint32_t source = launcher_source(list);
+            if (source == (uint32_t)(uintptr_t)launcher_paths[0] ||
+                source == (uint32_t)(uintptr_t)launcher_paths[1]) launcher_set(list, 0);
+        }
+    }
+    launcher_background_active = 0;
+    /* Exact key retirement only on reload, including same-path asset updates. */
+    header_cache = load32(RH_FW_HEADER_CACHE_SLOT);
+    image_cache = load32(RH_FW_IMAGE_CACHE_SLOT);
+    if (old[0]) {
+        if (header_cache && (!cache_valid(header_cache, RH_FW_HEADER_CACHE_CLASS) ||
+            retire_cache(header_cache, 0, 0, old))) return -2145;
+        if (image_cache && (!cache_valid(image_cache, RH_FW_IMAGE_CACHE_CLASS) ||
+            retire_cache(image_cache, 4, 0, old))) return -2145;
+    }
+    for (i = 0; i < RH_PATH; ++i) {
+        launcher_paths[next][i] = path[i];
+        if (!path[i]) break;
+    }
+    launcher_path_index = next;
+    launcher_background_active = path[0] != 0;
+    rh_platform_launcher_background_poll();
+    return 0;
+}
+#else
+int rh_platform_launcher_background_stage(const char *path) {
+    return path[0] ? -2144 : 0;
+}
+int rh_platform_launcher_background_commit(const char *path) {
+    return path[0] ? -2144 : 0;
+}
+void rh_platform_launcher_background_poll(void) {}
+#endif
+
 int rh_platform_retire_images(const struct rh_state *state) {
     struct rh_mapping_view view;
     if (!state) return -1;
