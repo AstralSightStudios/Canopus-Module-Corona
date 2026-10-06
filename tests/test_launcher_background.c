@@ -145,9 +145,37 @@ static void test_paths(void) {
     rejected_bytes(path, sizeof(path) - 1u);
 }
 
+static void test_multi_background(void) {
+    static const char multi_all[] =
+        "version=1\n"
+        "launcher=themes/a/l.bin\n"
+        "control_center=themes/b/c.bin\n"
+        "notifications=themes/c/n.bin\n";
+    static const char multi_partial[] =
+        "version=1\n"
+        "control_center=themes/b/c.bin\n"
+        "launcher=system\n";
+    struct rh_backgrounds out;
+    memset(&out, 0xa5, sizeof(out));
+    assert(!rh_backgrounds_parse(multi_all, (uint32_t)strlen(multi_all), &out));
+    assert(!strcmp(out.launcher + strlen(RH_APP_FILES_ROOT), "themes/a/l.bin"));
+    assert(!strcmp(out.control_center + strlen(RH_APP_FILES_ROOT), "themes/b/c.bin"));
+    assert(!strcmp(out.notifications + strlen(RH_APP_FILES_ROOT), "themes/c/n.bin"));
+
+    memset(&out, 0xa5, sizeof(out));
+    assert(!rh_backgrounds_parse(multi_partial, (uint32_t)strlen(multi_partial), &out));
+    assert(out.launcher[0] == 0);
+    assert(!strcmp(out.control_center + strlen(RH_APP_FILES_ROOT), "themes/b/c.bin"));
+    assert(out.notifications[0] == 0);
+
+    /* Invalid key rejected */
+    assert(rh_backgrounds_parse("version=1\nunknown=themes/a/x.bin\n", 31, &out) < 0);
+}
+
 int main(void) {
     test_format();
     test_paths();
+    test_multi_background();
     puts("launcher background bounded parser tests passed");
     return 0;
 }

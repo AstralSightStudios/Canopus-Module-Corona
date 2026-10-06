@@ -1,6 +1,7 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_quickapp.h"
 #include "resource_hook_font_reload.h"
+#include "resource_hook_background.h"
 #include "canopus_abi.h"
 #include "canopus_module_registration.h"
 #include <assert.h>
@@ -42,30 +43,46 @@ static struct mock_timer mock_timers[64];
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 static int calendar_mode, calendar_rc;
 #if defined(RH_TARGET_177) && RH_TARGET_177
-#define BACKGROUND_CONFIG_PATH RH_APP_FILES_ROOT "launcher-background.cfg"
+#define BACKGROUNDS_CONFIG_PATH RH_APP_FILES_ROOT "backgrounds.cfg"
 static const char *background_config; /* Missing in all legacy scenarios. */
 static unsigned background_position, background_opens, background_reads, background_closes;
 static unsigned background_stages, background_commits, background_polls;
 static int background_stage_rc;
 static char staged_background[RH_PATH], committed_background[RH_PATH];
-int rh_platform_launcher_background_stage(const char *path) {
-    assert(!locked && in_ui_timer && path && strlen(path) < RH_PATH);
+static struct rh_backgrounds staged_backgrounds, committed_backgrounds;
+
+int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
+    assert(!locked && in_ui_timer && bg);
     background_stages++;
     if (background_stage_rc) return background_stage_rc; /* e.g. image_info failure */
-    strcpy(staged_background, path);
+    staged_backgrounds = *bg;
+    strcpy(staged_background, bg->launcher);
     return 0;
 }
-int rh_platform_launcher_background_commit(const char *path) {
-    assert(!locked && in_ui_timer && path && strlen(path) < RH_PATH);
-    /* ENOENT selects system without calling stage. */
-    assert(!path[0] || !strcmp(path, staged_background));
+int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
+    assert(!locked && in_ui_timer && bg);
     background_commits++;
-    strcpy(committed_background, path);
+    committed_backgrounds = *bg;
+    strcpy(committed_background, bg->launcher);
     return 0;
 }
-void rh_platform_launcher_background_poll(void) {
+void rh_platform_backgrounds_poll(void) {
     assert(!locked && in_ui_timer);
     background_polls++;
+}
+
+int rh_platform_launcher_background_stage(const char *path) {
+    struct rh_backgrounds bg = {{0}, {0}, {0}};
+    strcpy(bg.launcher, path);
+    return rh_platform_backgrounds_stage(&bg);
+}
+int rh_platform_launcher_background_commit(const char *path) {
+    struct rh_backgrounds bg = {{0}, {0}, {0}};
+    strcpy(bg.launcher, path);
+    return rh_platform_backgrounds_commit(&bg);
+}
+void rh_platform_launcher_background_poll(void) {
+    rh_platform_backgrounds_poll();
 }
 #endif
 static int quickapp_mode, quickapp_result, reenter_lookup;
@@ -186,7 +203,7 @@ int rh_platform_open(const char *path, int mode) {
     }
     assert(mode == 1);
 #if defined(RH_TARGET_177) && RH_TARGET_177
-    if (!strcmp(path, BACKGROUND_CONFIG_PATH)) {
+    if (!strcmp(path, BACKGROUNDS_CONFIG_PATH)) {
         background_opens++;
         background_position = 0;
         if (!background_config) { open_errno = RH_ENOENT; return -1; }
@@ -696,6 +713,23 @@ static int test_launcher_background(void) {
     opens = background_opens; reads = background_reads;
     query_status("resource-hook-status-v1\tng.lst.corona\tbackground-stage-status\n", -2143, 1, 0);
     assert(background_opens == opens && background_reads == reads);
+
+    /* Test multi-background keys (launcher, control_center, notifications). */
+    background_stage_rc = 0;
+    background_config =
+        "version=1\n"
+        "launcher=themes/current/l.bin\n"
+        "control_center=themes/current/c.bin\n"
+        "notifications=themes/current/n.bin\n";
+    control_config = config;
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tmulti-bg\n";
+    fire_timers(1000u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(!strcmp(committed_backgrounds.launcher, RH_THEME_ROOT "current/l.bin"));
+    assert(!strcmp(committed_backgrounds.control_center, RH_THEME_ROOT "current/c.bin"));
+    assert(!strcmp(committed_backgrounds.notifications, RH_THEME_ROOT "current/n.bin"));
+    assert_background_map_unchanged(original);
+    commits = background_commits;
 
     /* A missing legacy cfg is ENOENT/system, not a parser or stage failure. */
     background_stage_rc = 0;

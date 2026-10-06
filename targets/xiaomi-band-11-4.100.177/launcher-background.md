@@ -1,60 +1,57 @@
-# Experimental launcher background (.177)
+# Experimental UI backgrounds: launcher, control center, notifications (.177)
 
-This new adapter is STATIC_RECOVERED / HOST_MODEL_PASS / NOT_PROBED on hardware.
+This adapter is STATIC_RECOVERED / HOST_MODEL_PASS / NOT_PROBED on hardware.
 Only Xiaomi Band 11 4.100.177 is enabled. The AP SHA256 remains
 `ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`.
 No firmware patch, class-table write, inline hook or extra widget is installed.
 
 ## Static recovery
 
-- `0x0c547d84` contains launcher main-page creation and publishes the page root
-  at `0x200c5f10`; its detached-list cache root is `0x200c5f0c`.
-- `0x0c5489fc` publishes the more-page root at `0x200c5adc`; its cache root is
-  `0x200c5ad8`.
-- `0x0c547a40` / `0x0c548784` create the first list child through `0x0c542384`.
-  That helper instantiates exact class `0x2ca435bc`, whose constructor is
-  `0x0c542744`. No background image source is assigned on these paths.
-- `0x0c5486ac` / `0x0c548b74` clear the live root slot and reparent the first
-  list child into the corresponding cache root. The adapter therefore checks
-  both live and cached roots, without retaining/dereferencing deleted objects.
-- `0x0c381090` retrieves child index zero. `0x0c383434` sets a local style
-  property with ABI `(object, property, value, selector)`.
+- **Launcher**:
+  - `0x0c547d84` contains launcher main-page creation and publishes the page root
+    at `0x200c5f10`; detached-list cache root is `0x200c5f0c`.
+  - `0x0c5489fc` publishes the more-page root at `0x200c5adc`; cache root is `0x200c5ad8`.
+  - List objects instantiate exact class `0x2ca435bc`.
+- **Control Center**:
+  - `0x0c54a3cc` creates control center within the cross-view tileview.
+  - Presenter structure lives at `0x200c5668`; root page is `load32(0x200c5668 + 8)`.
+  - Container is child 0 (`&off_2CA3BAD4`, class `0x2ca3bad4`).
+- **Notification Center**:
+  - `0x0c55c54c` (`ntf_create_main_page`) creates notifications view under `0x200c5ee4`.
+  - Container slot is `0x200c633c` (`&off_2CA3BAD4`, class `0x2ca3bad4`).
+- `0x0c383434` sets local style property (ABI: `obj, prop, value, selector`).
 - `0x0c386de2` reads property 40 into the native rectangle draw descriptor's
-  background image source at +48; property 41 supplies background-image opacity.
-  The existing audited effective-style getter is `0x0c380164`.
+  background image source at +48. Effective-style getter is `0x0c380164`.
 
-Rather than inserting a background child and risking launcher child[0] assumptions,
-this adapter assigns native main-part background-image property 40 to the exact
-launcher list. Native background drawing remains behind the existing icons;
-child order, layout, hit testing and scroll callbacks are unchanged. The intended
-result is a fixed centered background. Actual scroll rendering, list editing,
-main/more transitions and cached-list restoration still require hardware testing.
+This adapter assigns native main-part background-image property 40 to the exact
+launcher list, control center container, and notification container. Native
+background drawing remains behind the existing icons and widgets.
 
 ## Configuration
 
 Authoritative package declaration in `corona.json`:
 
 ```json
-"launcherBackground": { "mode": "image", "image": "backgrounds/launcher.bin" }
+"backgrounds": {
+  "launcher": "backgrounds/launcher.bin",
+  "controlCenter": "backgrounds/control.bin",
+  "notifications": "backgrounds/notifications.bin"
+}
 ```
 
-Use `{ "mode": "system" }` to mask lower-priority background packages. Omission
-inherits. The first declaration above the system-style divider wins as a whole.
-The image must exist in the package and use a safe relative path. Manager keeps
-background package dependencies protected until a successful reload acknowledgement.
-
-Manager generates separate `internal://files/launcher-background.cfg`:
+Or with explicit `{ "mode": "system" }` / `{ "mode": "image", "image": "..." }`.
+Legacy `"launcherBackground": { "mode": "image", "image": "..." }` is also accepted.
+Omission inherits. The first declaration above the system-style divider wins per target.
+Manager generates separate `internal://files/backgrounds.cfg`:
 
 ```text
 version=1
-mode=image
-image=themes/dark/backgrounds/launcher.bin
+launcher=themes/dark/backgrounds/launcher.bin
+control_center=themes/dark/backgrounds/control.bin
+notifications=themes/dark/backgrounds/notifications.bin
 ```
 
-System mode is exactly `version=1\nmode=system\n`; a missing file also means system.
-The format has strict ordering and a trailing newline. No entry is added to
-`mappings.tsv`. Module-side path parsing is bounded and performed only at initial
-watcher activation or an explicit reload revision.
+Legacy `internal://files/launcher-background.cfg` is also read as a fallback.
 
 Use a native supported LVGL image, preferably 212 x 520 for this target. No runtime
 resizing, effects, transparency controls or animation are introduced. Native header

@@ -7,39 +7,15 @@ static int bytes_equal(const char *a, const char *b, uint32_t size) {
     return 1;
 }
 
-int rh_launcher_background_parse(const char *data, uint32_t size,
-                                  struct rh_launcher_background *out) {
-    static const char system_config[] = "version=1\nmode=system\n";
-    static const char image_prefix[] = "version=1\nmode=image\nimage=";
+static int validate_and_prefix_image(const char *image, uint32_t length, char *out) {
     static const char themes[] = "themes/";
     static const char root[] = RH_APP_FILES_ROOT;
-    const uint32_t prefix_length = sizeof(image_prefix) - 1u;
     const uint32_t root_length = sizeof(root) - 1u;
     const uint32_t themes_length = sizeof(themes) - 1u;
-    char parsed[RH_PATH];
-    const char *image;
-    uint32_t length, i, theme_end, start;
+    uint32_t i, theme_end, start;
 
-    /* Bound the entire read before examining caller bytes, including sizes
-     * near UINT32_MAX. No accepted document can exceed this limit. */
-    if (!data || !out || root_length >= RH_PATH ||
-        size > prefix_length + (RH_PATH - 1u - root_length) + 1u)
-        return -1;
-    for (i = 0; i < size; i++)
-        if (!data[i]) return -1;
-
-    if (size == sizeof(system_config) - 1u &&
-        bytes_equal(data, system_config, sizeof(system_config) - 1u)) {
-        out->image[0] = 0;
-        return 0;
-    }
-    if (size <= prefix_length ||
-        !bytes_equal(data, image_prefix, prefix_length) || data[size - 1u] != '\n')
-        return -1;
-    image = data + prefix_length;
-    length = size - prefix_length - 1u;
-    if (length >= RH_PATH - root_length || length <= themes_length ||
-        !bytes_equal(image, themes, themes_length))
+    if (root_length >= RH_PATH || length >= RH_PATH - root_length ||
+        length <= themes_length || !bytes_equal(image, themes, themes_length))
         return -1;
 
     theme_end = themes_length;
@@ -69,11 +45,126 @@ int rh_launcher_background_parse(const char *data, uint32_t size,
             if (c < 32u || c == 127u || c == '\\' || c == ':') return -1;
         }
     }
-    /* Stage bytes before committing so even overlapping input/output is safe.
-     * Explicit bounded loops keep freestanding builds free of libc helpers. */
-    for (i = 0; i < root_length; i++) parsed[i] = root[i];
-    for (i = 0; i < length; i++) parsed[root_length + i] = image[i];
-    parsed[root_length + length] = 0;
-    for (i = 0; i <= root_length + length; i++) out->image[i] = parsed[i];
+
+    for (i = 0; i < root_length; i++) out[i] = root[i];
+    for (i = 0; i < length; i++) out[root_length + i] = image[i];
+    out[root_length + length] = 0;
+    return 0;
+}
+
+static void copy_staged(struct rh_backgrounds *out, const struct rh_backgrounds *staged) {
+    uint32_t i;
+    for (i = 0; i < RH_PATH; i++) {
+        out->launcher[i] = staged->launcher[i];
+        if (!staged->launcher[i]) break;
+    }
+    for (i = 0; i < RH_PATH; i++) {
+        out->control_center[i] = staged->control_center[i];
+        if (!staged->control_center[i]) break;
+    }
+    for (i = 0; i < RH_PATH; i++) {
+        out->notifications[i] = staged->notifications[i];
+        if (!staged->notifications[i]) break;
+    }
+}
+
+int rh_backgrounds_parse(const char *data, uint32_t size,
+                         struct rh_backgrounds *out) {
+    static const char v1_header[] = "version=1\n";
+    static const char legacy_system[] = "version=1\nmode=system\n";
+    static const char legacy_prefix[] = "version=1\nmode=image\nimage=";
+    static const char k_launcher[] = "launcher=";
+    static const char k_control[] = "control_center=";
+    static const char k_notify[] = "notifications=";
+    struct rh_backgrounds staged;
+    uint32_t i, pos;
+
+    if (!data || !out || size < sizeof(v1_header) - 1u || size > 3u * RH_PATH + 128u)
+        return -1;
+    for (i = 0; i < size; i++)
+        if (!data[i]) return -1;
+    if (data[size - 1u] != '\n') return -1;
+
+    /* Initialize staged output with empty (system) values. */
+    staged.launcher[0] = 0;
+    staged.control_center[0] = 0;
+    staged.notifications[0] = 0;
+
+    /* Legacy single-launcher formats. */
+    if (size == sizeof(legacy_system) - 1u &&
+        bytes_equal(data, legacy_system, sizeof(legacy_system) - 1u)) {
+        copy_staged(out, &staged);
+        return 0;
+    }
+    if (size > sizeof(legacy_prefix) - 1u &&
+        bytes_equal(data, legacy_prefix, sizeof(legacy_prefix) - 1u)) {
+        const char *img = data + sizeof(legacy_prefix) - 1u;
+        uint32_t img_len = size - (sizeof(legacy_prefix) - 1u) - 1u;
+        if (validate_and_prefix_image(img, img_len, staged.launcher)) return -1;
+        copy_staged(out, &staged);
+        return 0;
+    }
+
+    /* Multi-background format: must start with version=1\n and have at least one key. */
+    if (!bytes_equal(data, v1_header, sizeof(v1_header) - 1u)) return -1;
+    pos = sizeof(v1_header) - 1u;
+    uint32_t keys_seen = 0;
+
+    while (pos < size) {
+        uint32_t line_start = pos, line_end;
+        while (pos < size && data[pos] != '\n') pos++;
+        line_end = pos;
+        if (pos < size && data[pos] == '\n') pos++;
+        if (line_end == line_start) continue;
+
+        if (line_end - line_start >= sizeof(k_launcher) - 1u &&
+            bytes_equal(data + line_start, k_launcher, sizeof(k_launcher) - 1u)) {
+            const char *val = data + line_start + sizeof(k_launcher) - 1u;
+            uint32_t val_len = line_end - (line_start + sizeof(k_launcher) - 1u);
+            if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
+                staged.launcher[0] = 0;
+            } else if (validate_and_prefix_image(val, val_len, staged.launcher)) {
+                return -1;
+            }
+            keys_seen++;
+        } else if (line_end - line_start >= sizeof(k_control) - 1u &&
+                   bytes_equal(data + line_start, k_control, sizeof(k_control) - 1u)) {
+            const char *val = data + line_start + sizeof(k_control) - 1u;
+            uint32_t val_len = line_end - (line_start + sizeof(k_control) - 1u);
+            if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
+                staged.control_center[0] = 0;
+            } else if (validate_and_prefix_image(val, val_len, staged.control_center)) {
+                return -1;
+            }
+            keys_seen++;
+        } else if (line_end - line_start >= sizeof(k_notify) - 1u &&
+                   bytes_equal(data + line_start, k_notify, sizeof(k_notify) - 1u)) {
+            const char *val = data + line_start + sizeof(k_notify) - 1u;
+            uint32_t val_len = line_end - (line_start + sizeof(k_notify) - 1u);
+            if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
+                staged.notifications[0] = 0;
+            } else if (validate_and_prefix_image(val, val_len, staged.notifications)) {
+                return -1;
+            }
+            keys_seen++;
+        } else {
+            return -1;
+        }
+    }
+    if (!keys_seen) return -1;
+
+    copy_staged(out, &staged);
+    return 0;
+}
+
+int rh_launcher_background_parse(const char *data, uint32_t size,
+                                 struct rh_launcher_background *out) {
+    struct rh_backgrounds bg;
+    uint32_t i;
+    if (!out || rh_backgrounds_parse(data, size, &bg)) return -1;
+    for (i = 0; i < RH_PATH; i++) {
+        out->image[i] = bg.launcher[i];
+        if (!bg.launcher[i]) break;
+    }
     return 0;
 }

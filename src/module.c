@@ -289,22 +289,24 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
     return rc;
 }
 #if defined(RH_TARGET_177) && RH_TARGET_177
-static int background_stage(struct rh_launcher_background *candidate) {
-    char data[RH_PATH + 64u];
+static int background_stage(struct rh_backgrounds *candidate) {
+    char data[RH_PATH * 3 + 128u];
     uint32_t used = 0;
-    int rc = read_bounded_file(RH_APP_FILES_ROOT "launcher-background.cfg",
+    int rc = read_bounded_file(RH_APP_FILES_ROOT "backgrounds.cfg",
                                data, sizeof(data), &used);
-    candidate->image[0] = 0;
-    if (rc == 1) return 0; /* Old packages/configs mean system background. */
-    if (rc || rh_launcher_background_parse(data, used, candidate)) return -2142;
-    return rh_platform_launcher_background_stage(candidate->image);
+    candidate->launcher[0] = 0;
+    candidate->control_center[0] = 0;
+    candidate->notifications[0] = 0;
+    if (rc == 1) return 0; /* Missing file means system background. */
+    if (rc || rh_backgrounds_parse(data, used, candidate)) return -2142;
+    return rh_platform_backgrounds_stage(candidate);
 }
 static void background_start(void) {
-    struct rh_launcher_background candidate;
+    struct rh_backgrounds candidate;
     if (background_initialized) return;
     background_error = background_stage(&candidate);
     if (!background_error)
-        background_error = rh_platform_launcher_background_commit(candidate.image);
+        background_error = rh_platform_backgrounds_commit(&candidate);
     background_initialized = 1;
 }
 #endif
@@ -501,7 +503,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     struct rh_mapping_view captured_view;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
 #if defined(RH_TARGET_177) && RH_TARGET_177
-    struct rh_launcher_background background_candidate;
+    struct rh_backgrounds background_candidate;
 #endif
 
     /* Active maps may be empty; NULL is the transparent zero-rule snapshot. */
@@ -644,7 +646,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     rh_platform_unlock(irq);
     #if defined(RH_TARGET_177) && RH_TARGET_177
     if (revision) {
-        background_error = rh_platform_launcher_background_commit(background_candidate.image);
+        background_error = rh_platform_backgrounds_commit(&background_candidate);
         background_initialized = 1;
         if (background_error) {
             publish_result(signal, signal_size, background_error, refresh_pending, 0);
@@ -685,7 +687,7 @@ static void watch_step(void *timer) {
     rh_platform_unlock(irq);
 #if defined(RH_TARGET_177) && RH_TARGET_177
     background_start();
-    rh_platform_launcher_background_poll();
+    rh_platform_backgrounds_poll();
 #endif
     rc = read_bounded_file(RH_CONTROL_REQUEST_PATH, signal, sizeof(signal), &signal_size);
     if (!rc) {

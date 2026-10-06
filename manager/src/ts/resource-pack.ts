@@ -46,7 +46,14 @@ export interface ResourcePackMapping {
   destination: string;
 }
 
-export type LauncherBackground = { mode: "system" } | { mode: "image"; image: string };
+export type BackgroundSetting = { mode: "system" } | { mode: "image"; image: string };
+export type LauncherBackground = BackgroundSetting;
+
+export interface BackgroundsDeclaration {
+  launcher?: BackgroundSetting;
+  controlCenter?: BackgroundSetting;
+  notifications?: BackgroundSetting;
+}
 
 export interface ResourcePackManifest {
   format: "canopus-resource-pack";
@@ -59,6 +66,7 @@ export interface ResourcePackManifest {
   description?: string;
   targets?: string[];
   mappings: ResourcePackMapping[];
+  backgrounds?: BackgroundsDeclaration;
   launcherBackground?: LauncherBackground;
 }
 
@@ -179,24 +187,37 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
       requiredText(target, `targets[${index}]`, 128));
   }
   const mappings = parseMappings(value.mappings, value.quickappIcons, value.themeId);
-  let launcherBackground: LauncherBackground | undefined;
-  if (value.launcherBackground !== undefined) {
-    const background = value.launcherBackground;
-    if (!isRecord(background) ||
-        (background.mode !== "system" && background.mode !== "image") ||
-        Object.keys(background).some(key => key !== "mode" &&
-          !(background.mode === "image" && key === "image")))
-      throw new Error("launcherBackground 格式无效");
-    if (background.mode === "system") launcherBackground = { mode: "system" };
-    else {
-      const image = background.image;
-      if (typeof image !== "string" || !safeRelativeResourcePath(image) || image.endsWith("/") ||
-          isReservedResourcePackPath(image) ||
-          !safeThemeDestination(`${THEME_DESTINATION_ROOT}${value.themeId}/${image}`))
-        throw new Error("launcherBackground.image 必须是安全的包内文件路径");
-      launcherBackground = { mode: "image", image };
-    }
+  function parseBackgroundSetting(val: unknown, themeId: string, label: string): BackgroundSetting {
+    if (typeof val === "string") val = { mode: "image", image: val };
+    if (!isRecord(val) || (val.mode !== "system" && val.mode !== "image") ||
+        Object.keys(val).some(key => key !== "mode" && !(val.mode === "image" && key === "image")))
+      throw new Error(`${label} 格式无效`);
+    if (val.mode === "system") return { mode: "system" };
+    const image = val.image;
+    if (typeof image !== "string" || !safeRelativeResourcePath(image) || image.endsWith("/") ||
+        isReservedResourcePackPath(image) ||
+        !safeThemeDestination(`${THEME_DESTINATION_ROOT}${themeId}/${image}`))
+      throw new Error(`${label}.image 必须是安全的包内文件路径`);
+    return { mode: "image", image };
   }
+
+  let backgrounds: BackgroundsDeclaration | undefined;
+  if (value.backgrounds !== undefined) {
+    if (!isRecord(value.backgrounds)) throw new Error("backgrounds 格式无效");
+    backgrounds = {};
+    if (value.backgrounds.launcher !== undefined)
+      backgrounds.launcher = parseBackgroundSetting(value.backgrounds.launcher, value.themeId, "backgrounds.launcher");
+    if (value.backgrounds.controlCenter !== undefined)
+      backgrounds.controlCenter = parseBackgroundSetting(value.backgrounds.controlCenter, value.themeId, "backgrounds.controlCenter");
+    if (value.backgrounds.notifications !== undefined)
+      backgrounds.notifications = parseBackgroundSetting(value.backgrounds.notifications, value.themeId, "backgrounds.notifications");
+  }
+  if (value.launcherBackground !== undefined) {
+    const lb = parseBackgroundSetting(value.launcherBackground, value.themeId, "launcherBackground");
+    if (!backgrounds) backgrounds = {};
+    if (!backgrounds.launcher) backgrounds.launcher = lb;
+  }
+  const launcherBackground = backgrounds?.launcher;
 
   // Consume quickappIcons into canonical mappings only. Re-parsing serialized
   // normalized manifests must neither duplicate rules nor discard pack metadata.
@@ -212,6 +233,7 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     ...(description === undefined ? {} : { description }),
     ...(targets === undefined ? {} : { targets }),
     mappings,
+    ...(backgrounds === undefined ? {} : { backgrounds }),
     ...(launcherBackground === undefined ? {} : { launcherBackground })
   };
 }
@@ -221,9 +243,15 @@ export function validateResourcePackFiles(
   manifest: ResourcePackManifest,
   relativePaths: string[],
 ): void {
-  if (manifest.launcherBackground?.mode === "image" &&
-      !relativePaths.includes(manifest.launcherBackground.image))
+  if (manifest.backgrounds) {
+    for (const [key, bg] of Object.entries(manifest.backgrounds) as [string, BackgroundSetting][]) {
+      if (bg.mode === "image" && !relativePaths.includes(bg.image))
+        throw new Error(`backgrounds.${key}.image 不存在于资源包文件中`);
+    }
+  } else if (manifest.launcherBackground?.mode === "image" &&
+      !relativePaths.includes(manifest.launcherBackground.image)) {
     throw new Error("launcherBackground.image 不存在于资源包文件中");
+  }
   for (const mapping of manifest.mappings) {
     const exists = mapping.destination.endsWith("/")
       ? relativePaths.some(path => path.startsWith(mapping.destination))

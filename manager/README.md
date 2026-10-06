@@ -46,11 +46,11 @@ npm run typecheck
 
 目录合并仅等待原生 `file.copy` 完成，不做复制前后的逐文件大小/类型检查，也不计算内容哈希；保留清单和路径校验、复制错误回滚，以及成功回执之后的旧代次清理。直接映射仍受活动包禁止替换/删除的保护；已有活动代次索引会持久化可能仍被模块使用的新旧包，只有匹配的成功回执才释放旧包保护。更新包前需先切换并成功重载。
 
-## 启动器背景
+## 界面背景（启动器、控制中心、通知中心）
 
-`corona.json` 可选 `launcherBackground: {"mode":"image","image":"assets/background.bin"}` 或 `{"mode":"system"}`。image 必须是安全的包内相对文件路径且实际存在；不指定则继承。系统样式分界以上按现有优先级取第一个声明，整个对象生效；没有声明则使用系统背景，混搭单文件选择不影响它。
+`corona.json` 可选 `backgrounds: {"launcher":"assets/l.bin","controlCenter":"assets/c.bin","notifications":"assets/n.bin"}`，也可为每个项指定 `{"mode":"image","image":"..."}` 或 `{"mode":"system"}`；兼容旧版单项 `launcherBackground`。image 必须是安全的包内相对文件路径且实际存在；不指定则继承。系统样式分界以上按现有优先级逐区域取第一个声明生效；没有声明则使用系统背景。
 
-激活时生成独立的 `internal://files/launcher-background.cfg`，内容为换行分隔的 `version=1`、`mode=image`、`image=themes/<id>/<relative>`（system 模式没有 image）。与 mappings 一起准备并写入，再走现有 reload 请求/回执；缓存命中不重复写入，没有逐帧检测。两个文件不是原子事务：任一写入失败不发送 reload，缓存失效后重试修复。背景所在包与直接映射包一样受保护，成功回执后释放旧包。需要支持此配置的运行时；旧运行时不应用启动器背景。
+激活时生成独立的 `internal://files/backgrounds.cfg`，内容为换行分隔的 `version=1` 及各区域键值（如 `launcher=themes/<id>/<path>`、`control_center=system`）。与 mappings 一起准备并写入，再走现有 reload 请求/回执；缓存命中不重复写入，没有逐帧检测。两个文件不是原子事务：任一写入失败不发送 reload，缓存失效后重试修复。背景所在包与直接映射包一样受保护，成功回执后释放旧包。需要支持此配置的运行时；旧运行时不应用自定义背景。
 
 ## 首页模块状态
 

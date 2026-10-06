@@ -18,7 +18,7 @@ import {
 } from "./resource-overrides";
 import type { ResourceOverrides, ResourcePackSnapshot } from "./resource-overrides";
 
-export const ACTIVE_LAUNCHER_BACKGROUND_URI = "internal://files/launcher-background.cfg";
+export const ACTIVE_BACKGROUNDS_URI = "internal://files/backgrounds.cfg";
 
 export const ACTIVE_MAPPINGS_URI = "internal://files/mappings.tsv";
 export const ACTIVE_GENERATIONS_URI = "internal://files/resource-active-generations.json";
@@ -49,7 +49,7 @@ export interface ActiveFileCopy {
 
 export interface ActiveMappingsPlan {
   mappings: string;
-  launcherBackground?: string;
+  backgrounds?: string;
   generation: string | null;
   copies: ActiveFileCopy[];
 }
@@ -126,16 +126,41 @@ export async function readProtectedThemeIds(
 }
 
 function backgroundThemes(config: string): string[] {
-  const match = /^image=themes\/([a-z0-9_-]{1,64})\//m.exec(config);
-  return match ? [match[1]] : [];
+  const ids: string[] = [];
+  const regex = /^[a-z_]+=themes\/([a-z0-9_-]{1,64})\//gm;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(config)) !== null) {
+    if (!ids.includes(match[1])) ids.push(match[1]);
+  }
+  return ids;
 }
 
-export function serializeLauncherBackground(themesHighToLow: ThemeRules[]): string {
-  const winner = themesHighToLow.find(theme => theme.active !== false && theme.manifest.launcherBackground);
-  const background = winner?.manifest.launcherBackground;
-  return background?.mode === "image"
-    ? `version=1\nmode=image\nimage=themes/${winner!.themeId}/${background.image}\n`
-    : "version=1\nmode=system\n";
+export function resolveBackgroundTarget(
+  themesHighToLow: ThemeRules[],
+  target: "launcher" | "controlCenter" | "notifications"
+): { themeId: string; image: string } | null {
+  const winner = themesHighToLow.find(theme => {
+    if (theme.active === false) return false;
+    const bg = theme.manifest.backgrounds?.[target] ||
+      (target === "launcher" ? theme.manifest.launcherBackground : undefined);
+    return bg !== undefined;
+  });
+  const bg = winner?.manifest.backgrounds?.[target] ||
+    (target === "launcher" ? winner?.manifest.launcherBackground : undefined);
+  if (winner && bg?.mode === "image") {
+    return { themeId: winner.themeId, image: bg.image };
+  }
+  return null;
+}
+
+export function serializeBackgrounds(themesHighToLow: ThemeRules[]): string {
+  const launcher = resolveBackgroundTarget(themesHighToLow, "launcher");
+  const control = resolveBackgroundTarget(themesHighToLow, "controlCenter");
+  const notify = resolveBackgroundTarget(themesHighToLow, "notifications");
+  const lStr = launcher ? `launcher=themes/${launcher.themeId}/${launcher.image}\n` : "launcher=system\n";
+  const cStr = control ? `control_center=themes/${control.themeId}/${control.image}\n` : "control_center=system\n";
+  const nStr = notify ? `notifications=themes/${notify.themeId}/${notify.image}\n` : "notifications=system\n";
+  return `version=1\n${lStr}${cStr}${nStr}`;
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
@@ -501,16 +526,17 @@ export async function regenerateActiveMappings(
   }
 
   const plan = planActiveMappings(themesHighToLow, generation, overrides);
-  plan.launcherBackground = serializeLauncherBackground(themesHighToLow);
-  const backgroundWinner = themesHighToLow.find(theme => theme.active !== false && theme.manifest.launcherBackground);
-  if (backgroundWinner?.manifest.launcherBackground?.mode === "image") {
-    const image = backgroundWinner.manifest.launcherBackground.image;
-    if (snapshot) {
-      if (!snapshot.themes.get(backgroundWinner.themeId)!.files.some(asset => asset.relativePath === image))
-        throw new Error("launcherBackground.image 不存在于资源包文件中");
-    } else {
-      const info = await file.readFileInfo(`${THEME_ROOT_URI}${backgroundWinner.themeId}/${image}`);
-      if (info.type !== "file") throw new Error("launcherBackground.image 不是文件");
+  plan.backgrounds = serializeBackgrounds(themesHighToLow);
+  for (const target of ["launcher", "controlCenter", "notifications"] as const) {
+    const bg = resolveBackgroundTarget(themesHighToLow, target);
+    if (bg) {
+      if (snapshot) {
+        if (!snapshot.themes.get(bg.themeId)!.files.some(asset => asset.relativePath === bg.image))
+          throw new Error(`backgrounds.${target}.image 不存在于资源包文件中`);
+      } else {
+        const info = await file.readFileInfo(`${THEME_ROOT_URI}${bg.themeId}/${bg.image}`);
+        if (info.type !== "file") throw new Error(`backgrounds.${target}.image 不是文件`);
+      }
     }
   }
   const previousText = await file.readOptionalText(ACTIVE_GENERATIONS_URI);
@@ -530,8 +556,8 @@ export async function regenerateActiveMappings(
       ...(generationIndex.protectedThemes || []),
       ...directlyMappedThemes(previousMappings || ""),
       ...directlyMappedThemes(plan.mappings),
-      ...backgroundThemes(await file.readOptionalText(ACTIVE_LAUNCHER_BACKGROUND_URI) || ""),
-      ...backgroundThemes(plan.launcherBackground!)
+      ...backgroundThemes(await file.readOptionalText(ACTIVE_BACKGROUNDS_URI) || ""),
+      ...backgroundThemes(plan.backgrounds!)
     ])).sort();
     // Either native write can fail after truncation. Preserve dependencies on
     // disk first, and never reuse a cache that could skip repairing the TSV.
@@ -540,7 +566,7 @@ export async function regenerateActiveMappings(
       generationIndex.protectedThemes = protectedThemes;
       await file.writeText(ACTIVE_GENERATIONS_URI, JSON.stringify(generationIndex));
     }
-    await file.writeText(ACTIVE_LAUNCHER_BACKGROUND_URI, plan.launcherBackground!);
+    await file.writeText(ACTIVE_BACKGROUNDS_URI, plan.backgrounds!);
     await file.writeText(ACTIVE_MAPPINGS_URI, plan.mappings);
   } catch (error) {
     if (plan.generation) {
@@ -565,7 +591,7 @@ export async function regenerateActiveMappings(
   // Retain only the latest published plan: acknowledged cleanup may remove any
   // earlier overlay. Signal/receipt failure outside this function does not evict it.
   if (snapshot) snapshot.activeMappings = { key: cacheKey,
-    plan: plan.copies.length ? { mappings: plan.mappings, launcherBackground: plan.launcherBackground, generation: plan.generation, copies: [] } : plan };
+    plan: plan.copies.length ? { mappings: plan.mappings, backgrounds: plan.backgrounds, generation: plan.generation, copies: [] } : plan };
   return plan;
 }
 
@@ -595,7 +621,7 @@ export async function cleanupInactiveGenerations(
   }
   const next: StoredGenerationIndex = { version: 1, generations: retained };
   const protectedThemes = Array.from(new Set([...directlyMappedThemes(mappings || ""),
-    ...backgroundThemes(await file.readOptionalText(ACTIVE_LAUNCHER_BACKGROUND_URI) || "")])).sort();
+    ...backgroundThemes(await file.readOptionalText(ACTIVE_BACKGROUNDS_URI) || "")])).sort();
   if (protectedThemes.length) next.protectedThemes = protectedThemes;
   const serialized = JSON.stringify(next);
   if ((text !== null || retained.length || protectedThemes.length) && text !== serialized)

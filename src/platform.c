@@ -1,5 +1,6 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
+#include "resource_hook_background.h"
 #include "canopus_veneer.h"
 
 static int *errno_location(void) {
@@ -124,31 +125,65 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     return retire_cache(data, 4u, mapping, 0);
 }
 #if defined(RH_TARGET_177) && RH_TARGET_177
-/* Native background style, not an extra child: preserve child[0], scrolling,
- * hit testing and native list caching. Path storage remains module-resident. */
-static char launcher_paths[2][RH_PATH];
-static unsigned launcher_path_index;
-static unsigned launcher_background_active;
+/* Native background style for launcher, control center, and notifications.
+ * Property 40 is set directly on native list / container objects. */
+static char bg_paths[3][2][RH_PATH];
+static unsigned bg_path_index;
+static unsigned bg_active[3];
+#define launcher_paths bg_paths[0]
+#define launcher_path_index bg_path_index
+#define launcher_background_active bg_active[0]
+
 static const uint32_t launcher_slots[4] = {
     RH_LB_MAIN_ROOT_SLOT, RH_LB_MAIN_CACHE_SLOT,
     RH_LB_MORE_ROOT_SLOT, RH_LB_MORE_CACHE_SLOT
 };
+
+static uint32_t bg_child(uint32_t root) {
+#if defined(RH_LB_CHILD_GET)
+    return ((uint32_t (*)(uint32_t, int))(uintptr_t)RH_LB_CHILD_GET)(root, 0);
+#endif
+    uint32_t spec;
+    if (!root) return 0;
+    spec = load32(root + 8u);
+    if (!spec || *(volatile const uint16_t *)(uintptr_t)(spec + 48u) == 0) return 0;
+    return load32(load32(spec));
+}
+
 static uint32_t launcher_list(unsigned i) {
     uint32_t root = load32(launcher_slots[i]);
     uint32_t list;
     if (!root) return 0;
-    list = ((uint32_t (*)(uint32_t, int))(uintptr_t)RH_LB_CHILD_GET)(root, 0);
+    list = bg_child(root);
     return list && load32(list) == RH_LB_LIST_CLASS ? list : 0;
 }
-static uint32_t launcher_source(uint32_t list) {
+
+static uint32_t control_center_container(void) {
+    uint32_t pres = load32(RH_LB_CONTROL_PRESENTER_SLOT);
+    uint32_t root, container;
+    if (!pres) return 0;
+    root = load32(pres + 8u);
+    if (!root) return 0;
+    container = bg_child(root);
+    return container && load32(container) == RH_LB_BASE_CLASS ? container : 0;
+}
+
+static uint32_t notify_container(void) {
+    uint32_t container = load32(RH_LB_NOTIFY_CONTAINER_SLOT);
+    return container && load32(container) == RH_LB_BASE_CLASS ? container : 0;
+}
+
+static uint32_t bg_source(uint32_t obj) {
     return ((uint32_t (*)(uint32_t, uint32_t, uint32_t))
-        (uintptr_t)RH_FW_OBJECT_STYLE_GET)(list, 0, 40u);
+        (uintptr_t)RH_FW_OBJECT_STYLE_GET)(obj, 0, 40u);
 }
-static void launcher_set(uint32_t list, uint32_t source) {
+
+static void bg_set(uint32_t obj, uint32_t source) {
     ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t))
-        (uintptr_t)RH_LB_STYLE_SET)(list, 40u, source, 0);
+        (uintptr_t)RH_LB_STYLE_SET)(obj, 40u, source, 0);
 }
-int rh_platform_launcher_background_stage(const char *path) {
+
+static int stage_one_path(const char *path) {
     uint32_t header[3] = {0, 0, 0};
     uint32_t cache;
     if (!path[0]) return 0;
@@ -164,54 +199,130 @@ int rh_platform_launcher_background_stage(const char *path) {
     return ((int (*)(const char *, void *))(uintptr_t)RH_FW_IMAGE_GET_INFO)
         (path, header) == 1 ? 0 : -2143;
 }
-void rh_platform_launcher_background_poll(void) {
+
+int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
+    int rc;
+    if (!bg) return -2142;
+    rc = stage_one_path(bg->launcher);
+    if (rc) return rc;
+    rc = stage_one_path(bg->control_center);
+    if (rc) return rc;
+    return stage_one_path(bg->notifications);
+}
+
+void rh_platform_backgrounds_poll(void) {
     unsigned i;
-    if (!launcher_background_active) return;
-    for (i = 0; i < 4; ++i) {
-        uint32_t list = launcher_list(i);
-        uint32_t source = (uint32_t)(uintptr_t)launcher_paths[launcher_path_index];
-        /* Getter handles cached/recreated objects and address reuse. No tree walk. */
-        if (list && launcher_source(list) != source) launcher_set(list, source);
+    if (bg_active[0]) {
+        uint32_t source = (uint32_t)(uintptr_t)bg_paths[0][bg_path_index];
+        for (i = 0; i < 4; ++i) {
+            uint32_t list = launcher_list(i);
+            if (list && bg_source(list) != source) bg_set(list, source);
+        }
+    }
+    if (bg_active[1]) {
+        uint32_t cc = control_center_container();
+        uint32_t source = (uint32_t)(uintptr_t)bg_paths[1][bg_path_index];
+        if (cc && bg_source(cc) != source) bg_set(cc, source);
+    }
+    if (bg_active[2]) {
+        uint32_t ntf = notify_container();
+        uint32_t source = (uint32_t)(uintptr_t)bg_paths[2][bg_path_index];
+        if (ntf && bg_source(ntf) != source) bg_set(ntf, source);
     }
 }
-int rh_platform_launcher_background_commit(const char *path) {
-    unsigned i, next = launcher_path_index ^ 1u;
-    uint32_t header_cache, image_cache;
-    const char *old = launcher_paths[launcher_path_index];
+
+int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
+    unsigned i, k, next = bg_path_index ^ 1u;
+    uint32_t header_cache = load32(RH_FW_HEADER_CACHE_SLOT);
+    uint32_t image_cache = load32(RH_FW_IMAGE_CACHE_SLOT);
+    const char *new_paths[3];
+
+    if (!bg) return -2142;
+    new_paths[0] = bg->launcher;
+    new_paths[1] = bg->control_center;
+    new_paths[2] = bg->notifications;
+
+    /* Reset active objects to 0 if their current style points to our old paths */
     for (i = 0; i < 4; ++i) {
         uint32_t list = launcher_list(i);
         if (list) {
-            uint32_t source = launcher_source(list);
-            if (source == (uint32_t)(uintptr_t)launcher_paths[0] ||
-                source == (uint32_t)(uintptr_t)launcher_paths[1]) launcher_set(list, 0);
+            uint32_t s = bg_source(list);
+            if (s == (uint32_t)(uintptr_t)bg_paths[0][0] ||
+                s == (uint32_t)(uintptr_t)bg_paths[0][1]) bg_set(list, 0);
         }
     }
-    launcher_background_active = 0;
-    /* Exact key retirement only on reload, including same-path asset updates. */
-    header_cache = load32(RH_FW_HEADER_CACHE_SLOT);
-    image_cache = load32(RH_FW_IMAGE_CACHE_SLOT);
-    if (old[0]) {
-        if (header_cache && (!cache_valid(header_cache, RH_FW_HEADER_CACHE_CLASS) ||
-            retire_cache(header_cache, 0, 0, old))) return -2145;
-        if (image_cache && (!cache_valid(image_cache, RH_FW_IMAGE_CACHE_CLASS) ||
-            retire_cache(image_cache, 4, 0, old))) return -2145;
+    {
+        uint32_t cc = control_center_container();
+        if (cc) {
+            uint32_t s = bg_source(cc);
+            if (s == (uint32_t)(uintptr_t)bg_paths[1][0] ||
+                s == (uint32_t)(uintptr_t)bg_paths[1][1]) bg_set(cc, 0);
+        }
     }
-    for (i = 0; i < RH_PATH; ++i) {
-        launcher_paths[next][i] = path[i];
-        if (!path[i]) break;
+    {
+        uint32_t ntf = notify_container();
+        if (ntf) {
+            uint32_t s = bg_source(ntf);
+            if (s == (uint32_t)(uintptr_t)bg_paths[2][0] ||
+                s == (uint32_t)(uintptr_t)bg_paths[2][1]) bg_set(ntf, 0);
+        }
     }
-    launcher_path_index = next;
-    launcher_background_active = path[0] != 0;
-    rh_platform_launcher_background_poll();
+
+    for (k = 0; k < 3; ++k) bg_active[k] = 0;
+
+    /* Retire old paths from image caches */
+    for (k = 0; k < 3; ++k) {
+        const char *old = bg_paths[k][bg_path_index];
+        if (old[0]) {
+            if (header_cache && (!cache_valid(header_cache, RH_FW_HEADER_CACHE_CLASS) ||
+                retire_cache(header_cache, 0, 0, old))) return -2145;
+            if (image_cache && (!cache_valid(image_cache, RH_FW_IMAGE_CACHE_CLASS) ||
+                retire_cache(image_cache, 4, 0, old))) return -2145;
+        }
+    }
+
+    /* Store new paths */
+    for (k = 0; k < 3; ++k) {
+        for (i = 0; i < RH_PATH; ++i) {
+            bg_paths[k][next][i] = new_paths[k][i];
+            if (!new_paths[k][i]) break;
+        }
+        bg_active[k] = new_paths[k][0] != 0;
+    }
+    bg_path_index = next;
+    rh_platform_backgrounds_poll();
     return 0;
 }
-#else
+
 int rh_platform_launcher_background_stage(const char *path) {
-    return path[0] ? -2144 : 0;
+    struct rh_backgrounds bg;
+    uint32_t i;
+    for (i = 0; i < RH_PATH; ++i) { bg.launcher[i] = path[i]; if (!path[i]) break; }
+    bg.control_center[0] = 0;
+    bg.notifications[0] = 0;
+    return rh_platform_backgrounds_stage(&bg);
 }
 int rh_platform_launcher_background_commit(const char *path) {
-    return path[0] ? -2144 : 0;
+    struct rh_backgrounds bg;
+    uint32_t i;
+    for (i = 0; i < RH_PATH; ++i) { bg.launcher[i] = path[i]; if (!path[i]) break; }
+    bg.control_center[0] = 0;
+    bg.notifications[0] = 0;
+    return rh_platform_backgrounds_commit(&bg);
 }
+void rh_platform_launcher_background_poll(void) {
+    rh_platform_backgrounds_poll();
+}
+#else
+int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
+    return (bg && (bg->launcher[0] || bg->control_center[0] || bg->notifications[0])) ? -2144 : 0;
+}
+int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
+    return (bg && (bg->launcher[0] || bg->control_center[0] || bg->notifications[0])) ? -2144 : 0;
+}
+void rh_platform_backgrounds_poll(void) {}
+int rh_platform_launcher_background_stage(const char *path) { return path[0] ? -2144 : 0; }
+int rh_platform_launcher_background_commit(const char *path) { return path[0] ? -2144 : 0; }
 void rh_platform_launcher_background_poll(void) {}
 #endif
 

@@ -44,7 +44,11 @@ int rh_platform_calendar_affected(const struct rh_mapping_view *,
                                   const struct rh_mapping_view *);
 int rh_platform_refresh_calendar(void);
 /* Experimental .177 only. All calls are serialized by the existing UI watcher.
- * Stage validates/decodes once; commit/poll touch at most four launcher lists. */
+ * Stage validates/decodes once; commit/poll touch launcher, control and notify views. */
+struct rh_backgrounds;
+int rh_platform_backgrounds_stage(const struct rh_backgrounds *);
+int rh_platform_backgrounds_commit(const struct rh_backgrounds *);
+void rh_platform_backgrounds_poll(void);
 int rh_platform_launcher_background_stage(const char *);
 int rh_platform_launcher_background_commit(const char *);
 void rh_platform_launcher_background_poll(void);

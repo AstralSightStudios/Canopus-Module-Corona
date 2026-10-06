@@ -60,10 +60,12 @@ class Target177(unittest.TestCase):
             'd4baa32c4527540c00000000000000000000000000000000d400000008020000c0051000')
         macros = (ROOT / 'include/resource_hook_target_177.h').read_text()
         for name, address in {
-            'CHILD_GET': 0x0c381091, 'STYLE_SET': 0x0c383435,
-            'LIST_CLASS': 0x2ca435bc, 'MAIN_ROOT_SLOT': 0x200c5f10,
-            'MAIN_CACHE_SLOT': 0x200c5f0c, 'MORE_ROOT_SLOT': 0x200c5adc,
-            'MORE_CACHE_SLOT': 0x200c5ad8,
+            'STYLE_SET': 0x0c383435,
+            'LIST_CLASS': 0x2ca435bc, 'BASE_CLASS': 0x2ca3bad4,
+            'MAIN_ROOT_SLOT': 0x200c5f10, 'MAIN_CACHE_SLOT': 0x200c5f0c,
+            'MORE_ROOT_SLOT': 0x200c5adc, 'MORE_CACHE_SLOT': 0x200c5ad8,
+            'CONTROL_PRESENTER_SLOT': 0x200c5668,
+            'NOTIFY_CONTAINER_SLOT': 0x200c633c,
         }.items():
             value = re.search(r'#define RH_LB_' + name + r' (0x[0-9a-f]+)u', macros)
             self.assertIsNotNone(value)

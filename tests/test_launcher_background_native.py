@@ -19,6 +19,7 @@ FIXTURE = r'''
 #include <stdio.h>
 #include <string.h>
 #include "resource_hook.h"
+#include "resource_hook_background.h"
 #include "resource_hook_target_177.h"
 
 #define HEADER 0x1000u
@@ -60,6 +61,8 @@ static uint32_t load32(uint32_t address) {
     case RH_LB_MAIN_CACHE_SLOT: return slots[1];
     case RH_LB_MORE_ROOT_SLOT: return slots[2];
     case RH_LB_MORE_CACHE_SLOT: return slots[3];
+    case RH_LB_CONTROL_PRESENTER_SLOT: return 0;
+    case RH_LB_NOTIFY_CONTAINER_SLOT: return 0;
     case RH_FW_HEADER_CACHE_SLOT: ++cache_reads; return header_cache;
     case RH_FW_IMAGE_CACHE_SLOT: ++cache_reads; return image_cache;
     default: return object(address)->clz;
