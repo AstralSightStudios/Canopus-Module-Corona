@@ -4,6 +4,7 @@
 #include "resource_hook_quickapp.h"
 #include "resource_hook_font_reload.h"
 #include "resource_hook_background.h"
+#include "resource_hook_calendar_runtime.h"
 
 #define RH_MODULE_ID "corona"
 #define RH_VERSION "0.3.0"
@@ -33,7 +34,8 @@ static struct rh_state S;
 static int configured;
 /* Explicit config failures stay latched until a successful publication.
  * Autonomous QuickApp resolution has an independently recoverable error. */
-static int32_t config_error, quickapp_error;
+static int32_t config_error, quickapp_error, calendar_config_error, calendar_error;
+static unsigned calendar_started;
 #if defined(RH_TARGET_177) && RH_TARGET_177
 static int32_t background_error;
 static unsigned background_initialized;
@@ -182,8 +184,17 @@ static void refresh_step(void *timer, unsigned ui_owner) {
      * before refreshing their launcher owner. Never invoke native snapshot work
      * from activate(); only serialized UI timer callbacks may run this stage. */
     if (cache_dropped && fonts_done && !calendar_done) {
-        if (!rh_platform_calendar_affected(old, &current)) calendar_done = 1;
-        else if (ui_owner && rh_platform_refresh_calendar() == 0) calendar_done = 1;
+        if (!calendar_started && calendar_config_error) {
+            /* No accepted startup configuration exists. Keep the stock file
+             * pass-through and the latched error, but do not block unrelated
+             * font/image refreshes behind an impossible calendar render. */
+            calendar_error = 0;
+            calendar_done = 1;
+        } else if (!rh_calendar_pending() && !rh_platform_calendar_affected(old, &current)) calendar_done = 1;
+        else if (ui_owner) {
+            calendar_error = rh_platform_refresh_calendar();
+            if (!calendar_error) calendar_done = 1;
+        }
     }
     if (cache_dropped && fonts_done && calendar_done && !images_done &&
         rh_platform_refresh_mapped_images(old, &current) >= 0)
@@ -259,7 +270,16 @@ static int rh_wrapper(void *d, const char *p, int m) {
     if (snapshot) snapshot->references++;
     view = rh_snapshot_view(snapshot);
     rh_platform_unlock(irq);
-    result = rh_posix_open_view(&S, &view, d, p, m);
+    result = 0;
+    if (d == S.driver && m == 2 && S.original) {
+        const char *derived = rh_calendar_redirect(p);
+        char mapped[RH_PATH];
+        /* Explicit final-icon mappings keep precedence over the derived icon.
+         * Never render or read calendar configuration in this callback. */
+        if (derived && rh_resolve_view(&view, RH_CALENDAR_OUTPUT_PATH, mapped) != 1)
+            result = S.original(d, derived, m);
+    }
+    if (!result || result == -1) result = rh_posix_open_view(&S, &view, d, p, m);
     snapshot_release(snapshot);
     return result;
 }
@@ -425,7 +445,8 @@ struct control_status_snapshot { int32_t error; uint32_t count, pending; };
 static struct control_status_snapshot control_status_snapshot(void) {
     struct control_status_snapshot status;
     uint32_t irq = rh_platform_lock();
-    status.error = config_error ? config_error : quickapp_error;
+    status.error = config_error ? config_error : (quickapp_error ? quickapp_error :
+                   (calendar_config_error ? calendar_config_error : calendar_error));
 #if defined(RH_TARGET_177) && RH_TARGET_177
     if (!status.error) status.error = background_error;
 #endif
@@ -501,7 +522,9 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     struct rh_snapshot *captured = 0, *candidate = 0, *declarations = 0;
     struct rh_snapshot *new_declarations = 0, *old_declarations = 0;
     struct rh_mapping_view captured_view;
+    struct rh_calendar_config *calendar_candidate = 0;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
+    unsigned commit_reserved = 0;
 #if defined(RH_TARGET_177) && RH_TARGET_177
     struct rh_backgrounds background_candidate;
 #endif
@@ -575,6 +598,14 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         }
     }
 #endif
+    if (revision) {
+        rc = rh_calendar_stage(&calendar_candidate);
+        if (rc) {
+            calendar_config_error = rc;
+            publish_result(signal, signal_size, rc, 0, 0);
+            goto done;
+        }
+    }
     quickapp_error = 0;
     identical = rh_snapshot_equal(captured, candidate);
     if (identical && !revision) {
@@ -585,7 +616,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     }
     captured_view = rh_snapshot_view(captured);
     calendar_affected = revision && identical &&
-                        rh_platform_calendar_affected(0, &captured_view);
+                        (calendar_candidate != 0 || rh_platform_calendar_affected(0, &captured_view));
     quickapp_affected = revision && identical && new_declarations != 0;
     irq = rh_platform_lock();
     /* A nested activation may have requested a refresh during parsing. Never
@@ -595,8 +626,32 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         rh_platform_unlock(irq);
         goto done;
     }
+    /* Reserve before invoking auxiliary callbacks. A failed background commit
+     * must not expose candidate mappings/declarations with the old calendar. */
+    refreshing = 1;
+    commit_reserved = 1;
+    rh_platform_unlock(irq);
+#if defined(RH_TARGET_177) && RH_TARGET_177
     if (revision) {
-        config_error = 0;
+        background_error = rh_platform_backgrounds_commit(&background_candidate);
+        background_initialized = 1;
+        if (background_error) {
+            publish_result(signal, signal_size, background_error, refresh_pending, 0);
+            goto done;
+        }
+    }
+#endif
+    if (revision && calendar_candidate) {
+        calendar_config_error = rh_calendar_commit(calendar_candidate);
+        if (calendar_config_error) {
+            publish_result(signal, signal_size, calendar_config_error, refresh_pending, 0);
+            goto done;
+        }
+        calendar_candidate = 0;
+    }
+    irq = rh_platform_lock();
+    if (revision) {
+        config_error = calendar_config_error = 0;
         old_declarations = quickapp_declarations;
         quickapp_declarations = new_declarations;
         new_declarations = 0;
@@ -643,17 +698,8 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
             refresh_pending = 1;
         }
     }
+    refreshing = 0; commit_reserved = 0;
     rh_platform_unlock(irq);
-    #if defined(RH_TARGET_177) && RH_TARGET_177
-    if (revision) {
-        background_error = rh_platform_backgrounds_commit(&background_candidate);
-        background_initialized = 1;
-        if (background_error) {
-            publish_result(signal, signal_size, background_error, refresh_pending, 0);
-            goto done;
-        }
-    }
-#endif
     if (revision) remember_reload_signal(signal, signal_size);
     if (refresh_pending) {
         refresh_step(0, 1u);
@@ -661,6 +707,10 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     }
     publish_current_result();
 done:
+    if (commit_reserved) {
+        irq = rh_platform_lock(); refreshing = 0; rh_platform_unlock(irq);
+    }
+    rh_calendar_discard(calendar_candidate);
     snapshot_release(candidate);
     snapshot_release(new_declarations);
     snapshot_release(old_declarations);
@@ -685,6 +735,10 @@ static void watch_step(void *timer) {
     }
     control_busy = 1;
     rh_platform_unlock(irq);
+    if (!calendar_started) {
+        calendar_config_error = rh_calendar_start();
+        if (!calendar_config_error) calendar_started = 1;
+    }
 #if defined(RH_TARGET_177) && RH_TARGET_177
     background_start();
     rh_platform_backgrounds_poll();
@@ -713,6 +767,20 @@ static void watch_step(void *timer) {
          * existing autonomous QuickApp watcher continues even if it stays. */
         poll_control_file(signal,signal_size,kind == RH_REQUEST_RELOAD);
     }
+    /* Date/language changes and missing-owner startup are independent of
+     * mapping revisions. Native firmware may rewrite its file at any time. */
+    irq = rh_platform_lock();
+    if (!refresh_pending && !new_status && calendar_started) {
+        /* Protect mapped caches as well as calendar-local ownership throughout
+         * autonomous rendering. Nested activate can request a future refresh,
+         * but must not retire source decoders before this render completes. */
+        refreshing = 1;
+        rh_platform_unlock(irq);
+        calendar_error = rh_calendar_poll();
+        irq = rh_platform_lock();
+        refreshing = 0;
+    }
+    rh_platform_unlock(irq);
     irq = rh_platform_lock();
     control_busy = 0;
     rh_platform_unlock(irq);

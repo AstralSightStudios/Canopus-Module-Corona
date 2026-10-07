@@ -1,0 +1,21 @@
+{
+  "format": "canopus-resource-pack",
+  "formatVersion": 1,
+  "themeId": "calendar-example",
+  "name": "Transparent calendar example",
+  "targets": ["xiaomi-band-11-4.100.177"],
+  "mappings": [],
+  "calendar": {
+    "month": {
+      "type": "text",
+      "x": 0,
+      "y": 2,
+      "align": "top_mid",
+      "size": 14,
+      "color": "#FFFFFF",
+      "context": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    },
+    "day": { "type": "text", "size": 48, "color": "#000000" },
+    "weekday": { "type": "none" }
+  }
+}

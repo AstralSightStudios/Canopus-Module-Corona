@@ -181,6 +181,8 @@ async function main() {
     version: '1.0.0',
     author: 'Canopus',
     description: 'Dark resource set',
+    calendar: { weekday: { type: 'image', x: 0, y: -1, align: 'center', size: 0,
+      context: Array(7).fill('icons/a.bin') } },
     targets: ['xiaomi-band-11-4.100.139'],
     mappings: [{
       source: '/resource/icons/',
@@ -218,7 +220,7 @@ async function main() {
   assert.throws(() => parseResourcePackManifest(JSON.stringify({ ...coronaObject, themeId: 'Bad_ID' }), 'Bad_ID'),
     /themeId/);
   assert.doesNotThrow(() => validateResourcePackFiles(parsedCorona, ['corona.json', 'icons/a.bin']));
-  assert.throws(() => validateResourcePackFiles(parsedCorona, ['corona.json']), /映射目标.*不存在/);
+  assert.throws(() => validateResourcePackFiles({ ...parsedCorona, calendar: undefined }, ['corona.json']), /映射目标.*不存在/);
   assert.throws(() => parseResourcePackManifest(coronaText, 'other'), /不匹配/);
   assert.throws(() => parseResourcePackManifest(JSON.stringify({
     ...coronaObject, mappings: [{ source: '/resource/', destination: '/tmp/theme/' }]
@@ -418,8 +420,19 @@ async function main() {
   assert.deepEqual([...native.binary.get('internal://files/themes/dark/icons/a.bin')], [1, 2, 255]);
   reply = await deliver('C0001');
   assert(reply.includes('C0001'));
+  // Calendar references are validated against the transferred package files at registration.
+  const missingCalendar = { ...coronaObject, calendar: { ...coronaObject.calendar,
+    weekday: { ...coronaObject.calendar.weekday, context: Array(7).fill('missing.bin') } } };
+  native.text.set('internal://files/themes/dark/corona.json', JSON.stringify(missingCalendar));
+  reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'dark' })));
+  assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
+  assert.equal(native.text.has('internal://files/interconnect-themes.json'), false);
+  native.text.delete('internal://files/themes/dark/corona.json');
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'dark' })));
   assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
+  assert.deepEqual(parseResourcePackManifest(Buffer.from(native.binary.get(
+    'internal://files/themes/dark/corona.json')).toString('utf8')).calendar, parsedCorona.calendar);
+
   assert.deepEqual(JSON.parse(native.text.get('internal://files/interconnect-themes.json')), ['dark']);
   assert.equal(native.text.get('internal://files/themes/dark/mappings.tsv'),
     '/resource/icons/\tthemes/dark/icons/\n');
@@ -457,7 +470,7 @@ async function main() {
 
   // One directory mapping can back more than 128 actual transferred files.
   const manyFiles = [
-    { relativePath: 'canora.json', bytes: Buffer.from(JSON.stringify({ ...coronaObject, themeId: 'legacy' })) },
+    { relativePath: 'canora.json', bytes: Buffer.from(JSON.stringify({ ...coronaObject, calendar: undefined, themeId: 'legacy' })) },
     ...Array.from({ length: 129 }, (_, index) => ({
       relativePath: `icons/${index}.bin`, bytes: Buffer.from([index])
     }))
@@ -610,7 +623,7 @@ async function main() {
 
   async function transferCapacityPack(ruleCount) {
     // Mapping-rule capacity remains independent of the number of transferred files.
-    const bytes = Buffer.from(JSON.stringify({ ...coronaObject, themeId: 'legacy',
+    const bytes = Buffer.from(JSON.stringify({ ...coronaObject, calendar: undefined, themeId: 'legacy',
       mappings: Array.from({ length: ruleCount }, (_, index) => ({
         source: `/resource/${index}.bin`, destination: 'shared.bin'
       })) }));
@@ -787,7 +800,7 @@ async function main() {
   native.text.delete('internal://files/themes/dark/canora.json');
   native.text.delete('internal://files/themes/legacy/corona.json');
   native.text.set('internal://files/themes/legacy/canora.json', JSON.stringify({
-    ...coronaObject, themeId: 'legacy', name: 'Legacy', version: undefined, author: undefined
+    ...coronaObject, calendar: undefined, themeId: 'legacy', name: 'Legacy', version: undefined, author: undefined
   }));
   native.text.set('internal://files/themes/broken/corona.json', '{invalid');
   const beforeList = nativeStorageSnapshot();

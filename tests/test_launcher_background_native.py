@@ -404,15 +404,15 @@ static void test_invalid_cache_system_commit(uint32_t invalid_cache) {
     uint32_t old_source = current_source();
     assert(stage("") == 0); /* System staging does not inspect the old cache. */
     bad_cache = invalid_cache;
-    /* A nonnull invalid cache must fail, not return success for the caller's
-     * configuration acknowledgement, even though our styles were detached. */
+    /* Failed pre-publication retirement must retain the old styles as well
+     * as the selected pathname: auxiliary commits cannot partially detach. */
     assert(commit("") == -2145);
-    assert(infos == old_infos && sets == old_sets + 4);
-    assert(launcher_background_active == 0);
+    assert(infos == old_infos && sets == old_sets);
+    assert(launcher_background_active == 1);
     assert(launcher_path_index == old_index && current_source() == old_source);
     assert(!strcmp(path_for_source(old_source), A));
     for (unsigned i = 0; i < 4; ++i)
-        assert(object(roots[i].children[0])->source == 0);
+        assert(object(roots[i].children[0])->source == old_source);
     if (invalid_cache == HEADER) {
         assert(validations == old_validations + 1);
         assert(retirements == old_retirements); /* Fail before either retirement. */
@@ -424,7 +424,8 @@ static void test_invalid_cache_system_commit(uint32_t invalid_cache) {
     }
     unsigned old_reads = reads;
     poll();
-    assert(reads == old_reads && sets == old_sets + 4);
+    assert(reads > old_reads && sets == old_sets); /* Old background remains actively watched. */
+    all_current();
     /* Repair and retry: the rejected commit retained the old key for cleanup. */
     bad_cache = 0;
     old_retirements = retirements;

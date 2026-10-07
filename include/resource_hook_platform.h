@@ -36,13 +36,14 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *);
 int rh_platform_refresh_images(const struct rh_state *);
 int rh_platform_refresh_mapped_images(const struct rh_mapping_view *,
                                       const struct rh_mapping_view *);
-/* Regenerate the native dynamic calendar only when its inputs/output are
- * affected. Refresh is UI-owner-only, synchronous, outside the IRQ lock.
- * 0 = native request completed/no initialized owner, -1 = retry readiness.
- * Native snapshot/file failures are not a verified rendered-success signal. */
+/* Derived calendar rendering is UI-owner-only, outside the IRQ lock.
+ * No adapter invokes the stock opaque generator or app signal/notify chain. */
 int rh_platform_calendar_affected(const struct rh_mapping_view *,
                                   const struct rh_mapping_view *);
 int rh_platform_refresh_calendar(void);
+struct rh_calendar_config;
+int rh_platform_calendar_retire(const struct rh_calendar_config *);
+void rh_platform_calendar_publish(void);
 /* Experimental .177 only. UI-owner-only, outside the IRQ lock. The watcher
  * stages/commits configuration and maintains one display subscription; native
  * refresh events own visibility, pixel generation and background attachment. */

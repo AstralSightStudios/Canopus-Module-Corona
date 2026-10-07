@@ -2,7 +2,7 @@ import {
   THEME_DESTINATION_ROOT, isBinFileDestination, isQuickAppIconSource, isDirectoryResourceSource,
   safeAbsoluteResourcePath, safeRelativeResourcePath, safeResourceSource, safeThemeDestination
 } from "./resource-path";
-import { readResourcePackManifest } from "./resource-pack";
+import { readResourcePackManifest, CALENDAR_ITEM_NAMES, calendarImagePaths } from "./resource-pack";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import {
   enumerateThemeFiles,
@@ -17,6 +17,10 @@ import {
   SYSTEM_RESOURCE_CHOICE
 } from "./resource-overrides";
 import type { ResourceOverrides, ResourcePackSnapshot } from "./resource-overrides";
+
+export const CALENDAR_RUNTIME_TARGETS: readonly string[] = ["xiaomi-band-11-4.100.177"];
+
+export const ACTIVE_CALENDAR_URI = "internal://files/calendar.cfg";
 
 export const ACTIVE_BACKGROUNDS_URI = "internal://files/backgrounds.cfg";
 
@@ -50,6 +54,7 @@ export interface ActiveFileCopy {
 export interface ActiveMappingsPlan {
   mappings: string;
   backgrounds?: string;
+  calendar?: string;
   generation: string | null;
   copies: ActiveFileCopy[];
 }
@@ -122,7 +127,10 @@ function directlyMappedThemes(mappings: string): string[] {
 export async function readProtectedThemeIds(
   file: Pick<ResourceAssetFileApi, "readOptionalText">,
 ): Promise<string[]> {
-  return parseGenerationIndex(await file.readOptionalText(ACTIVE_GENERATIONS_URI)).protectedThemes || [];
+  return Array.from(new Set([
+    ...(parseGenerationIndex(await file.readOptionalText(ACTIVE_GENERATIONS_URI)).protectedThemes || []),
+    ...calendarThemes(await file.readOptionalText(ACTIVE_CALENDAR_URI) || "")
+  ])).sort();
 }
 
 function backgroundThemes(config: string): string[] {
@@ -133,6 +141,52 @@ function backgroundThemes(config: string): string[] {
     if (!ids.includes(match[1])) ids.push(match[1]);
   }
   return ids;
+}
+
+/** Parse only image contexts: text labels that happen to look like paths are not dependencies. */
+function calendarThemes(config: string): string[] {
+  const ids = new Set<string>();
+  const lines = config.split("\n");
+  if (lines[0] !== "version=1") return [];
+  for (let i = 1; i < lines.length; i++) {
+    const fields = lines[i].split("\t");
+    if (fields.length !== 8 || !(CALENDAR_ITEM_NAMES as readonly string[]).includes(fields[0]) ||
+        !/^(0|[1-9][0-9]*)$/.test(fields[7])) continue;
+    const count = Number(fields[7]);
+    if (count > 31) continue;
+    for (let entry = 0; entry < count && i + 1 < lines.length; entry++) {
+      const path = lines[++i];
+      if (fields[1] !== "image") continue;
+      const match = /^themes\/([a-z0-9_-]{1,64})\//.exec(path);
+      if (match) ids.add(match[1]);
+    }
+  }
+  return Array.from(ids);
+}
+
+export function resolveCalendar(themesHighToLow: ThemeRules[]): ThemeRules | null {
+  return themesHighToLow.find(theme => theme.active !== false &&
+    theme.manifest.calendar !== undefined) || null;
+}
+
+/** Generic pack transport, not a runtime capability assertion: initially only .177 consumes this CFG. */
+export function serializeCalendar(themesHighToLow: ThemeRules[]): string {
+  const winner = resolveCalendar(themesHighToLow);
+  let config = "version=1\n";
+  for (const name of CALENDAR_ITEM_NAMES) {
+    const item = winner?.manifest.calendar?.[name];
+    if (!item) continue; // Native month none, day numeric text, weekday localized text.
+    if (item.type === "none") {
+      config += `${name}\tnone\ttop_left\t0\t0\t0\tnative\t0\n`;
+      continue;
+    }
+    const context = item.context || [];
+    const color = item.color ? item.color.slice(1).toUpperCase() : "native";
+    config += `${name}\t${item.type}\t${item.align}\t${item.x}\t${item.y}\t${item.size}\t${color}\t${context.length}\n`;
+    for (const entry of context)
+      config += `${item.type === "image" ? `themes/${winner!.themeId}/${entry}` : entry}\n`;
+  }
+  return config;
 }
 
 export function resolveBackgroundTarget(
@@ -455,6 +509,8 @@ export async function regenerateActiveMappings(
   file: ResourceAssetFileApi,
   overrides: ResourceOverrides = Object.create(null) as ResourceOverrides,
   snapshot?: ResourcePackSnapshot,
+  // Exact runtime identity, when supplied by a controller; manifest.targets is only author metadata.
+  runtimeTarget?: string,
 ): Promise<ActiveMappingsPlan> {
   const systemIndex = order.indexOf(SYSTEM_STYLE_ID);
   if (systemIndex < 0 || order.lastIndexOf(SYSTEM_STYLE_ID) !== systemIndex)
@@ -462,7 +518,7 @@ export async function regenerateActiveMappings(
 
   const canonicalOrder = serializeResourceOrder(order);
   if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
-  const cacheKey = JSON.stringify([canonicalOrder,
+  const cacheKey = JSON.stringify([canonicalOrder, runtimeTarget || null,
     Object.keys(overrides).sort().map(sourcePath => [sourcePath, overrides[sourcePath]])]);
   const activeThemeIds = order.slice(0, systemIndex);
   const installedThemeIds = order.filter(themeId => themeId !== SYSTEM_STYLE_ID);
@@ -480,6 +536,9 @@ export async function regenerateActiveMappings(
           !Array.isArray(theme.manifest.mappings) || !Array.isArray(theme.files))
         throw new Error(`资源快照缺少资源包 ${themeId}，无法生成映射`);
     }
+    if (runtimeTarget && !CALENDAR_RUNTIME_TARGETS.includes(runtimeTarget) &&
+        activeThemeIds.some(id => snapshot.themes.get(id)!.manifest.calendar !== undefined))
+      throw new Error(`当前模块目标 ${runtimeTarget} 不支持 calendar（仅支持精确 .177 目标）`);
     if (snapshot.activeMappings?.key === cacheKey) return snapshot.activeMappings.plan;
   }
   const themesHighToLow: ThemeRules[] = [];
@@ -510,6 +569,9 @@ export async function regenerateActiveMappings(
       themesHighToLow.push({ themeId, manifest: { ...manifest, mappings }, files: null, active: false });
   }
 
+  if (runtimeTarget && !CALENDAR_RUNTIME_TARGETS.includes(runtimeTarget) && resolveCalendar(themesHighToLow))
+    throw new Error(`当前模块目标 ${runtimeTarget} 不支持 calendar（仅支持精确 .177 目标）`);
+
   // Inventories resolve overlapping groups for exact rules or the overlay fallback.
   const inventoryThemeIds = themesNeedingInventory(
     themesHighToLow.filter(theme => theme.active !== false));
@@ -529,6 +591,19 @@ export async function regenerateActiveMappings(
 
   const plan = planActiveMappings(themesHighToLow, generation, overrides);
   plan.backgrounds = serializeBackgrounds(themesHighToLow);
+  plan.calendar = serializeCalendar(themesHighToLow);
+  const calendarWinner = resolveCalendar(themesHighToLow);
+  if (calendarWinner) {
+    for (const path of new Set(calendarImagePaths(calendarWinner.manifest.calendar))) {
+      if (snapshot) {
+        if (!snapshot.themes.get(calendarWinner.themeId)!.files.some(asset => asset.relativePath === path))
+          throw new Error(`calendar 图片 ${path} 不存在于资源包文件中`);
+      } else {
+        const info = await file.readFileInfo(`${THEME_ROOT_URI}${calendarWinner.themeId}/${path}`);
+        if (info.type !== "file") throw new Error(`calendar 图片 ${path} 不是文件`);
+      }
+    }
+  }
   for (const target of ["launcher", "controlCenter", "notifications"] as const) {
     const bg = resolveBackgroundTarget(themesHighToLow, target);
     if (bg?.mode === "image" && bg.image) {
@@ -559,7 +634,9 @@ export async function regenerateActiveMappings(
       ...directlyMappedThemes(previousMappings || ""),
       ...directlyMappedThemes(plan.mappings),
       ...backgroundThemes(await file.readOptionalText(ACTIVE_BACKGROUNDS_URI) || ""),
-      ...backgroundThemes(plan.backgrounds!)
+      ...backgroundThemes(plan.backgrounds!),
+      ...calendarThemes(await file.readOptionalText(ACTIVE_CALENDAR_URI) || ""),
+      ...calendarThemes(plan.calendar!)
     ])).sort();
     // Either native write can fail after truncation. Preserve dependencies on
     // disk first, and never reuse a cache that could skip repairing the TSV.
@@ -568,6 +645,7 @@ export async function regenerateActiveMappings(
       generationIndex.protectedThemes = protectedThemes;
       await file.writeText(ACTIVE_GENERATIONS_URI, JSON.stringify(generationIndex));
     }
+    await file.writeText(ACTIVE_CALENDAR_URI, plan.calendar!);
     await file.writeText(ACTIVE_BACKGROUNDS_URI, plan.backgrounds!);
     await file.writeText(ACTIVE_MAPPINGS_URI, plan.mappings);
   } catch (error) {
@@ -593,7 +671,7 @@ export async function regenerateActiveMappings(
   // Retain only the latest published plan: acknowledged cleanup may remove any
   // earlier overlay. Signal/receipt failure outside this function does not evict it.
   if (snapshot) snapshot.activeMappings = { key: cacheKey,
-    plan: plan.copies.length ? { mappings: plan.mappings, backgrounds: plan.backgrounds, generation: plan.generation, copies: [] } : plan };
+    plan: plan.copies.length ? { mappings: plan.mappings, backgrounds: plan.backgrounds, calendar: plan.calendar, generation: plan.generation, copies: [] } : plan };
   return plan;
 }
 
@@ -623,7 +701,8 @@ export async function cleanupInactiveGenerations(
   }
   const next: StoredGenerationIndex = { version: 1, generations: retained };
   const protectedThemes = Array.from(new Set([...directlyMappedThemes(mappings || ""),
-    ...backgroundThemes(await file.readOptionalText(ACTIVE_BACKGROUNDS_URI) || "")])).sort();
+    ...backgroundThemes(await file.readOptionalText(ACTIVE_BACKGROUNDS_URI) || ""),
+    ...calendarThemes(await file.readOptionalText(ACTIVE_CALENDAR_URI) || "")])).sort();
   if (protectedThemes.length) next.protectedThemes = protectedThemes;
   const serialized = JSON.stringify(next);
   if ((text !== null || retained.length || protectedThemes.length) && text !== serialized)

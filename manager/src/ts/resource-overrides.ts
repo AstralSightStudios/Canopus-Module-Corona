@@ -1,4 +1,4 @@
-import { readResourcePackManifest } from "./resource-pack";
+import { readResourcePackManifest, calendarImagePaths } from "./resource-pack";
 import { safeResourceSource, isDirectoryResourceSource } from "./resource-path";
 import type { ResourcePackManifest, ResourcePackMapping } from "./resource-pack";
 import type { ActiveMappingsPlan } from "./resource-activation";
@@ -323,12 +323,19 @@ export async function loadResourcePackSnapshot(
     let inventory = inventories ? inventories[themeId] : null;
     const inventoryCoversMappings = inventory && manifest.mappings.some(mapping =>
       inventory!.some(asset => mappingMatchesRelativeFile(mapping, asset.relativePath)));
-    if (manifest.mappings.length && !inventoryCoversMappings) {
+    const calendarPaths = calendarImagePaths(manifest.calendar);
+    const inventoryCoversCalendar = calendarPaths.every(path =>
+      inventory?.some(asset => asset.relativePath === path));
+    if ((manifest.mappings.length && !inventoryCoversMappings) || !inventoryCoversCalendar) {
       // Scan at most one package at a time; activation reuses the resolved fallback.
       inventory = await enumerateThemeFiles(themeId, file, isCurrent);
       checkCurrent();
     }
     const files = inventory || [];
+    for (const path of calendarPaths) {
+      if (!files.some(asset => asset.relativePath === path))
+        throw new Error(`资源包 ${themeId} calendar 图片 ${path} 不存在于资源包文件中`);
+    }
     themes.set(themeId, { themeId, manifest, files });
     mergeThemeRegistrations(byPath, manifest, files);
   }

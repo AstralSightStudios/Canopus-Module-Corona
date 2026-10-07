@@ -10,6 +10,7 @@ const tests = [
   'test_resource_storage.cjs',
   'test_module_control.cjs',
   'test_resource_order.cjs',
+  'test_manager_calendar.cjs',
   'test_resource_overrides.cjs',
   'test_resource_catalog_async.cjs',
   'test_reload_native_copy.cjs',

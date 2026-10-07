@@ -43,7 +43,7 @@ if (metadata.get('target_id') != target or metadata.get('firmware_sha256') != fi
     raise SystemExit('Framework target/firmware identity mismatch')
 PY
 CANOPUS_ROOT="$SDK" CC="$CC" sh "$ROOT/scripts/test-host.sh"
-for name in module resource_hook config launcher_background platform "$NATIVE_PLATFORM" font_reload quickapp_icon; do
+for name in module resource_hook config calendar_config calendar_icon calendar_native launcher_background platform "$NATIVE_PLATFORM" font_reload quickapp_icon; do
     "$CLANG" -Wall -Wextra -Werror --target=arm-none-eabi -mcpu=cortex-m33 -mthumb \
         -mfloat-abi=soft -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
         -Os $TARGET_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
@@ -55,7 +55,8 @@ done
     -Os -I"$SDK/sdk/c" -c "$SDK/runtime/control/canopus_control.c" -o "$ROOT/build/control.o"
 "$LD_LLD" -r -T "$SDK/scripts/canopus_supervisor_sections.ld" \
     "$ROOT/build/module.o" "$ROOT/build/resource_hook.o" "$ROOT/build/config.o" \
-    "$ROOT/build/launcher_background.o" \
+    "$ROOT/build/launcher_background.o" "$ROOT/build/calendar_config.o" \
+    "$ROOT/build/calendar_icon.o" "$ROOT/build/calendar_native.o" \
     "$ROOT/build/platform.o" "$ROOT/build/$NATIVE_PLATFORM.o" "$ROOT/build/font_reload.o" \
     "$ROOT/build/quickapp_icon.o" \
     "$ROOT/build/control.o" -o "$ROOT/build/resource-hook.elf"

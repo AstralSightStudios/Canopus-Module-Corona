@@ -1,7 +1,7 @@
 import {
   THEME_DESTINATION_ROOT, QUICKAPP_ICON_SOURCE_PREFIX, isBinFileDestination,
   isQuickAppIconSource, safeResourceSource, safeRelativeResourcePath, safeThemeDestination,
-  validQuickAppPackage
+  validQuickAppPackage, utf8PathLength
 } from "./resource-path";
 
 export const RESOURCE_PACK_MANIFEST_FILENAME = "corona.json";
@@ -55,6 +55,22 @@ export interface BackgroundsDeclaration {
   notifications?: BackgroundSetting;
 }
 
+export const CALENDAR_ITEM_NAMES = ["month", "day", "weekday"] as const;
+export type CalendarItemName = typeof CALENDAR_ITEM_NAMES[number];
+export type CalendarAlign = "top_left" | "top_mid" | "top_right" | "center";
+/** Canonical parsed items: optional JSON placement/font properties are expanded to native defaults. */
+export type CalendarItem = { type: "none" } | {
+  type: "text" | "image";
+  x: number;
+  y: number;
+  align: CalendarAlign;
+  size: number;
+  color?: string;
+  // weekday entries are Monday first; omitted/empty text context uses the system date.
+  context?: string[];
+};
+export type CalendarDeclaration = Partial<Record<CalendarItemName, CalendarItem>>;
+
 export interface ResourcePackManifest {
   format: "canopus-resource-pack";
   formatVersion: 1;
@@ -67,6 +83,7 @@ export interface ResourcePackManifest {
   targets?: string[];
   mappings: ResourcePackMapping[];
   backgrounds?: BackgroundsDeclaration;
+  calendar?: CalendarDeclaration;
   launcherBackground?: LauncherBackground;
 }
 
@@ -155,6 +172,97 @@ function serializeMappings(mappings: ResourcePackMapping[], themeId: string): st
     `${rule.source}\t${destinationRoot}${rule.destination}\n`).join("");
 }
 
+/** Reject lone UTF-16 surrogates before native UTF-8 serialization (never replace them silently). */
+function validCalendarUnicode(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(++i);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
+}
+
+function parseCalendar(value: unknown, themeId: string): CalendarDeclaration {
+  if (!isRecord(value) || Object.keys(value).some(key =>
+      !(CALENDAR_ITEM_NAMES as readonly string[]).includes(key)))
+    throw new Error("calendar 必须仅包含 month/day/weekday（背景仍使用普通映射）");
+  const result: CalendarDeclaration = {};
+  const counts = { month: 12, day: 31, weekday: 7 };
+  for (const name of CALENDAR_ITEM_NAMES) {
+    const item = value[name];
+    if (item === undefined) continue;
+    const label = `calendar.${name}`;
+    if (!isRecord(item) || !["none", "text", "image"].includes(item.type as string))
+      throw new Error(`${label}.type 必须为 text/image/none`);
+    if (item.type === "none") {
+      if (Object.keys(item).some(key => key !== "type"))
+        throw new Error(`${label} none 只允许 type`);
+      result[name] = { type: "none" };
+      continue;
+    }
+    if (Object.keys(item).some(key =>
+        !["type", "x", "y", "align", "size", "color", "context"].includes(key)))
+      throw new Error(`${label} 包含未知字段`);
+    // A partial declaration keeps the item's native placement/font, not zeroed properties.
+    const x = item.x === undefined ? 0 : item.x;
+    const y = item.y === undefined ? (name === "day" ? 34 : 17) : item.y;
+    const align = item.align === undefined ? "top_mid" : item.align;
+    const size = item.size === undefined ? 0 : item.size;
+    if (typeof x !== "number" || !Number.isInteger(x) || x < -112 || x > 112 ||
+        typeof y !== "number" || !Number.isInteger(y) || y < -112 || y > 112)
+      throw new Error(`${label}.x/y 必须为-112..112 的整数偏移`);
+    if (!["top_left", "top_mid", "top_right", "center"].includes(align as string))
+      throw new Error(`${label}.align 无效`);
+    if (typeof size !== "number" || !Number.isInteger(size) ||
+        (size !== 0 && (size < 8 || size > 72)))
+      throw new Error(`${label}.size 必须为 0 或 8..72`);
+    if (item.type === "image" && (size !== 0 || item.color !== undefined))
+      throw new Error(`${label} 图片使用原始尺寸，不允许非零 size 或 color`);
+    if (item.color !== undefined &&
+        (typeof item.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(item.color)))
+      throw new Error(`${label}.color 必须为 #RRGGBB`);
+    const context = item.context;
+    if (context !== undefined && (!Array.isArray(context) ||
+        (context.length !== counts[name] && !(item.type === "text" && context.length === 0))))
+      throw new Error(`${label}.context 必须为 ${counts[name]} 项数组（text 可省略或为空）`);
+    if (item.type === "image" && (!Array.isArray(context) || context.length !== counts[name]))
+      throw new Error(`${label}.context 图片必须恰有 ${counts[name]} 项`);
+    if (Array.isArray(context)) {
+      for (const entry of context) {
+        if (typeof entry !== "string") throw new Error(`${label}.context 必须为字符串数组`);
+        if (!validCalendarUnicode(entry) || /[\u0000-\u001f\u007f-\u009f]/.test(entry))
+          throw new Error(`${label}.context 不能包含控制字符或无效 Unicode`);
+        if (item.type === "text") {
+          if (utf8PathLength(entry) > 63)
+            throw new Error(`${label}.context 文本最多 63 UTF-8 字节且不能包含控制字符`);
+        } else if (!isBinFileDestination(entry) || isReservedResourcePackPath(entry) ||
+            !safeThemeDestination(`${THEME_DESTINATION_ROOT}${themeId}/${entry}`)) {
+          throw new Error(`${label}.context 图片必须为安全的包内 BIN 文件路径，展开后小于 256 字节`);
+        }
+      }
+    }
+    result[name] = {
+      type: item.type as "text" | "image", x, y,
+      align: align as CalendarAlign, size,
+      ...(item.color === undefined ? {} : { color: (item.color as string).toUpperCase() }),
+      ...(context === undefined ? {} : { context: (context as string[]).slice() })
+    };
+  }
+  return result;
+}
+
+/** All package files referenced by calendar images, including duplicate date entries. */
+export function calendarImagePaths(calendar?: CalendarDeclaration): string[] {
+  const paths: string[] = [];
+  for (const name of CALENDAR_ITEM_NAMES) {
+    const item = calendar?.[name];
+    if (item?.type === "image") paths.push(...item.context || []);
+  }
+  return paths;
+}
+
 /** Parse and validate the on-device corona.json (or legacy canora.json) before registering or displaying a pack. */
 export function parseResourcePackManifest(text: string, expectedThemeId?: string): ResourcePackManifest {
   if (typeof text !== "string" || text.charCodeAt(0) === 0xfeff ||
@@ -226,6 +334,7 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     if (!backgrounds.launcher) backgrounds.launcher = lb;
   }
   const launcherBackground = backgrounds?.launcher;
+  const calendar = value.calendar === undefined ? undefined : parseCalendar(value.calendar, value.themeId);
 
   // Consume quickappIcons into canonical mappings only. Re-parsing serialized
   // normalized manifests must neither duplicate rules nor discard pack metadata.
@@ -241,6 +350,7 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     ...(description === undefined ? {} : { description }),
     ...(targets === undefined ? {} : { targets }),
     mappings,
+    ...(calendar === undefined ? {} : { calendar }),
     ...(backgrounds === undefined ? {} : { backgrounds }),
     ...(launcherBackground === undefined ? {} : { launcherBackground })
   };
@@ -251,6 +361,10 @@ export function validateResourcePackFiles(
   manifest: ResourcePackManifest,
   relativePaths: string[],
 ): void {
+  for (const path of calendarImagePaths(manifest.calendar)) {
+    if (!relativePaths.includes(path))
+      throw new Error(`calendar 图片 ${path} 不存在于资源包文件中`);
+  }
   if (manifest.backgrounds) {
     for (const [key, bg] of Object.entries(manifest.backgrounds) as [string, BackgroundSetting][]) {
       if (bg.mode === "image" && !relativePaths.includes(bg.image))

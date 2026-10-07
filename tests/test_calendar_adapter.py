@@ -1,8 +1,7 @@
-"""Source-compiled calendar adapter guards for all exact targets.
+"""Source-compiled calendar adapter guards for every exact target.
 
-Native lookup/notify/generation and cache unlink leaves are modeled here;
-firmware_calendar.py separately executes the exact native AP instructions.
-No device, GPU, file-write or renderer success is asserted.
+Only cache unlink, publisher and a refresh-owner stub are modeled. No native
+renderer, generator, application notification, GPU or file I/O is executed.
 """
 import os
 from pathlib import Path
@@ -22,11 +21,21 @@ ROOT = Path(__file__).resolve().parents[1]
 SDK = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus-Private'))
 REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3]
 STOP = 0x1c73ff00
+# display slot, decoded/header slots, decoded/header classes, cache drop leaf
 TARGETS = {
     '139': (0x200bd200, 0x200bd310, 0x200bd314, 0x2ca168c4, 0x2ca16944, 0xc8b8cae),
     '155': (0x200bd200, 0x200bd310, 0x200bd314, 0x2ca168b4, 0x2ca16934, 0xc8b8c9e),
+    '177': (0x200bd0a4, 0x200bd1b4, 0x200bd1b8, 0x2ca14980, 0x2ca14a00, 0xc8b708a),
     '1043': (0x2010318c, 0x2010329c, 0x201032a0, 0x2cce56f4, 0x2cce571c, 0xc1667dc),
 }
+LAUNCHERS = {
+    '139': (0x200c6010, 0xc5487a4, 0xc5486d0),
+    '155': (0x200c6010, 0xc5487a4, 0xc5486d0),
+    '177': (0x200c5d88, 0xc547870, 0xc54779c),
+}
+EXPORTS = ('rh_platform_refresh_calendar', 'rh_platform_calendar_retire',
+           'rh_platform_calendar_publish', 'rh_platform_calendar_affected',
+           'rh_calendar_parse', 'rh_calendar_defaults', 'test_config_size')
 
 
 class CalendarAdapter(unittest.TestCase):
@@ -37,25 +46,42 @@ class CalendarAdapter(unittest.TestCase):
         cls.images = {}
         clang = os.environ.get('CLANG', shutil.which('clang'))
         linker = os.environ.get('LD_LLD', shutil.which('ld.lld'))
+        # The adapter must delegate to the owner, not implement refresh itself.
+        # Use the actual config parser/context accessor, but never the renderer.
+        fixture = Path(cls.tmp.name) / 'fixture.c'
+        fixture.write_text('''#include "resource_hook_calendar.h"
+volatile int test_refresh_result;
+volatile unsigned test_refresh_calls;
+int rh_calendar_refresh(void) {
+    ++test_refresh_calls;
+    return test_refresh_result;
+}
+unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
+''')
         for version in TARGETS:
             target = ('xiaomi-band-10-pro-3.101.043' if version == '1043'
                       else 'xiaomi-band-11-4.100.' + version)
             objects = []
-            for name in ('platform', 'resource_hook',
-                         'platform_band10pro' if version == '1043' else 'platform_band11'):
-                obj = Path(cls.tmp.name) / f'{version}-{name}.o'
+            sources = [ROOT / 'src' / (name + '.c') for name in
+                       ('platform', 'resource_hook', 'calendar_config')]
+            sources.append(fixture)
+            for source in sources:
+                obj = Path(cls.tmp.name) / f'{version}-{source.stem}.o'
                 defines = ([] if version == '139' else [f'-DRH_TARGET_{version}=1'])
                 subprocess.run([clang, '--target=arm-none-eabi', '-mcpu=cortex-m33',
                     '-mthumb', '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin',
-                    '-fno-stack-protector', '-fno-unwind-tables', '-Os', '-Wall',
+                    '-fno-stack-protector', '-fno-unwind-tables',
+                    '-ffunction-sections', '-fdata-sections', '-Os', '-Wall',
                     '-Wextra', '-Werror', *defines, '-I' + str(ROOT / 'include'),
                     '-I' + str(SDK / 'sdk/c'), '-I' + str(SDK / 'manager/target/band11'),
                     '-I' + str(SDK / 'targets' / target / 'generated'),
-                    '-c', str(ROOT / 'src' / (name + '.c')), '-o', str(obj)], check=True)
+                    '-c', str(source), '-o', str(obj)], check=True)
                 objects.append(str(obj))
             elf = Path(cls.tmp.name) / f'{version}.elf'
-            subprocess.run([linker, '-Ttext=0x1c700000', '-e',
-                'rh_platform_refresh_calendar', *objects, '-o', str(elf)], check=True)
+            subprocess.run([linker, '-Ttext=0x1c700000', '--gc-sections', '-e',
+                'rh_platform_refresh_calendar',
+                *[f'--undefined={name}' for name in EXPORTS],
+                *objects, '-o', str(elf)], check=True)
             with elf.open('rb') as stream:
                 f = ELFFile(stream)
                 cls.images[version] = (
@@ -91,25 +117,23 @@ class CalendarAdapter(unittest.TestCase):
                            '/resource/app/perpetual_calendar/launcher_icon.bin')
         self.output = ('/resource/app/perpetual_calendar/launcher.bin' if version == '1043'
                        else '/data/app/perpetual_calendar/calendar_icon.bin')
+        self.root = ('/data/files/' if version == '1043' else '/data/quickapp/files/') + 'ng.lst.corona/'
+        self.keys = [self.background, self.output,
+                     self.root + 'calendar-alpha-0.bin', self.root + 'calendar-alpha-1.bin']
         self.entries = {}
+        self.unlink = True
         self.hook(drop, self.drop)
         if version == '1043':
+            # Even a live application registry must not be consulted/notified.
             self.word(0x200eb658, 0x2cdbb054)
-            for offset, value in ((12, 0xca69e81), (16, 0xca69e55), (44, 0xca69aa1)):
-                self.word(0x2cdbb054 + offset, value)
-            self.app = self.mem(64)
-            self.appid = self.text('com.xiaomi.miwear.perpetual_calendar')
-            self.word(self.app + 8, self.appid)
-            self.u.mem_write(self.app + 16, struct.pack('<H', 69))
-            self.word(self.app + 56, 0xc4efde9)
-            self.fallback = False
-            self.hook(0xca69934, lambda: self.lookup(False))
-            self.hook(0xca6996c, lambda: self.lookup(True))
-            self.hook(0xca6a004, self.notify)
+            for address, label in ((0xca69934, 'lookup'), (0xca6996c, 'lookup-other'),
+                                   (0xca6a004, 'notify')):
+                self.hook(address, lambda label=label: self.calls.append(label) or 0)
         else:
-            self.word(0x200c6010, self.mem())
-            self.hook(0xc5487a4, lambda: self.calls.append('generate') or 0)
-            self.hook(0xc5486d0, lambda: self.calls.append('publish') or 0)
+            slot, generate, publish = LAUNCHERS[version]
+            self.word(slot, self.mem())
+            self.hook(generate, lambda: self.calls.append('generate') or 0)
+            self.hook(publish, lambda: self.calls.append('publish') or 0)
 
     def mem(self, size=128):
         p = self.next_memory
@@ -120,22 +144,12 @@ class CalendarAdapter(unittest.TestCase):
     def word(self, p, value=None):
         if value is None:
             return struct.unpack('<I', self.u.mem_read(p, 4))[0]
-        self.u.mem_write(p, struct.pack('<I', value))
+        self.u.mem_write(p, struct.pack('<I', value & 0xffffffff))
 
     def text(self, value):
-        p = self.mem(len(value) + 1)
+        p = self.mem(len(value.encode()) + 1)
         self.u.mem_write(p, value.encode() + b'\0')
         return p
-
-    def string(self, p):
-        data = bytearray()
-        for _ in range(256):
-            byte = self.u.mem_read(p, 1)[0]
-            if not byte:
-                return data.decode()
-            data.append(byte)
-            p += 1
-        self.fail('unterminated path')
 
     def reg(self, i):
         return self.u.reg_read(REGS[i])
@@ -159,16 +173,6 @@ class CalendarAdapter(unittest.TestCase):
         self.assertEqual(self.u.reg_read(UC_ARM_REG_PC), STOP)
         return self.reg(0)
 
-    def lookup(self, other):
-        self.assertEqual(self.reg(0), 69)
-        self.calls.append('lookup-other' if other else 'lookup')
-        return self.app if other == self.fallback else 0
-
-    def notify(self):
-        self.assertEqual(self.string(self.reg(0)), 'com.xiaomi.miwear.perpetual_calendar')
-        self.calls.append('notify')
-        return 0
-
     def cached(self, cache, path, offset, kind=1):
         node, rb, data = self.mem(), self.mem(), self.mem()
         self.word(node, rb)
@@ -185,90 +189,173 @@ class CalendarAdapter(unittest.TestCase):
         expected, node = self.entries[data]
         self.assertEqual(cache, expected)
         self.drops.append(data)
+        if not self.unlink:
+            return 0
         cursor, previous = self.word(cache + 52), 0
         while cursor != node:
             previous, cursor = cursor, self.word(cursor + 8)
         self.word(previous + 8 if previous else cache + 52, self.word(node + 8))
+        # Any subsequent access to retired list storage must not be needed.
+        self.u.mem_write(node, b'\xdd' * 128)
+        self.u.mem_write(data, b'\xdd' * 128)
         return 0
+
+    def survivors(self):
+        nodes = set()
+        for cache in (self.header, self.data):
+            node = self.word(cache + 52)
+            while node:
+                self.assertNotIn(node, nodes)
+                nodes.add(node)
+                node = self.word(node + 8)
+        return {data for data, (_, node) in self.entries.items() if node in nodes}
+
+    def seed_keys(self, paths):
+        expected, unrelated = [], []
+        for cache, offset in ((self.header, 0), (self.data, 4)):
+            for path in paths:
+                # Match path strings, not pointer identity; keep duplicate keys.
+                expected.extend(self.cached(cache, path, offset) for _ in range(2))
+                unrelated.append(self.cached(cache, path, offset, kind=0))
+                unrelated.append(self.cached(cache, path + '.unrelated', offset))
+            unrelated.append(self.cached(cache, '/unrelated/icon.bin', offset))
+        return expected, unrelated
 
     def view(self, source=None):
         view = self.mem(12)
         if source:
             rules = self.mem(512)
             self.u.mem_write(rules, source.encode() + b'\0')
-            root = ('/data/files/' if self.version == '1043' else '/data/quickapp/files/')
-            self.u.mem_write(rules + 256,
-                (root + 'ng.lst.corona/themes/calendar.bin').encode() + b'\0')
+            self.u.mem_write(rules + 256, (self.root + 'themes/calendar.bin').encode() + b'\0')
             self.word(view, rules)
             self.word(view + 4, 1)
         return view
+
+    def config(self, images=False):
+        config = self.mem(self.call('test_config_size'))
+        if not images:
+            self.call('rh_calendar_defaults', config)
+            return config, [], []
+        source = 'version=1\n'
+        image_paths, text_paths = [], []
+        for item, kind, count in (('month', 'image', 12), ('day', 'text', 31),
+                                  ('weekday', 'image', 7)):
+            source += f'{item}\t{kind}\ttop_mid\t0\t0\t0\tnative\t{count}\n'
+            for index in range(count):
+                path = f'themes/{item}-{index}.bin'
+                source += path + '\n'
+                (image_paths if kind == 'image' else text_paths).append(self.root + path)
+        self.assertEqual(self.call('rh_calendar_parse', self.text(source), len(source), config), 0)
+        return config, image_paths, text_paths
 
     def test_affected_inputs_old_rules_and_unrelated_sources(self):
         for version in TARGETS:
             with self.subTest(version=version):
                 self.machine(version)
                 empty = self.view()
-                for path in (self.background, self.output):
+                for path in (self.background, self.output, '/resource/app/launcher/calendar.bin',
+                             '/resource/font/MiSans-Regular-All.ttf'):
                     view = self.view(path)
                     self.assertEqual(self.call('rh_platform_calendar_affected', 0, view), 1)
                     self.assertEqual(self.call('rh_platform_calendar_affected', view, empty), 1)
                 view = self.view('/resource/app/settings/launcher.bin')
                 self.assertEqual(self.call('rh_platform_calendar_affected', 0, view), 0)
 
-    def test_only_background_keys_retire_before_native_calls(self):
+    def test_retire_exact_keys_and_optional_configured_images(self):
         for version in TARGETS:
-            with self.subTest(version=version):
-                self.machine(version)
-                expected = []
-                for cache, offset in ((self.header, 0), (self.data, 4)):
-                    self.cached(cache, '/unrelated/icon.bin', offset)
-                    expected.append(self.cached(cache, self.background, offset))
-                    self.cached(cache, self.output, offset)
-                    self.cached(cache, self.background, offset, kind=0)
-                self.assertEqual(self.call('rh_platform_refresh_calendar'), 0)
-                self.assertEqual(self.drops, expected)
-                self.assertEqual(self.calls,
-                    ['lookup', 'notify'] if version == '1043' else ['generate', 'publish'])
+            for mode in ('null', 'defaults', 'images'):
+                with self.subTest(version=version, config=mode):
+                    self.machine(version)
+                    config, images, texts = ((0, [], []) if mode == 'null'
+                                            else self.config(mode == 'images'))
+                    expected, unrelated = self.seed_keys(self.keys + images)
+                    for cache, offset in ((self.header, 0), (self.data, 4)):
+                        for path in texts + [self.root + 'themes/not-configured.bin']:
+                            unrelated.append(self.cached(cache, path, offset))
+                    self.assertEqual(self.call('rh_platform_calendar_retire', config), 0)
+                    self.assertCountEqual(self.drops, expected)
+                    self.assertEqual(self.survivors(), set(unrelated))
+                    self.assertEqual(self.calls, [])
+                    self.assertEqual(self.word(self.symbols['test_refresh_calls']), 0)
 
-    def test_busy_display_and_invalid_cache_do_not_generate(self):
+    def test_display_and_cache_guards_precede_any_retirement(self):
+        faults = ('display-null', 'screen-null', 'busy', 'invalidation-off',
+                  'invalidation-negative', 'data-null', 'header-null',
+                  'data-class', 'header-class', 'data-node-size', 'header-node-size',
+                  'data-rb-null', 'header-rb-null', 'data-entry-null', 'header-entry-null')
+        for version in TARGETS:
+            for fault in faults:
+                with self.subTest(version=version, fault=fault):
+                    self.machine(version)
+                    expected, unrelated = self.seed_keys(self.keys)
+                    display_slot, data_slot, header_slot, *_ = TARGETS[version]
+                    if fault == 'display-null':
+                        self.word(display_slot, 0)
+                    elif fault == 'screen-null':
+                        self.word(self.display + 696, 0)
+                    elif fault == 'busy':
+                        self.u.mem_write(self.display + 58, b'\2')
+                    elif fault.startswith('invalidation-'):
+                        self.word(self.display + 608, -1 if fault.endswith('negative') else 0)
+                    else:
+                        cache = self.data if fault.startswith('data-') else self.header
+                        slot = data_slot if cache == self.data else header_slot
+                        if fault.endswith('-null') and fault in ('data-null', 'header-null'):
+                            self.word(slot, 0)
+                        elif fault.endswith('-class'):
+                            self.word(cache, 0)
+                        elif fault.endswith('-node-size'):
+                            self.word(cache + 48, 8)
+                        elif fault.endswith('-rb-null'):
+                            self.word(self.word(cache + 52), 0)
+                        else:
+                            self.word(self.word(self.word(cache + 52)) + 16, 0)
+                    self.assertEqual(self.call('rh_platform_calendar_retire', 0), 0xffffffff)
+                    self.assertEqual(self.drops, [])
+                    self.assertEqual(self.survivors(), set(expected + unrelated))
+                    self.assertEqual(self.calls, [])
+
+    def test_failed_unlink_is_not_reported_as_success(self):
         for version in TARGETS:
             with self.subTest(version=version):
                 self.machine(version)
-                self.u.mem_write(self.display + 58, b'\2')
-                self.assertEqual(self.call('rh_platform_refresh_calendar'), 0xffffffff)
+                expected, unrelated = self.seed_keys(self.keys)
+                self.unlink = False
+                self.assertEqual(self.call('rh_platform_calendar_retire', 0), 0xffffffff)
+                self.assertEqual(len(self.drops), 1)
+                self.assertEqual(self.survivors(), set(expected + unrelated))
                 self.assertEqual(self.calls, [])
-                self.u.mem_write(self.display + 58, b'\0')
-                self.word(self.header, 0)
-                self.assertEqual(self.call('rh_platform_refresh_calendar'), 0xffffffff)
-                self.assertNotIn('notify', self.calls)
-                self.assertNotIn('generate', self.calls)
-                self.assertEqual(self.drops, [])
 
-    def test_10pro_secondary_registry_and_owner_identity_guards(self):
-        self.machine('1043')
-        self.fallback = True
-        self.assertEqual(self.call('rh_platform_refresh_calendar'), 0)
-        self.assertEqual(self.calls, ['lookup', 'lookup-other', 'notify'])
-        for fault in ('vtable', 'callback', 'id', 'appid-null', 'appid-invalid', 'appid-wrong', 'app-invalid'):
-            with self.subTest(fault=fault):
-                self.machine('1043')
-                if fault == 'vtable':
-                    self.word(0x200eb658, 0)
-                elif fault == 'callback':
-                    self.word(self.app + 56, 0)
-                elif fault == 'id':
-                    self.u.mem_write(self.app + 16, struct.pack('<H', 27))
-                elif fault == 'appid-null':
-                    self.word(self.app + 8, 0)
-                elif fault == 'appid-invalid':
-                    self.word(self.app + 8, 0xdead0000)
-                elif fault == 'appid-wrong':
-                    self.word(self.app + 8, self.text('com.xiaomi.miwear.calendar'))
-                else:
-                    self.app = 0xdead0000
-                self.assertEqual(self.call('rh_platform_refresh_calendar'), 0)
-                self.assertNotIn('notify', self.calls)
-                self.assertEqual(self.drops, [])
+    def test_publish_only_when_launcher_initialized_and_043_is_noop(self):
+        for version in TARGETS:
+            for initialized in (False, True):
+                with self.subTest(version=version, initialized=initialized):
+                    self.machine(version)
+                    expected, unrelated = self.seed_keys(self.keys)
+                    if version in LAUNCHERS:
+                        self.word(LAUNCHERS[version][0], self.mem() if initialized else 0)
+                    self.call('rh_platform_calendar_publish')
+                    self.assertEqual(self.calls, ['publish'] if initialized and version != '1043' else [])
+                    self.assertEqual(self.drops, [])
+                    self.assertEqual(self.survivors(), set(expected + unrelated))
+                    self.assertEqual(self.word(self.symbols['test_refresh_calls']), 0)
+
+    def test_refresh_forwards_once_and_propagates_owner_return(self):
+        for version in TARGETS:
+            with self.subTest(version=version):
+                self.machine(version)
+                expected, unrelated = self.seed_keys(self.keys)
+                # Refresh is delegation even if the adapter's retirement guard
+                # would fail; the owner decides readiness and transaction order.
+                self.word(TARGETS[version][0], 0)
+                self.word(self.header, 0)
+                for count, result in enumerate((0, 1, -1, -2145, 73), 1):
+                    self.word(self.symbols['test_refresh_result'], result)
+                    self.assertEqual(self.call('rh_platform_refresh_calendar'), result & 0xffffffff)
+                    self.assertEqual(self.word(self.symbols['test_refresh_calls']), count)
+                    self.assertEqual(self.calls, [])
+                    self.assertEqual(self.drops, [])
+                    self.assertEqual(self.survivors(), set(expected + unrelated))
 
 
 if __name__ == '__main__':

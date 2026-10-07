@@ -2,6 +2,7 @@
 #include "resource_hook_quickapp.h"
 #include "resource_hook_font_reload.h"
 #include "resource_hook_background.h"
+#include "resource_hook_calendar_runtime.h"
 #include "canopus_abi.h"
 #include "canopus_module_registration.h"
 #include <assert.h>
@@ -42,12 +43,38 @@ struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 static int calendar_mode, calendar_rc;
+static unsigned calendar_hook_mode, calendar_hook_fail, calendar_hook_calls;
+static unsigned calendar_poll_calls, calendar_reenter_poll;
+static int calendar_stage_rc, calendar_start_rc;
+static unsigned calendar_force_pending;
+static char calendar_hook_path[RH_PATH];
+/* Coordinator model only; renderer/parser/bank ownership have separate tests. */
+int rh_calendar_stage(struct rh_calendar_config **out) { *out = NULL; return calendar_stage_rc; }
+int rh_calendar_commit(struct rh_calendar_config *config) { assert(!config); return 0; }
+void rh_calendar_discard(struct rh_calendar_config *config) { assert(!config); }
+int rh_calendar_start(void) { assert(in_ui_timer && !locked); return calendar_start_rc; }
+int rh_calendar_poll(void) {
+    assert(in_ui_timer && !locked);
+    ++calendar_poll_calls;
+    if (calendar_reenter_poll) {
+        unsigned before = image_drops;
+        calendar_reenter_poll = 0;
+        assert(canopus_module_descriptor.activate(NULL) == 0);
+        assert(image_drops == before);
+    }
+    return 0;
+}
+int rh_calendar_pending(void) { return (int)calendar_force_pending; }
+const char *rh_calendar_redirect(const char *path) {
+    return calendar_hook_mode && path && !strcmp(path, &RH_CALENDAR_OUTPUT_PATH[1])
+        ? &RH_CALENDAR_BANK0[1] : NULL;
+}
 #if defined(RH_TARGET_177) && RH_TARGET_177
 #define BACKGROUNDS_CONFIG_PATH RH_APP_FILES_ROOT "backgrounds.cfg"
 static const char *background_config; /* Missing in all legacy scenarios. */
 static unsigned background_position, background_opens, background_reads, background_closes;
 static unsigned background_stages, background_commits, background_polls;
-static int background_stage_rc;
+static int background_stage_rc, background_commit_rc;
 static char staged_background[RH_PATH], committed_background[RH_PATH];
 static struct rh_backgrounds staged_backgrounds, committed_backgrounds;
 
@@ -62,6 +89,7 @@ int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
 int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     assert(!locked && in_ui_timer && bg);
     background_commits++;
+    if (background_commit_rc) return background_commit_rc;
     committed_backgrounds = *bg;
     strcpy(committed_background, bg->launcher);
     return 0;
@@ -148,6 +176,11 @@ int rh_font_reload(const struct rh_mapping_view *current, uint32_t *changed) {
 void rh_font_reload_disable(void) { assert(!locked); font_disabled++; }
 static int backend(void *d, const char *p, int mode) {
     assert(d == &driver && mode == 2);
+    if (calendar_hook_mode) {
+        ++calendar_hook_calls;
+        strcpy(calendar_hook_path, p);
+        return calendar_hook_fail && !strcmp(p, &RH_CALENDAR_BANK0[1]) ? -1 : 7;
+    }
     assert(!strcmp(p, backend_expected));
     if (nested_reload) {
         unsigned i, live = 0;
@@ -1028,6 +1061,72 @@ static int test_startup_diagnostics(void) {
     puts("startup logging, registration faults, errno capture and bounded failures passed");
     return 0;
 }
+static int test_calendar_initial_invalid(void) {
+    calendar_start_rc = -2153;
+    calendar_force_pending = 1; /* Real engine has no active configuration yet. */
+    assert(canopus_module_descriptor.activate(NULL) == 0);
+    fire_timers(1000u);
+    assert(metadata_refreshes && redraws && !calendar_calls);
+    query_status("resource-hook-status-v1\tng.lst.corona\tcalendar-initial-invalid\n", -2153, 1, 0);
+    calendar_start_rc = 0; calendar_force_pending = 0;
+    control_signal = NULL; fire_timers(1000u);
+    assert(calendar_poll_calls); /* Repair permits autonomous startup without a revision. */
+    query_status("resource-hook-status-v1\tng.lst.corona\tcalendar-initial-repaired\n", 0, 1, 0);
+    puts("invalid initial calendar config preserves stock fallback and unrelated redraws");
+    return 0;
+}
+static int test_calendar_coordinator_guards(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned polls;
+    assert(d->activate(NULL) == 0);
+    fire_timers(50u); fire_timers(1000u);
+    polls = calendar_poll_calls;
+    calendar_stage_rc = -2153;
+    control_config = "/resource/a.bin\tthemes/current/a.bin\n/resource/b.bin\tthemes/current/b.bin\n";
+    control_signal = "resource-hook-reload-v1\tcalendar-invalid-replacement\n";
+    fire_timers(1000u);
+    assert(calendar_poll_calls == polls + 1); /* Rejected CFG must not freeze old calendar. */
+    query_status("resource-hook-status-v1\tng.lst.corona\tcalendar-invalid-status\n", -2153, 1, 0);
+    polls = calendar_poll_calls;
+    control_signal = NULL; fire_timers(1000u);
+    assert(calendar_poll_calls == polls + 1);
+    calendar_reenter_poll = 1; fire_timers(1000u);
+    assert(!calendar_reenter_poll); /* Nested activate must not retire caches inside poll. */
+    fire_timers(50u);
+    calendar_stage_rc = 0;
+    control_config = config;
+    control_signal = "resource-hook-reload-v1\tcalendar-recover\n";
+    fire_timers(1000u);
+#if defined(RH_TARGET_177) && RH_TARGET_177
+    background_commit_rc = -2145;
+    control_config = "/resource/a.bin\tthemes/current/a.bin\n/resource/b.bin\tthemes/current/b.bin\n";
+    control_signal = "resource-hook-reload-v1\tcalendar-failed-background-commit\n";
+    fire_timers(1000u);
+    query_status("resource-hook-status-v1\tng.lst.corona\tcalendar-commit-status\n", -2145, 1, 0);
+    background_commit_rc = 0;
+#endif
+    puts("calendar coordinator keeps prior date polling, reserves reentrant activation and rejects partial commits");
+    return 0;
+}
+static int test_calendar_alpha_hook(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    calendar_hook_mode = 1;
+    assert(d->activate(NULL) == 0);
+    assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
+    assert(calendar_hook_calls == 1 && !strcmp(calendar_hook_path, &RH_CALENDAR_BANK0[1]));
+    calendar_hook_fail = 1;
+    assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
+    assert(calendar_hook_calls == 3 && !strcmp(calendar_hook_path, &RH_CALENDAR_OUTPUT_PATH[1]));
+    fire_timers(50u);
+    control_config = RH_CALENDAR_OUTPUT_PATH "\tthemes/current/final.bin\n";
+    control_signal = "resource-hook-reload-v1\tcalendar-static-override\n";
+    fire_timers(1000u);
+    calendar_hook_fail = 0;
+    assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
+    assert(!strcmp(calendar_hook_path, &(RH_THEME_ROOT "current/final.bin")[1]));
+    puts("calendar read-only hook, incomplete-bank fallback and explicit final-icon override passed");
+    return 0;
+}
 static int test_calendar_integration(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned drops, owners, calls, draws;
@@ -1667,6 +1766,12 @@ int main(int argc, char **argv) {
         return test_control_status(argv[2]);
     if (argc == 2 && !strcmp(argv[1], "--quickapp"))
         return test_quickapp_integration();
+    if (argc > 1 && !strcmp(argv[1], "--calendar-initial-invalid"))
+        return test_calendar_initial_invalid();
+    if (argc > 1 && !strcmp(argv[1], "--calendar-coordinator-guards"))
+        return test_calendar_coordinator_guards();
+    if (argc > 1 && !strcmp(argv[1], "--calendar-alpha-hook"))
+        return test_calendar_alpha_hook();
     if (argc > 1 && !strcmp(argv[1], "--calendar"))
         return test_calendar_integration();
     if (argc == 2 && !strcmp(argv[1], "--snapshots"))

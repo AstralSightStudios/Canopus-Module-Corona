@@ -25,6 +25,10 @@ for target in 139 1043; do
         "$ROOT/tests/test_launcher_background.c" -o "$ROOT/build/test_launcher_background_$target"
     "$ROOT/build/test_launcher_background_$target"
 done
+"$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -I"$ROOT/include" "$ROOT/src/calendar_config.c" "$ROOT/src/calendar_icon.c" \
+    "$ROOT/tests/test_calendar.c" -o "$ROOT/build/test_calendar"
+"$ROOT/build/test_calendar"
 CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
 CC="$CC" python3 "$ROOT/tests/test_blur_background_native.py"
 # Compile the actual shared transaction for each exact address selection.
@@ -72,6 +76,9 @@ for target in 139 155 177 1043; do
     done
     "$ROOT/build/test_module_${target}" --snapshots
     "$ROOT/build/test_module_${target}" --calendar
+    "$ROOT/build/test_module_${target}" --calendar-alpha-hook
+    "$ROOT/build/test_module_${target}" --calendar-coordinator-guards
+    "$ROOT/build/test_module_${target}" --calendar-initial-invalid
     "$ROOT/build/test_module_${target}" --quickapp
     for fault in open-fail write-fail short-write fd-zero; do
         RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}" --startup-diagnostics

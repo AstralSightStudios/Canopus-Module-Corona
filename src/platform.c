@@ -1,6 +1,7 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 #include "resource_hook_background.h"
+#include "resource_hook_calendar_runtime.h"
 #include "canopus_veneer.h"
 
 static int *errno_location(void) {
@@ -762,6 +763,18 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     new_paths[1] = bg->control_center;
     new_paths[2] = bg->notifications;
 
+    /* All fallible retirement must precede style/active-state mutation. A
+     * failed auxiliary commit must leave the previously selected paths live. */
+    for (k = 0; k < 3; ++k) {
+        const char *old = bg_paths[k][bg_path_index];
+        if (old[0] && !rh_background_is_blur(old)) {
+            if (header_cache && (!cache_valid(header_cache, RH_FW_HEADER_CACHE_CLASS) ||
+                retire_cache(header_cache, 0, 0, old))) return -2145;
+            if (image_cache && (!cache_valid(image_cache, RH_FW_IMAGE_CACHE_CLASS) ||
+                retire_cache(image_cache, 4, 0, old))) return -2145;
+        }
+    }
+
     /* Reset active objects to 0 if their current style points to our old paths */
     for (i = 0; i < 4; ++i) {
         uint32_t list = launcher_list(i);
@@ -823,17 +836,6 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     }
 
     for (k = 0; k < 3; ++k) bg_active[k] = 0;
-
-    /* Retire old paths from image caches */
-    for (k = 0; k < 3; ++k) {
-        const char *old = bg_paths[k][bg_path_index];
-        if (old[0] && !rh_background_is_blur(old)) {
-            if (header_cache && (!cache_valid(header_cache, RH_FW_HEADER_CACHE_CLASS) ||
-                retire_cache(header_cache, 0, 0, old))) return -2145;
-            if (image_cache && (!cache_valid(image_cache, RH_FW_IMAGE_CACHE_CLASS) ||
-                retire_cache(image_cache, 4, 0, old))) return -2145;
-        }
-    }
 
     /* Store new paths */
     for (k = 0; k < 3; ++k) {
@@ -910,53 +912,39 @@ int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
            affected(previous, current, (uint32_t)(uintptr_t)"/resource/app/launcher/calendar.bin") ||
            affected(previous, current, (uint32_t)(uintptr_t)"/resource/font/MiSans-Regular-All.ttf");
 }
-int rh_platform_refresh_calendar(void) {
-    uint32_t data, header;
+int rh_platform_refresh_calendar(void) { return rh_calendar_refresh(); }
+int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
+    static const char *const keys[] = {RH_CALENDAR_BACKGROUND, RH_CALENDAR_OUTPUT,
+                                      RH_CALENDAR_BANK0, RH_CALENDAR_BANK1};
+    uint32_t data, header, i, j;
+    char path[RH_PATH];
     if (!rh_platform_redraw_ready()) return -1;
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    uint32_t app, appid, table = load32(RH_FW_CALENDAR_VTABLE_SLOT);
-    if (table != RH_FW_CALENDAR_VTABLE ||
-        load32(table + 12u) != RH_FW_CALENDAR_LOOKUP_NAME ||
-        load32(table + 16u) != RH_FW_CALENDAR_LOOKUP_NAME_OTHER ||
-        load32(table + 44u) != RH_FW_CALENDAR_DISPATCH) return 0;
-    app = ((uint32_t (*)(uint16_t))(uintptr_t)RH_FW_CALENDAR_LOOKUP)(69u);
-    if (!app) app = ((uint32_t (*)(uint16_t))(uintptr_t)RH_FW_CALENDAR_LOOKUP_OTHER)(69u);
-    /* Only the real registered app may be passed into the signal/event chain.
-     * Missing/unrecognized owners are left to their normal native lifecycle. */
-    if ((app & 3u) || !((app >= 0x20000000u && app <= 0x20160000u - 60u) ||
-                       (app >= 0x3c000000u && app <= 0x3d000000u - 60u)) ||
-        *(volatile uint16_t *)(uintptr_t)(app + 16u) != 69u ||
-        load32(app + 56u) != RH_FW_CALENDAR_SIGNAL) return 0;
-    appid = load32(app + 8u);
-    /* Name registries copy appids into RAM; ROM aliases are also admissible.
-     * Bound the complete expected string before dereferencing a damaged slot. */
-    if (!((appid >= 0x20000000u && appid <= 0x20160000u - sizeof(RH_CALENDAR_APP_ID)) ||
-          (appid >= 0x3c000000u && appid <= 0x3d000000u - sizeof(RH_CALENDAR_APP_ID)) ||
-          (appid >= 0x2c0c0000u && appid <= 0x2cde8190u - sizeof(RH_CALENDAR_APP_ID)) ||
-          (appid >= 0x0c0c0000u && appid <= 0x0cde8190u - sizeof(RH_CALENDAR_APP_ID))) ||
-        !same_path(appid, RH_CALENDAR_APP_ID)) return 0;
-#else
-    /* No launcher application-list service yet: its normal initialization will
-     * generate the icon later through the installed resource hook. */
-    if (!load32(RH_FW_CALENDAR_LAUNCHER_SLOT)) return 0;
-#endif
     data = load32(RH_FW_IMAGE_CACHE_SLOT);
     header = load32(RH_FW_HEADER_CACHE_SLOT);
     if (!cache_valid(data, RH_FW_IMAGE_CACHE_CLASS) ||
         !cache_valid(header, RH_FW_HEADER_CACHE_CLASS)) return -1;
-    if (retire_cache(header, 0u, 0, RH_CALENDAR_BACKGROUND) ||
-        retire_cache(data, 4u, 0, RH_CALENDAR_BACKGROUND)) return -1;
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    /* Native notify resolves the real app, signals 6 and synchronously dispatches
-     * launcher event 0x2b. It owns/reuses the snapshot; never free/reset it here. */
-    ((void (*)(const char *))(uintptr_t)RH_FW_CALENDAR_NOTIFY)(RH_CALENDAR_APP_ID);
-#else
-    /* Native generation saves /data/.../calendar_icon.bin and retires that key.
-     * Native publication finds app 69 and updates an existing launcher widget. */
-    ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_GENERATE)();
-    ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_PUBLISH)();
-#endif
+    for (i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i)
+        if (retire_cache(header, 0u, 0, keys[i]) || retire_cache(data, 4u, 0, keys[i])) return -1;
+    if (config) for (i = 0; i < 3; ++i) {
+        if (config->items[i].type != RH_CALENDAR_IMAGE) continue;
+        for (j = 0; j < config->items[i].count; ++j) {
+            const char *relative = rh_calendar_context(config, i, j);
+            uint32_t k = 0, n = 0;
+            if (!relative) return -1;
+            while (RH_APP_FILES_ROOT[k]) { path[k] = RH_APP_FILES_ROOT[k]; ++k; }
+            while (relative[n] && k + n < RH_PATH - 1u) { path[k+n] = relative[n]; ++n; }
+            if (relative[n]) return -1;
+            path[k+n] = 0;
+            if (retire_cache(header, 0u, 0, path) || retire_cache(data, 4u, 0, path)) return -1;
+        }
+    }
     return 0;
+}
+void rh_platform_calendar_publish(void) {
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
+    if (load32(RH_FW_CALENDAR_LAUNCHER_SLOT))
+        ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_PUBLISH)();
+#endif
 }
 struct object_list { uint32_t objects[RH_RELOAD_LIMIT], count, overflow; };
 /* Bound native walk recursion as well as the snapshot size. Parent +4 is
