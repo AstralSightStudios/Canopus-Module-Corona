@@ -53,6 +53,7 @@ export interface BackgroundsDeclaration {
   launcher?: BackgroundSetting;
   controlCenter?: BackgroundSetting;
   notifications?: BackgroundSetting;
+  widgets?: BackgroundSetting;
 }
 
 export const CALENDAR_ITEM_NAMES = ["month", "day", "weekday"] as const;
@@ -318,7 +319,7 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
   if (value.backgrounds !== undefined) {
     if (!isRecord(value.backgrounds) ||
         Object.keys(value.backgrounds).some(key =>
-          key !== "launcher" && key !== "controlCenter" && key !== "notifications"))
+          key !== "launcher" && key !== "controlCenter" && key !== "notifications" && key !== "widgets"))
       throw new Error("backgrounds 格式无效");
     backgrounds = {};
     if (value.backgrounds.launcher !== undefined)
@@ -327,6 +328,8 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
       backgrounds.controlCenter = parseBackgroundSetting(value.backgrounds.controlCenter, value.themeId, "backgrounds.controlCenter");
     if (value.backgrounds.notifications !== undefined)
       backgrounds.notifications = parseBackgroundSetting(value.backgrounds.notifications, value.themeId, "backgrounds.notifications");
+    if (value.backgrounds.widgets !== undefined)
+      backgrounds.widgets = parseBackgroundSetting(value.backgrounds.widgets, value.themeId, "backgrounds.widgets");
   }
   if (value.launcherBackground !== undefined) {
     const lb = parseBackgroundSetting(value.launcherBackground, value.themeId, "launcherBackground");

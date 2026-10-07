@@ -446,7 +446,7 @@ static void refresh(void) {
     fire_frame();
 }
 static void commit_blur_reentrantly(void) {
-    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR};
+    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR, ""};
     unsigned old_wakeups = wakeups;
     assert(rh_platform_backgrounds_commit(&bg) == 0);
     assert(wakeups == old_wakeups && "in-frame commit must defer invalidation to REFR_READY");
@@ -505,7 +505,15 @@ static void test_zero_default(void) {
     stable_polls();
 }
 static void test_cold_commit(void) {
-    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR};
+    /* Unsupported widgets must not preflight even a nonexistent image. */
+    struct rh_backgrounds widgets = {"", "", "", "/missing/widgets.bin"};
+    assert(rh_platform_backgrounds_stage(&widgets) == 0);
+    widgets.widgets[0] = 0;
+    strcpy(widgets.widgets, RH_BG_BLUR);
+    assert(rh_platform_backgrounds_stage(&widgets) == 0);
+    assert(rh_platform_backgrounds_commit(&widgets) == 0);
+    assert(!creates && !snapshots && !setters && !events);
+    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR, ""};
     assert(rh_platform_backgrounds_stage(&bg) == 0);
     assert(!creates && !snapshots && !setters && !events);
     for (unsigned i = 0; i < 7; ++i) assert(objects[i].source == 0);
@@ -520,7 +528,7 @@ static void test_cold_commit(void) {
 }
 static void test_foreign_snapshot_retry(void) {
     for (unsigned i = 0; i < 7; ++i) objects[i].source = FOREIGN;
-    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR};
+    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR, ""};
     fail_snapshot = 1;
     assert(rh_platform_backgrounds_stage(&bg) == 0);
     assert(rh_platform_backgrounds_commit(&bg) == 0);
@@ -643,7 +651,7 @@ static void test_update_result(void) {
 static void test_reload(void) {
     test_zero_default();
     s_blur_needed = 0;
-    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR};
+    struct rh_backgrounds bg = {RH_BG_BLUR, RH_BG_BLUR, RH_BG_BLUR, ""};
     unsigned before = snapshots, old_wakeups = wakeups;
     assert(rh_platform_backgrounds_stage(&bg) == 0);
     assert(rh_platform_backgrounds_commit(&bg) == 0);
@@ -659,7 +667,7 @@ static void test_reload(void) {
     stable_polls();
 }
 static void test_system(void) {
-    struct rh_backgrounds bg = {{0}, {0}, {0}};
+    struct rh_backgrounds bg = {0};
     assert(rh_platform_backgrounds_stage(&bg) == 0);
     assert(rh_platform_backgrounds_commit(&bg) == 0);
     for (unsigned i = 0; i < 20; ++i) rh_platform_backgrounds_poll();
@@ -668,7 +676,7 @@ static void test_system(void) {
 }
 static void test_system_after_blur(void) {
     test_zero_default();
-    struct rh_backgrounds bg = {{0}, {0}, {0}};
+    struct rh_backgrounds bg = {0};
     unsigned old_snapshots = snapshots, old_creates = creates, old_releases = releases;
     assert(rh_platform_backgrounds_stage(&bg) == 0);
     assert(rh_platform_backgrounds_commit(&bg) == 0);
@@ -750,7 +758,7 @@ static void test_pending_snapshot_without_visible_blur(int image) {
     assert(g_blur_pending_snapshot == src_id && snapshots == 1 && !releases);
     fail_finish_at = 0;
     if (image) {
-        struct rh_backgrounds bg = {IMAGE_PATH, IMAGE_PATH, IMAGE_PATH};
+        struct rh_backgrounds bg = {IMAGE_PATH, IMAGE_PATH, IMAGE_PATH, ""};
         assert(rh_platform_backgrounds_stage(&bg) == 0);
         assert(rh_platform_backgrounds_commit(&bg) == 0);
     } else for (unsigned i = 0; i < 7; ++i) objects[i].hidden = 1;
@@ -833,7 +841,7 @@ static void test_system_commit_rediscovers_notification_list(unsigned mode) {
     test_zero_default();
     unsigned old_snapshots = snapshots, old_sets = setters, old_list_sets = objects[6].sets;
     rebuild_notify_list_mode = (int)mode;
-    struct rh_backgrounds bg = {{0}, {0}, {0}};
+    struct rh_backgrounds bg = {0};
     assert(rh_platform_backgrounds_stage(&bg) == 0);
     assert(rh_platform_backgrounds_commit(&bg) == 0);
     assert(rebuild_notify_list_mode == -1 && !registered_callback && removes == 1 && events == 1);
@@ -855,7 +863,7 @@ static void test_pending_snapshot_watch_without_frames(int image, int invalid_re
     refresh();
     assert(g_blur_pending_snapshot == src_id && snapshots == 1 && !releases);
     if (image) {
-        struct rh_backgrounds bg = {IMAGE_PATH, IMAGE_PATH, IMAGE_PATH};
+        struct rh_backgrounds bg = {IMAGE_PATH, IMAGE_PATH, IMAGE_PATH, ""};
         fail_finish_at = finishes + 1;
         assert(rh_platform_backgrounds_stage(&bg) == 0);
         assert(rh_platform_backgrounds_commit(&bg) == 0);
@@ -884,7 +892,7 @@ static void test_pending_snapshot_system_maintenance(void) {
     refresh();
     assert(g_blur_pending_snapshot == src_id && snapshot_inflight && !releases);
     no_pixels_published();
-    struct rh_backgrounds bg = {{0}, {0}, {0}};
+    struct rh_backgrounds bg = {0};
     fail_finish_at = finishes + 1;
     reset_operations();
     assert(rh_platform_backgrounds_commit(&bg) == 0);
@@ -1151,7 +1159,7 @@ static void test_screen_fixed(void) {
     fail_object_event = 0;
     refresh();
     assert(object_callbacks[5] && screen_background_find(objects[5].id));
-    struct rh_backgrounds system = {"", "", ""};
+    struct rh_backgrounds system = {0};
     assert(!rh_platform_backgrounds_commit(&system));
     for (unsigned i = 0; i < 7; ++i) {
         assert(!object_callbacks[i] && !screen_background_find(objects[i].id));
@@ -1263,7 +1271,7 @@ class BlurBackgroundNative(unittest.TestCase):
         source = (ROOT / 'src/platform.c').read_text()
         marker = '#if defined(RH_TARGET_177) && RH_TARGET_177\n'
         start = source.index(marker) + len(marker)
-        end = source.index('\n#else\n', start)
+        end = source.index('\n#elif defined(RH_TARGET_1043)', start)
         adapter = source[start:end]
         if 'int rh_platform_backgrounds_stage(' not in adapter:
             raise AssertionError('.177 backgrounds block not found')

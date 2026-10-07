@@ -8,6 +8,20 @@
 
 ---
 
+## 背景配置支持范围
+
+Manager 始终生成 `version=1` 的 `launcher`、`control_center`、`notifications`、
+`widgets` 四个独立配置项，支持图片、`blur` 和 `system`；缺省项恢复系统背景。
+Band11 的 `widgets` 仅解析、不执行，不触发该区域的图片检查、加载、模糊或原生挂钩。
+
+p67 3.101.043 默认不启用原生背景替换。精确目标可通过
+`RH_P67_LIVE_BACKGROUNDS=1` 构建四区域静态背景 LIVE 前景实验；
+`RH_P67_LIVE_LAUNCHER=1` 保留原有仅启动器实验。
+背景固定在屏幕坐标并按移动页面裁剪；其余三区保留原生快照生命周期，
+隐藏快照图像并显示实时前景，不使用透明快照、不改模糊或日历。
+新增区域的设备绘制与帧时间尚未验证。
+详见 [p67 审计记录](docs/P67_BACKGROUNDS.md)。
+
 ## 架构概览
 
 ```text

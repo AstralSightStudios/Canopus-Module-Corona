@@ -470,7 +470,7 @@ class LauncherBackgroundNative(unittest.TestCase):
         source = (ROOT / 'src/platform.c').read_text()
         marker = '#if defined(RH_TARGET_177) && RH_TARGET_177\n'
         start = source.index(marker) + len(marker)
-        end = source.index('\n#else\n', start)
+        end = source.index('\n#elif defined(RH_TARGET_1043)', start)
         adapter = source[start:end]
         # Guard the extraction against silently selecting another target block.
         if 'int rh_platform_launcher_background_stage(' not in adapter:

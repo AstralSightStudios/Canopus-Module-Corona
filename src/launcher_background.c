@@ -68,6 +68,10 @@ static void copy_staged(struct rh_backgrounds *out, const struct rh_backgrounds 
         out->notifications[i] = staged->notifications[i];
         if (!staged->notifications[i]) break;
     }
+    for (i = 0; i < RH_PATH; i++) {
+        out->widgets[i] = staged->widgets[i];
+        if (!staged->widgets[i]) break;
+    }
 }
 
 int rh_backgrounds_parse(const char *data, uint32_t size,
@@ -78,10 +82,11 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
     static const char k_launcher[] = "launcher=";
     static const char k_control[] = "control_center=";
     static const char k_notify[] = "notifications=";
+    static const char k_widgets[] = "widgets=";
     struct rh_backgrounds staged;
     uint32_t i, pos;
 
-    if (!data || !out || size < sizeof(v1_header) - 1u || size > 3u * RH_PATH + 128u)
+    if (!data || !out || size < sizeof(v1_header) - 1u || size > 4u * RH_PATH + 128u)
         return -1;
     for (i = 0; i < size; i++)
         if (!data[i]) return -1;
@@ -91,6 +96,7 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
     staged.launcher[0] = 0;
     staged.control_center[0] = 0;
     staged.notifications[0] = 0;
+    staged.widgets[0] = 0;
 
     /* Legacy single-launcher formats. */
     if (size == sizeof(legacy_system) - 1u &&
@@ -152,6 +158,18 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
             } else if (val_len == 4u && bytes_equal(val, "blur", 4u)) {
                 set_special(staged.notifications, RH_BG_BLUR, sizeof(RH_BG_BLUR));
             } else if (validate_and_prefix_image(val, val_len, staged.notifications)) {
+                return -1;
+            }
+            keys_seen++;
+        } else if (line_end - line_start >= sizeof(k_widgets) - 1u &&
+                   bytes_equal(data + line_start, k_widgets, sizeof(k_widgets) - 1u)) {
+            const char *val = data + line_start + sizeof(k_widgets) - 1u;
+            uint32_t val_len = line_end - (line_start + sizeof(k_widgets) - 1u);
+            if (!val_len || (val_len == 6u && bytes_equal(val, "system", 6u))) {
+                staged.widgets[0] = 0;
+            } else if (val_len == 4u && bytes_equal(val, "blur", 4u)) {
+                set_special(staged.widgets, RH_BG_BLUR, sizeof(RH_BG_BLUR));
+            } else if (validate_and_prefix_image(val, val_len, staged.widgets)) {
                 return -1;
             }
             keys_seen++;

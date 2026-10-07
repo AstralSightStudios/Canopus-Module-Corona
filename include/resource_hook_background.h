@@ -21,12 +21,14 @@ struct rh_backgrounds {
     char launcher[RH_PATH];
     char control_center[RH_PATH];
     char notifications[RH_PATH];
+    /* Accepted on every target; unsupported adapters must ignore this field. */
+    char widgets[RH_PATH];
 };
 
 struct rh_launcher_background { char image[RH_PATH]; };
 
 /* Strict newline-terminated format:
- *   version=1\nlauncher=themes/<id>/<path>\ncontrol_center=system\nnotifications=...\n
+ *   version=1\nlauncher=themes/<id>/<path>\ncontrol_center=system\nnotifications=...\nwidgets=...\n
  * Also accepts legacy format:
  *   version=1\nmode=system\n
  *   version=1\nmode=image\nimage=themes/<id>/<path>\n

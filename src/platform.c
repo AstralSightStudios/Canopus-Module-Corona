@@ -518,6 +518,8 @@ static int stage_one_path(const char *path) {
         (path, header) == 1 ? 0 : -2143;
 }
 
+/* Widgets are configuration-only on Band11: do not validate, load, blur,
+ * or register native hooks for that unsupported surface. */
 int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
     int rc;
     if (!bg) return -2142;
@@ -881,6 +883,10 @@ int rh_platform_launcher_background_commit(const char *path) {
 void rh_platform_launcher_background_poll(void) {
     rh_platform_backgrounds_poll();
 }
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS
+#include "p67_backgrounds.inc"
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_LAUNCHER) && RH_P67_LIVE_LAUNCHER
+#include "p67_launcher.inc"
 #else
 int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
     return (bg && (bg->launcher[0] || bg->control_center[0] || bg->notifications[0])) ? -2144 : 0;

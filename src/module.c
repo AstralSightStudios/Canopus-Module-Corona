@@ -36,7 +36,15 @@ static int configured;
  * Autonomous QuickApp resolution has an independently recoverable error. */
 static int32_t config_error, quickapp_error, calendar_config_error, calendar_error;
 static unsigned calendar_started;
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if (defined(RH_TARGET_177) && RH_TARGET_177) || \
+    (defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+     ((defined(RH_P67_LIVE_LAUNCHER) && RH_P67_LIVE_LAUNCHER) || \
+      (defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)))
+#define RH_BACKGROUND_ADAPTER 1
+#else
+#define RH_BACKGROUND_ADAPTER 0
+#endif
+#if RH_BACKGROUND_ADAPTER
 static int32_t background_error;
 static unsigned background_initialized;
 #endif
@@ -308,15 +316,16 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
     if (!rc) *used = total;
     return rc;
 }
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if RH_BACKGROUND_ADAPTER
 static int background_stage(struct rh_backgrounds *candidate) {
-    char data[RH_PATH * 3 + 128u];
+    char data[RH_PATH * 4 + 128u];
     uint32_t used = 0;
     int rc = read_bounded_file(RH_APP_FILES_ROOT "backgrounds.cfg",
                                data, sizeof(data), &used);
     candidate->launcher[0] = 0;
     candidate->control_center[0] = 0;
     candidate->notifications[0] = 0;
+    candidate->widgets[0] = 0;
     if (rc == 1) return 0; /* Missing file means system background. */
     if (rc || rh_backgrounds_parse(data, used, candidate)) return -2142;
     return rh_platform_backgrounds_stage(candidate);
@@ -447,7 +456,7 @@ static struct control_status_snapshot control_status_snapshot(void) {
     uint32_t irq = rh_platform_lock();
     status.error = config_error ? config_error : (quickapp_error ? quickapp_error :
                    (calendar_config_error ? calendar_config_error : calendar_error));
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if RH_BACKGROUND_ADAPTER
     if (!status.error) status.error = background_error;
 #endif
     status.count = S.count;
@@ -525,7 +534,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     struct rh_calendar_config *calendar_candidate = 0;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
     unsigned commit_reserved = 0;
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if RH_BACKGROUND_ADAPTER
     struct rh_backgrounds background_candidate;
 #endif
 
@@ -588,7 +597,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         goto done;
     }
 
-    #if defined(RH_TARGET_177) && RH_TARGET_177
+    #if RH_BACKGROUND_ADAPTER
     if (revision) {
         rc = background_stage(&background_candidate);
         if (rc) {
@@ -631,7 +640,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     refreshing = 1;
     commit_reserved = 1;
     rh_platform_unlock(irq);
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if RH_BACKGROUND_ADAPTER
     if (revision) {
         background_error = rh_platform_backgrounds_commit(&background_candidate);
         background_initialized = 1;
@@ -739,7 +748,7 @@ static void watch_step(void *timer) {
         calendar_config_error = rh_calendar_start();
         if (!calendar_config_error) calendar_started = 1;
     }
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if RH_BACKGROUND_ADAPTER
     background_start();
     rh_platform_backgrounds_poll();
 #endif

@@ -14,6 +14,17 @@ case "$TARGET_ID" in
     xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1; NATIVE_PLATFORM=platform_band10pro ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
+# Explicit exact-target experiment. Default builds retain p67 background no-op.
+if [ "${RH_P67_LIVE_BACKGROUNDS:-0}" = 1 ]; then
+    [ "$TARGET_ID" = xiaomi-band-10-pro-3.101.043 ] || { printf 'Live backgrounds requires exact .043 target.\n' >&2; exit 1; }
+    TARGET_DEFINE="$TARGET_DEFINE -DRH_P67_LIVE_BACKGROUNDS=1"
+fi
+if [ "${RH_P67_LIVE_LAUNCHER:-0}" = 1 ]; then
+    [ "$TARGET_ID" = xiaomi-band-10-pro-3.101.043 ] || {
+        printf 'Live launcher experiment requires exact p67 .043 target.\n' >&2; exit 1;
+    }
+    TARGET_DEFINE="$TARGET_DEFINE -DRH_P67_LIVE_LAUNCHER=1"
+fi
 CC=${CC:-cc}
 CLANG=${CLANG:-clang}
 LD_LLD=${LD_LLD:-ld.lld}
@@ -64,3 +75,9 @@ done
     --target "$TARGET_ID" --targets-dir "$SDK/targets"
 printf 'Built resource-hook.elf for %s. Static/build verification only; this artifact and .177 device behavior: NOT_PROBED.\n' "$TARGET_ID"
 printf 'GPU recovery and framework restart safety remain unsupported.\n'
+if [ "${RH_P67_LIVE_BACKGROUNDS:-0}" = 1 ]; then
+    printf 'EXPERIMENTAL p67 four-surface LIVE foreground; device rendering/frame time NOT_PROBED.\n'
+fi
+if [ "${RH_P67_LIVE_LAUNCHER:-0}" = 1 ] && [ "${RH_P67_LIVE_BACKGROUNDS:-0}" != 1 ]; then
+    printf 'EXPERIMENTAL p67 launcher-only LIVE foreground: no alpha snapshots; rendering and frame time NOT_PROBED.\n'
+fi

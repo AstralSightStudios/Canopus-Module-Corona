@@ -31,6 +31,14 @@ done
 "$ROOT/build/test_calendar"
 CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
 CC="$CC" python3 "$ROOT/tests/test_blur_background_native.py"
+python3 "$ROOT/tests/test_p67_launcher_native.py"
+# Four-surface opt-in must reach the actual shared transaction, not only native mocks.
+"$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -DRH_TARGET_1043=1 -DRH_P67_LIVE_BACKGROUNDS=1 -I"$ROOT/include" -I"$SDK/sdk/c" \
+    "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+    "$ROOT/src/launcher_background.c" "$SDK/runtime/control/canopus_control.c" \
+    "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_four"
+"$ROOT/build/test_module_1043_four" --launcher-background
 # Compile the actual shared transaction for each exact address selection.
 # Fonts are part of the ordinary runtime; no opt-in or legacy stub matrix.
 for target in 139 155 177 1043; do

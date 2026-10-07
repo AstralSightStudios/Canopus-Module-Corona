@@ -150,7 +150,8 @@ static void test_multi_background(void) {
         "version=1\n"
         "launcher=themes/a/l.bin\n"
         "control_center=themes/b/c.bin\n"
-        "notifications=themes/c/n.bin\n";
+        "notifications=themes/c/n.bin\n"
+        "widgets=themes/d/w.bin\n";
     static const char multi_partial[] =
         "version=1\n"
         "control_center=themes/b/c.bin\n"
@@ -159,31 +160,61 @@ static void test_multi_background(void) {
         "version=1\n"
         "launcher=blur\n"
         "control_center=blur\n"
-        "notifications=blur\n";
+        "notifications=blur\n"
+        "widgets=blur\n";
     struct rh_backgrounds out;
     memset(&out, 0xa5, sizeof(out));
     assert(!rh_backgrounds_parse(multi_all, (uint32_t)strlen(multi_all), &out));
     assert(!strcmp(out.launcher + strlen(RH_APP_FILES_ROOT), "themes/a/l.bin"));
     assert(!strcmp(out.control_center + strlen(RH_APP_FILES_ROOT), "themes/b/c.bin"));
     assert(!strcmp(out.notifications + strlen(RH_APP_FILES_ROOT), "themes/c/n.bin"));
+    assert(!strcmp(out.widgets + strlen(RH_APP_FILES_ROOT), "themes/d/w.bin"));
 
     memset(&out, 0xa5, sizeof(out));
     assert(!rh_backgrounds_parse(multi_partial, (uint32_t)strlen(multi_partial), &out));
     assert(out.launcher[0] == 0);
     assert(!strcmp(out.control_center + strlen(RH_APP_FILES_ROOT), "themes/b/c.bin"));
     assert(out.notifications[0] == 0);
+    assert(out.widgets[0] == 0);
 
     memset(&out, 0xa5, sizeof(out));
     assert(!rh_backgrounds_parse(multi_blur, (uint32_t)strlen(multi_blur), &out));
     assert(rh_background_is_blur(out.launcher));
     assert(rh_background_is_blur(out.control_center));
     assert(rh_background_is_blur(out.notifications));
+    assert(rh_background_is_blur(out.widgets));
+    {
+        struct rh_backgrounds saved = out;
+        const char *bad = "version=1\nwidgets=themes/a/../x.bin\n";
+        assert(rh_backgrounds_parse(bad, (uint32_t)strlen(bad), &out) < 0);
+        assert(!memcmp(&saved, &out, sizeof(out)));
+    }
 
     /* Invalid key rejected */
     assert(rh_backgrounds_parse("version=1\nunknown=themes/a/x.bin\n", 31, &out) < 0);
 }
 
+static void test_four_maximum_paths(void) {
+    char path[RH_PATH], config[RH_PATH * 4u + 128u];
+    struct rh_backgrounds out;
+    size_t length = RH_PATH - strlen(RH_APP_FILES_ROOT) - 1u;
+    int n;
+    memcpy(path, "themes/a/", 9u);
+    memset(path + 9u, 'x', length - 9u);
+    path[length] = 0;
+    n = snprintf(config, sizeof(config),
+        "version=1\nlauncher=%s\ncontrol_center=%s\nnotifications=%s\nwidgets=%s\n",
+        path, path, path, path);
+    assert(n > 0 && (size_t)n < sizeof(config));
+    assert(!rh_backgrounds_parse(config, (uint32_t)n, &out));
+    assert(strlen(out.launcher) == RH_PATH - 1u);
+    assert(!strcmp(out.launcher, out.control_center));
+    assert(!strcmp(out.launcher, out.notifications));
+    assert(!strcmp(out.launcher, out.widgets));
+}
+
 int main(void) {
+    test_four_maximum_paths();
     test_format();
     test_paths();
     test_multi_background();

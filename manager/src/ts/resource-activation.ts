@@ -191,7 +191,7 @@ export function serializeCalendar(themesHighToLow: ThemeRules[]): string {
 
 export function resolveBackgroundTarget(
   themesHighToLow: ThemeRules[],
-  target: "launcher" | "controlCenter" | "notifications"
+  target: "launcher" | "controlCenter" | "notifications" | "widgets"
 ): { themeId: string; image?: string; mode: "image" | "blur" | "system" } | null {
   const winner = themesHighToLow.find(theme => {
     if (theme.active === false) return false;
@@ -210,13 +210,13 @@ export function resolveBackgroundTarget(
 }
 
 export function serializeBackgrounds(themesHighToLow: ThemeRules[]): string {
-  const format = (target: "launcher" | "controlCenter" | "notifications", key: string): string => {
+  const format = (target: "launcher" | "controlCenter" | "notifications" | "widgets", key: string): string => {
     const res = resolveBackgroundTarget(themesHighToLow, target);
     if (res?.mode === "image" && res.image) return `${key}=themes/${res.themeId}/${res.image}\n`;
     if (res?.mode === "blur") return `${key}=blur\n`;
     return `${key}=system\n`;
   };
-  return `version=1\n${format("launcher", "launcher")}${format("controlCenter", "control_center")}${format("notifications", "notifications")}`;
+  return `version=1\n${format("launcher", "launcher")}${format("controlCenter", "control_center")}${format("notifications", "notifications")}${format("widgets", "widgets")}`;
 }
 
 function sourceRuleMatches(source: string, resourcePath: string): boolean {
@@ -604,7 +604,7 @@ export async function regenerateActiveMappings(
       }
     }
   }
-  for (const target of ["launcher", "controlCenter", "notifications"] as const) {
+  for (const target of ["launcher", "controlCenter", "notifications", "widgets"] as const) {
     const bg = resolveBackgroundTarget(themesHighToLow, target);
     if (bg?.mode === "image" && bg.image) {
       if (snapshot) {

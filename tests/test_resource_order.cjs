@@ -102,11 +102,11 @@ async function main() {
     pack.validateResourcePackFiles(image, ['assets/background.bin']);
     const theme = (manifest, active = true) => ({ themeId: 'bg', manifest, files: null, active });
     assert.equal(activation.serializeBackgrounds([theme(make()), theme(image)]),
-      'version=1\nlauncher=themes/bg/assets/background.bin\ncontrol_center=system\nnotifications=system\n');
+      'version=1\nlauncher=themes/bg/assets/background.bin\ncontrol_center=system\nnotifications=system\nwidgets=system\n');
     assert.equal(activation.serializeBackgrounds([theme(make({ mode: 'system' })), theme(image)]),
-      'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\n');
+      'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\nwidgets=system\n');
     assert.equal(activation.serializeBackgrounds([theme(image, false)]),
-      'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\n');
+      'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\nwidgets=system\n');
   }
 
   {
@@ -119,10 +119,29 @@ async function main() {
           `unknown backgrounds key ${key} must not be silently dropped`);
     }
     assert.deepEqual(parse({ ...base, backgrounds: {} }).backgrounds, {});
+    const widgetsManifest = parse({ ...base, backgrounds: {
+      widgets: { mode: 'image', image: 'widgets.bin' }
+    } });
+    assert.throws(() => pack.validateResourcePackFiles(widgetsManifest, []));
+    pack.validateResourcePackFiles(widgetsManifest, ['widgets.bin']);
+    assert.equal(activation.serializeBackgrounds([{ themeId: 'blur', manifest: widgetsManifest }]),
+      'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\nwidgets=themes/blur/widgets.bin\n');
+    assert.equal(activation.resolveBackgroundTarget([
+      { themeId: 'override', manifest: { backgrounds: { widgets: { mode: 'system' } } } },
+      { themeId: 'blur', manifest: widgetsManifest }
+    ], 'widgets').mode, 'system');
+    for (const mode of ['blur', 'system']) {
+      const manifest = parse({ ...base, backgrounds: {
+        launcher: 'blur', controlCenter: 'blur', notifications: 'blur', widgets: mode
+      } });
+      pack.validateResourcePackFiles(manifest, []);
+      assert.equal(activation.serializeBackgrounds([{ themeId: 'blur', manifest }]),
+        `version=1\nlauncher=blur\ncontrol_center=blur\nnotifications=blur\nwidgets=${mode}\n`);
+    }
     const expected = {
       launcher: { mode: 'blur' }, controlCenter: { mode: 'blur' }, notifications: { mode: 'blur' }
     };
-    const expectedCfg = 'version=1\nlauncher=blur\ncontrol_center=blur\nnotifications=blur\n';
+    const expectedCfg = 'version=1\nlauncher=blur\ncontrol_center=blur\nnotifications=blur\nwidgets=system\n';
     for (const backgrounds of [expected,
       { launcher: 'blur', controlCenter: 'blur', notifications: 'blur' },
       { launcher: { mode: 'blur' }, controlCenter: 'blur', notifications: { mode: 'blur' } }]) {
@@ -169,13 +188,13 @@ async function main() {
       ['plain', { themeId: 'plain', manifest: systemManifest, files: [] }]
     ]) };
     const first = await activation.regenerateActiveMappings(['image', 'plain', systemId], 'bg1', file, {}, snapshot);
-    assert.equal(file.text.get(bg), 'version=1\nlauncher=themes/image/bg.bin\ncontrol_center=system\nnotifications=system\n');
+    assert.equal(file.text.get(bg), 'version=1\nlauncher=themes/image/bg.bin\ncontrol_center=system\nnotifications=system\nwidgets=system\n');
     assert.deepEqual(await activation.readProtectedThemeIds(file), ['image']);
     const cached = await activation.regenerateActiveMappings(['image', 'plain', systemId], 'bg2', file, {}, snapshot);
     assert.equal(cached, first, 'unchanged background reuses published plan');
     const second = await activation.regenerateActiveMappings(['plain', 'image', systemId], 'bg3', file, {}, snapshot);
     assert.equal(second.mappings, first.mappings, 'background-only order change leaves TSV unchanged');
-    assert.equal(file.text.get(bg), 'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\n');
+    assert.equal(file.text.get(bg), 'version=1\nlauncher=system\ncontrol_center=system\nnotifications=system\nwidgets=system\n');
     assert.notEqual(second, first, 'background-only order change must republish');
     assert.deepEqual(await activation.readProtectedThemeIds(file), ['image'], 'publication is not acknowledgement');
     await activation.cleanupInactiveGenerations(null, file, second.mappings);

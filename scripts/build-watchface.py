@@ -132,9 +132,28 @@ def main():
                         help='overwrite existing output directory if it already exists')
     args = parser.parse_args()
     targets = args.target or list(DEFAULT_TARGETS)
-    groups = device_groups(targets)
     if len(set(targets)) != len(targets):
         parser.error('duplicate target')
+    live_launcher = os.environ.get('RH_P67_LIVE_LAUNCHER', '0') == '1'
+    live_backgrounds = os.environ.get('RH_P67_LIVE_BACKGROUNDS', '0') == '1'
+    live_experiment = live_launcher or live_backgrounds
+    if live_experiment and targets != ['xiaomi-band-10-pro-3.101.043']:
+        parser.error('Live background experiment requires only the exact p67 .043 target')
+    module_description = ('experimental four-page live-foreground module' if live_backgrounds
+                          else 'experimental launcher-only live-foreground module' if live_launcher
+                          else 'normal module with transactional font reload')
+    experiment_note = ('\n\nEXPERIMENTAL: static screen-fixed wallpapers for launcher, '
+                       'notifications, Control Center and widgets. Native foreground remains '
+                       'live; unused transition snapshots remain firmware-owned. '
+                       'No alpha snapshots or blur. Device rendering and frame time are NOT_PROBED. '
+                       'Restore system while idle; do not unload while callbacks are attached.\n'
+                       if live_backgrounds else
+                       '\n\nEXPERIMENTAL: static launcher wallpaper only; native launcher '
+                       'snapshot optimization is bypassed. No alpha snapshots, blur, or other '
+                       'page backgrounds. Device rendering and frame time are NOT_PROBED. '
+                       'Restore system while idle; do not unload while callbacks are attached.\n'
+                       if live_launcher else '')
+    groups = device_groups(targets)
 
     if args.output is None:
         output_name = default_output_name(targets)
@@ -216,14 +235,14 @@ def main():
             device_docs.write_text(
                 f'# Resource Hook installer\n\n'
                 f'Targets: {device_name}, firmware {target_versions}. This watchface installs '
-                'the normal `resource-hook-0.3.0` module in the disabled state.\n\n'
+                f'the {module_description} (`resource-hook-0.3.0`) in the disabled state.\n\n'
                 'Pack only `main.lua` and the .bin files in this directory. '
                 'Requires a Canopus Supervisor whose Ed25519 trust key matches this receipt. '
                 'Opening the watchface installs the module; it does not enable/restart the framework.\n\n'
                 'Use Manager 1.2.2 or newer for transaction acknowledgements; install it separately. '
                 f'Font reload: {font_status}. This new artifact: '
                 'NOT_PROBED on hardware. GPU recovery and framework restart safety remain '
-                'unsupported. Never force-release native font caches.\n')
+                'unsupported. Never force-release native font caches.\n' + experiment_note)
             manifest_path = device / 'build/manifest.json'
             manifest = json.loads(manifest_path.read_text())
             manifest['font_reload'] = True
@@ -233,6 +252,13 @@ def main():
             manifest['module_build_id'] = 'resource-hook-0.3.0'
             manifest['signer_public_key_sha256'] = public_fingerprint
             manifest['hardware_status'] = 'NOT_PROBED'
+            if live_experiment:
+                manifest['p67_live_launcher'] = True
+                manifest['launcher_background_device_status'] = 'NOT_PROBED'
+            if live_backgrounds:
+                manifest['p67_live_backgrounds'] = True
+                manifest['background_targets'] = ['launcher', 'control_center', 'notifications', 'widgets']
+                manifest['background_device_status'] = 'NOT_PROBED'
             manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
             # Recreate and verify each independently packable device archive.
             archive_path = device / 'build/resource-hook-prod.zip'
@@ -250,7 +276,7 @@ def main():
         (package / 'docs/README.md').write_text(
             f'# Signed Resource Hook installer watchface\n\n'
             f'This complete package targets {", ".join(targets)} and installs '
-            f'the normal module with transactional font reload.\n\n'
+            f'the {module_description}.\n\n'
             'Open the appropriate device folder in the watchface packer, or use its '
             '`build/resource-hook-prod.zip` as the flat watchface input. Keep the '
             '`.cmi.bin` beside the module `.bin`.\n\n'
@@ -260,7 +286,7 @@ def main():
             'Manager 1.2.2 or newer is recommended for revision-matched transaction '
             'results. Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new package is NOT_PROBED on hardware. GPU recovery and framework '
-            'restart safety remain unsupported.\n')
+            'restart safety remain unsupported.\n' + experiment_note)
         shutil.copyfile(ROOT / 'docs/FONT_RELOAD.md', package / 'docs/FONT_RELOAD.md')
         for target in targets:
             evidence = package / 'evidence' / target
@@ -281,7 +307,7 @@ def main():
             '- `SHA256SUMS`: package file checksums.\n\n'
             'Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new artifact is NOT_PROBED. GPU recovery and framework restart safety '
-            'remain unsupported. Do not use on other firmware targets.\n')
+            'remain unsupported. Do not use on other firmware targets.\n' + experiment_note)
         target_details = {}
         for target in targets:
             target_details[target] = {
@@ -302,6 +328,14 @@ def main():
                 'NOT_PROBED' if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
         }
+        if live_experiment:
+            build_meta['p67_live_launcher'] = True
+            build_meta['launcher_background_device_status'] = 'NOT_PROBED'
+            shutil.copyfile(ROOT / 'docs/P67_BACKGROUNDS.md', package / 'docs/P67_BACKGROUNDS.md')
+        if live_backgrounds:
+            build_meta['p67_live_backgrounds'] = True
+            build_meta['background_targets'] = ['launcher', 'control_center', 'notifications', 'widgets']
+            build_meta['background_device_status'] = 'NOT_PROBED'
         if len(targets) == 1:
             build_meta['target'] = targets[0]
             build_meta['firmware_sha256'] = firmwares[targets[0]]
