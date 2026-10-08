@@ -14,9 +14,11 @@ export CANOPUS_ROOT="$SDK"
     exit 1
 }
 # Missing/wrong APs must fail this explicit runner, never silently skip coverage.
-for target in 139 177; do
+for target in 139 155 177; do
     if [ "$target" = 139 ]; then
         AP=${RH_AP_139:-"$SDK/fwbins/xiaomi-band-11-4.100.139/vela_ap.bin"}
+    elif [ "$target" = 155 ]; then
+        AP=${RH_AP_155:-"$SDK/fwbins/xiaomi-band-11-4.100.155/vela_ap.bin"}
     else
         AP=${RH_AP_177:-"$SDK/fwbins/xiaomi-band-11-4.100.177/vela_ap.bin"}
     fi

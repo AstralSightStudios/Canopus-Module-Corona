@@ -380,7 +380,7 @@ class NativeCalendar(unittest.TestCase):
         self.assertEqual(self.trace, [])
 
     def test_other_targets_make_no_native_calls(self):
-        for target in ('155', '1043'):
+        for target in ('1043',):
             with self.subTest(target=target):
                 self.machine(target)
                 self.assertEqual(self.call('rh_calendar_native_supported'), 0)

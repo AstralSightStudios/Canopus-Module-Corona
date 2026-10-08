@@ -67,7 +67,7 @@ for target in 139 155 177 1043; do
         "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
-    if [ "$target" = 177 ] || [ "$target" = 139 ]; then
+    if [ "$target" = 177 ] || [ "$target" = 139 ] || [ "$target" = 155 ]; then
         "$ROOT/build/test_module_${target}" --launcher-background
     fi
     "$ROOT/build/test_module_${target}" --font-reload

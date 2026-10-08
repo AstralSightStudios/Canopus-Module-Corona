@@ -11,7 +11,7 @@ from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
 from capstone.arm import ARM_OP_MEM, ARM_REG_PC
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = ('139',)
+TARGETS = ('139', '155')
 SDK_DEFAULT = ROOT.parent / 'Canopus'
 if not SDK_DEFAULT.exists():
     SDK_DEFAULT = ROOT.parent / 'Canopus-Private'

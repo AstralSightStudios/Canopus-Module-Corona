@@ -25,9 +25,9 @@ Validation (static/models only):
   the updated exact restricted records in the external Canopus target pack.
 - Exact function-block and global-literal receipts; .043 capabilities stay off.
 
-The opt-in runner executes .139 and .177 native calendar, launcher and blur tests,
-then .139 AP receipts. AP defaults are the selected SDK's `fwbins` directory;
-`RH_AP_139`/`RH_AP_177` override them. Missing APs fail the runner explicitly.
+The opt-in runner executes .139, .155 and .177 native calendar, launcher and blur tests,
+then .139/.155 AP receipts. AP defaults are the selected SDK's `fwbins` directory;
+`RH_AP_139`/`RH_AP_155`/`RH_AP_177` override them. Missing APs fail the runner explicitly.
 Individual calendar tests also accept `RH_CALENDAR_FIRMWARE`. `PYTHON` selects a
 Python environment with capstone, unicorn and pyelftools; `CC`, `CLANG` and
 `LD_LLD` select the required host/ARM tools.

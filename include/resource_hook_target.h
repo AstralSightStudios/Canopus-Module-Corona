@@ -225,7 +225,11 @@
 #define RH_Q66_BACKGROUND 1
 #define RH_Q66_CALENDAR 1
 #include "resource_hook_q66_177.h"
-#elif !(defined(RH_TARGET_1043) && RH_TARGET_1043) && !(defined(RH_TARGET_155) && RH_TARGET_155)
+#elif defined(RH_TARGET_155) && RH_TARGET_155
+#define RH_Q66_BACKGROUND 1
+#define RH_Q66_CALENDAR 1
+#include "resource_hook_q66_155.h"
+#elif !(defined(RH_TARGET_1043) && RH_TARGET_1043)
 #define RH_Q66_BACKGROUND 1
 #define RH_Q66_CALENDAR 1
 #include "resource_hook_q66_139.h"
