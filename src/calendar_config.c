@@ -20,6 +20,7 @@ static int number(const char *s, uint32_t n, int32_t *out, int32_t lo, int32_t h
 void rh_calendar_defaults(struct rh_calendar_config *c) {
     unsigned i, j;
     c->pool_used = 0;
+    c->custom = 0;
     for (i = 0; i < 3; ++i) {
         struct rh_calendar_item *p = &c->items[i];
         p->type = i ? RH_CALENDAR_TEXT : RH_CALENDAR_NONE;
@@ -134,6 +135,7 @@ int rh_calendar_parse(const char *data, uint32_t size, struct rh_calendar_config
             c->pool_used += n + 1; ++pos;
         }
     }
+    c->custom = (seen != 0);
     return 0;
 }
 const char *rh_calendar_context(const struct rh_calendar_config *c, unsigned item, unsigned index) {

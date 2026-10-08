@@ -946,8 +946,14 @@ int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
     }
     return 0;
 }
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+void rh_p67_calendar_publish(void);
+#endif
+
 void rh_platform_calendar_publish(void) {
-#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    rh_p67_calendar_publish();
+#elif !defined(RH_TARGET_1043) || !RH_TARGET_1043
     if (load32(RH_FW_CALENDAR_LAUNCHER_SLOT))
         ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_PUBLISH)();
 #endif

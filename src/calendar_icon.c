@@ -2,6 +2,10 @@
 #include "resource_hook_calendar_native.h"
 #include "resource_hook_platform.h"
 
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+void rh_p67_calendar_reset(void);
+#endif
+
 static struct rh_calendar_config *active;
 static struct rh_calendar_date generated;
 static unsigned initialized, busy, dirty = 1, ready, bank;
@@ -65,7 +69,13 @@ int rh_calendar_commit(struct rh_calendar_config *c) {
     if (!c) return -2153;
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
-    old = active; active = c; initialized = dirty = 1;
+    old = active; active = c; initialized = 1;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    dirty = c->custom ? 1 : 0;
+    if (!c->custom) ready = 0;
+#else
+    dirty = 1;
+#endif
     rh_platform_unlock(irq);
     rh_calendar_discard(old);
     return 0;
@@ -92,6 +102,17 @@ static int generate(unsigned force) {
     uint32_t irq;
     if (!rh_calendar_native_supported()) return 0;
     if (!initialized || !active || !rh_platform_redraw_ready()) return -2154;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    /* On P67 (Band 10 Pro), default calendar icon is already transparent natively.
+     * Do not generate or hook when there is no custom configuration. */
+    if (!active->custom) {
+        rh_p67_calendar_reset();
+        irq = rh_platform_lock();
+        ready = dirty = 0;
+        rh_platform_unlock(irq);
+        return 0;
+    }
+#endif
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
     busy = 1;
@@ -123,12 +144,21 @@ done:
 }
 int rh_calendar_refresh(void) { return generate(1); }
 int rh_calendar_poll(void) { return generate(0); }
-int rh_calendar_pending(void) { return rh_calendar_native_supported() && (dirty || !ready); }
+int rh_calendar_pending(void) {
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    return rh_calendar_native_supported() && active && active->custom && (dirty || !ready);
+#else
+    return rh_calendar_native_supported() && (dirty || !ready);
+#endif
+}
 const char *rh_calendar_redirect(const char *path) {
     static const char logical[] = RH_CALENDAR_OUTPUT_PATH;
     uint32_t i, irq;
     const char *out = 0;
     if (!path || !rh_calendar_native_supported()) return 0;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    if (!active || !active->custom) return 0;
+#endif
     /* The native '/' POSIX driver receives paths WITHOUT the leading slash. */
     for (i = 0; i < sizeof(logical) - 2u; ++i)
         if (!path[i] || path[i] != logical[i + 1u]) return 0;

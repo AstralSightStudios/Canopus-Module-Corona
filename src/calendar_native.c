@@ -285,9 +285,11 @@ done:
     owned.busy = 0;
     return rc;
 }
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043 && (defined(__arm__) || defined(__thumb__))
+#include "p67_calendar_native.inc"
 #else
 int rh_calendar_native_supported(void) {
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     return 1;
 #else
     return 0;
@@ -298,4 +300,10 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
                               const struct rh_calendar_date *d, const char *output) {
     (void)c; (void)d; (void)output; return -1;
 }
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+void rh_p67_calendar_publish(void) {}
+void rh_p67_calendar_reset(void) {}
+uint32_t rh_p67_calendar_get_draw_buf(void) { return 0; }
 #endif
+#endif
+

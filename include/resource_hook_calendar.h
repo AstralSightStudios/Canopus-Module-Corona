@@ -6,7 +6,7 @@
 #define RH_CALENDAR_OUTPUT_PATH "/data/app/perpetual_calendar/calendar_icon.bin"
 #define RH_CALENDAR_BANK0 RH_APP_FILES_ROOT "calendar-alpha-0.bin"
 #define RH_CALENDAR_BANK1 RH_APP_FILES_ROOT "calendar-alpha-1.bin"
-#define RH_CALENDAR_POOL_BYTES 12800u
+#define RH_CALENDAR_POOL_BYTES 12796u
 #define RH_CALENDAR_CONFIG_BYTES 14336u
 #define RH_CALENDAR_NONE 0u
 #define RH_CALENDAR_TEXT 1u
@@ -24,6 +24,7 @@ struct rh_calendar_config {
     struct rh_calendar_item items[3];
     uint32_t pool_used;
     char pool[RH_CALENDAR_POOL_BYTES];
+    uint32_t custom;
 };
 struct rh_calendar_date { int32_t year, month, day, weekday; uint32_t locale; };
 
