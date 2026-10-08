@@ -450,9 +450,10 @@ rendering." The supplied device log records board_crashdump and RTC watchdog res
 but lacks the incident PC/assertion text; this is a confirmed forbidden code path
 and a strong incident candidate, not a captured fault-PC attribution.
 
-The adapter now performs visibility restoration, listener refresh and live-mode
-swapping only for audited gesture events 9/11/12, except notification event 12
-which now forwards natively without these transitions. All other events are forwarded
+The rendering-boundary fix originally restricted visibility restoration, listener
+refresh and live-mode swapping to audited gesture events 9/11/12, with notification
+12 forwarded directly. The steady-scroll optimization below now restricts these
+adapter side effects to begin/end 9/11 for every surface. All other events are forwarded
 without these adapter side effects; native descriptor filters and userdata remain
 unchanged. Native transition-end cleanup and pooled-buffer ownership are preserved.
 The accepted launcher path is unchanged.
@@ -472,7 +473,8 @@ notification native callback `0x0C527BBC` handles event 12 by updating the direc
 icon; capture occurs on event 9 and retirement on event 11. It does not require
 restoring the snapshot/root visibility for event 12.
 
-Only notification event 12 now takes the native-only forwarding path. This removes
+The initial optimization made only notification event 12 take the native-only
+forwarding path. This removes
 four adapter visibility changes and approximately 25 separate membership tree walks
 per steady, successfully swapped event in the old path. These are static operation
 counts, not a measured frame-time speedup. Other surfaces, begin/end bookkeeping,
@@ -483,7 +485,47 @@ The regression dispatches 128 owner ALL event-12 notifications with page userdat
 while the notification transition is live, requiring native forwarding, zero added
 tree walks, no flag/registration changes and unchanged capture/cleanup counts.
 The pre-optimization path fails this guard; the optimized path passes ASan/UBSan.
-Control Center/widgets retain their existing event-12 transitions. The optimized
-package was subsequently user-reported to perform well on hardware. This is
-USER_REPORTED_PASS for the reported scenario, not instrumented FPS evidence or
-exhaustive lifecycle/frame-time acceptance; no FPS guarantee is made.
+At that revision Control Center/widgets retained their event-12 transitions.
+The notification-optimized package was subsequently user-reported to perform well
+on hardware. This is USER_REPORTED_PASS for the reported scenario, not instrumented
+FPS evidence or exhaustive lifecycle/frame-time acceptance; no FPS guarantee is made.
+
+### Static-background steady-scroll and draw-path optimization
+
+All three surface wrappers now forward SCROLL12 directly, regardless of static
+image or blur configuration. Exact CC `0x0C5036C4` and widget `0x0C50ABB4`
+callbacks have no event12 action (`four_way_audit.txt:389-531,686-814`); notification
+12 retains its native direction-icon updates. This removes approximately four
+visibility changes and 25 global membership queries per successfully swapped
+static CC/widget SCROLL event. Begin/end, first-entry widget caches, native captures,
+release/pool ownership and conservative nonterminal/reversal handling are unchanged.
+Changed-list subscriptions remain repaired by UI-owner polling, not SCROLL callbacks.
+
+Surface DRAW_MAIN_END25 no longer searches the global object tree for the retained
+page. After current-target, generation, busy and root-slot gates, it follows the
+native dispatch-owned object's parents to the installed root (at most 16 nodes),
+then requires root->page->owner identity before reading viewport coordinates.
+A root draw uses two read-only parent getters; a direct list child uses three.
+It never dereferences a retained page unless that pointer was obtained as the
+current root's attached parent. Reparented/detached targets, stale generations,
+root-slot replacement and DELETE-invalidated bindings fail closed. List-only DELETE
+still preserves the page generation, while clearing list identity until polling
+repairs the listener, including same-address recreation.
+
+This is dispatch-scoped lifetime/ancestry validation, not cached global registry
+membership: a native draw of an allocated off-tree hierarchy with the correct
+ancestor identities can draw its background. Native dispatch must own the current
+target's lifetime, and attached parents must remain alive for these read-only
+getters on the serialized UI owner. No parent query is made from an arbitrary
+retained pointer. Mutation-capable begin/end/install/detach/repair paths retain
+full membership checks; the launcher draw path and firmware permissions are unchanged.
+Page/screen/layer clipping and clip restoration are unchanged. No draw-time flag,
+listener, capture, allocation or source-retirement changes are introduced.
+
+ASan/UBSan regressions require zero tree/parent queries, visibility changes or
+listener mutations across 128 steady events for static/blur on every surface.
+They also cover list appearance/DELETE/reuse with poll-only repair, repeated root
+and list draws with zero global walks, stale/dead retained pages, owner/root DELETE,
+root address reuse, list reparent/detach, off-tree allocated ancestry, cyclic/deep
+parent chains and the 16-node boundary. These are host operation/lifecycle checks;
+physical-device frame time for this revision remains NOT_PROBED.

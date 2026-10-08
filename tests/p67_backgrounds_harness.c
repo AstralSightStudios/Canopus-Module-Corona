@@ -24,8 +24,8 @@ static uint32_t *word_at(uint32_t address);
 #define P67_NATIVE(address) native(address)
 #define P67_U8(address) (*byte_at(address))
 #define P67_U32(address) (*word_at(address))
-struct object { uint32_t id, parent, clz, y, bounds[4], count, d[8][3]; int live; };
-static struct object objects[5];
+struct object { uint32_t id, parent, clz, y, bounds[4], count, d[8][3]; int live, off_tree; };
+static struct object objects[5], ancestors[16];
 static unsigned char moving;
 static uint32_t surface_root, surface_image;
 static int hidden_root, hidden_image, capture_fail;
@@ -42,7 +42,7 @@ static int delete_on_flag, delete_on_remove, shared_mode;
 static uint32_t root_slot, image_slot, foreground_slot;
 static unsigned add_calls, fail_add, mutate_binding, forwards[64], preparations, draws;
 static int forbid_mutation;
-static unsigned tree_calls,forbid_page_coords;
+static unsigned tree_calls,parent_calls,forbid_page_coords;
 static uint32_t layer_clip[4];
 static int32_t expected_clip[4];
 static uint32_t last_prepared, last_draw_source;
@@ -50,6 +50,7 @@ static unsigned image_inits, image_draws;
 static uint32_t last_image_descriptor[28];
 static struct object *object(uint32_t id) {
     for (unsigned i = 0; i < 5; ++i) if (objects[i].id == id) return &objects[i];
+    for (unsigned i = 0; i < 16; ++i) if (ancestors[i].id == id) return &ancestors[i];
     assert(!"unknown object"); return 0;
 }
 static unsigned char *byte_at(uint32_t a) { assert(a == 0x201102d9u); return &moving; }
@@ -60,6 +61,7 @@ static uint32_t *word_at(uint32_t a) {
         struct object *s = &objects[i];
         if (a >= s->id + 28u && a <= s->id + 40u) {
             unsigned index = (a - s->id - 28u) / 4u;
+            assert(s->live);
             return index == 1 ? &s->y : &s->bounds[index];
         }
     }
@@ -93,13 +95,16 @@ static int rh_platform_request_full_redraw(void) { ++redraw_requests; return red
 #include "../src/p67_backgrounds.inc"
 static void tree(uint32_t root, int (*cb)(uint32_t, void *), void *cookie) {
     assert(root == 0); ++tree_calls;
-    for (unsigned i = 0; i < 5; ++i) if (objects[i].live && cb(objects[i].id, cookie) == 2) break;
+    for (unsigned i = 0; i < 5; ++i)
+        if (objects[i].live && !objects[i].off_tree && cb(objects[i].id, cookie) == 2) break;
 }
 static uint32_t count(uint32_t o) { return object(o)->count; }
 static uint32_t *get(uint32_t o, uint32_t index) {
     struct object *s = object(o); assert(s->live && index < s->count); return s->d[index];
 }
-static uint32_t parent(uint32_t o) { assert(object(o)->live); return object(o)->parent; }
+static uint32_t parent(uint32_t o) {
+    assert(object(o)->live); ++parent_calls; return object(o)->parent;
+}
 static uint32_t *add(uint32_t o, uint32_t cb, uint32_t filter, uint32_t user) {
     struct object *s = object(o); assert(s->live && !forbid_mutation);
     if (++add_calls == fail_add) return 0;
@@ -291,18 +296,18 @@ static void check_non_gestures(struct p67_surface *s) {
     assert(draws==rendered+1);
     forbid_mutation=0;populated=0;
 }
-static void check_notification_scroll(struct p67_surface *s) {
+static void check_steady_scroll(struct p67_surface *s) {
     struct p67_surface before=*s;
     struct object saved_objects[5];
     memcpy(saved_objects,objects,sizeof(objects));
-    unsigned walks=tree_calls, calls=forwards[12], adds=add_calls;
+    unsigned walks=tree_calls, parents=parent_calls, calls=forwards[12], adds=add_calls;
     unsigned snapshots=captures, released=cleanup;
-    assert((selected==1 || rh_background_is_blur(p67_surface_path(s))) && s->moving);
+    assert(s->moving);
     forbid_mutation=1;
     for(unsigned n=0;n<128;++n) {
         dispatch(s,OWNER,12);
         assert(forwards[12]==calls+n+1);
-        assert(tree_calls==walks && add_calls==adds);
+        assert(tree_calls==walks && parent_calls==parents && add_calls==adds);
         assert(!memcmp(&before,s,sizeof(before)));
         assert(!memcmp(saved_objects,objects,sizeof(objects)));
         assert(!hidden_root && hidden_image);
@@ -311,13 +316,13 @@ static void check_notification_scroll(struct p67_surface *s) {
     forbid_mutation=0;
 }
 static void reset(void) {
-    forbid_mutation=forbid_page_coords=0; tree_calls=0;
+    forbid_mutation=forbid_page_coords=0; tree_calls=parent_calls=0;
     root_hides=root_shows=image_hides=image_shows=0;
     buffer_releases=pool_releases=image_deletes=end_bookkeeping=begin_bookkeeping=end_reentry=0;
     native_buffer=1;reenter_on_end=delete_on_end=delete_on_flag=delete_on_remove=0;
     timer_resume_hook=0;
     timer_resets=timer_resumes=predelete_reentry=0;reenter_before_delete=0;
-    memset(objects, 0, sizeof(objects));
+    memset(objects, 0, sizeof(objects));memset(ancestors, 0, sizeof(ancestors));
     uint32_t ids[5] = {OWNER, PAGE, FOREGROUND, LIST, NEW_LIST};
     for (unsigned i = 0; i < 5; ++i) { objects[i].id = ids[i]; objects[i].live = 1; }
     object(PAGE)->parent = OWNER; object(FOREGROUND)->parent = PAGE;
@@ -677,7 +682,147 @@ static void check_idle_list_repair(void) {
  }
  p67_blur_source=0;populated=0;
 }
+/* A draw event proves its current target is alive, not retained pointers.
+ * Prove ancestor identity without global walks and reject stale/detached pairs
+ * before reading page bounds, including DELETE and same-address reuse. */
+static void check_draw_binding(void) {
+ for(unsigned i=0;i<3;++i) for(unsigned blur=0;blur<2;++blur)
+ for(unsigned list_draw=0;list_draw<2;++list_draw) for(unsigned which=0;which<13;++which) {
+  struct p67_surface *s=bind_blur(i);position(s,0);completed_capture();
+  if(!blur) strcpy(s->path,"/data/static.bin");
+  s->list=FOREGROUND;object(FOREGROUND)->parent=LIST;
+  uint32_t obj=list_draw?FOREGROUND:LIST,e[5],gone[5];
+  event(e,obj,obj,25,s->generation);
+  if(which==1) --e[3];
+  if(which==2) e[1]=OWNER;
+  if(which==3) surface_root=NEW_LIST;
+  if(which==4) object(LIST)->parent=NEW_LIST;
+  if(which==5) object(PAGE)->parent=NEW_LIST;
+  if(which==6) object(LIST)->parent=0;
+  if(which==7 || which==8) {
+   uint32_t deleted=which==7?LIST:OWNER;
+   event(gone,deleted,deleted,36,s->generation);p67_surface_event(gone);
+   object(deleted)->live=0;
+   if(which==7) {
+    /* A new object at the same address must not revive an old generation. */
+    object(deleted)->live=1;object(deleted)->parent=PAGE;
+   }
+  }
+  if(which==9) {
+   /* The retained page is stale/dead, but the current root has a live parent.
+    * Its mismatch must be detected before dereferencing the retained page. */
+   s->page=NEW_LIST;object(NEW_LIST)->live=0;
+  }
+  if(which==10) {
+   if(list_draw) object(FOREGROUND)->parent=FOREGROUND;
+   else object(LIST)->parent=LIST;
+  }
+  if(which==11) s->page=0;
+  if(which==12) {
+   /* Page teardown detaches its root before freeing the ancestor. */
+   object(LIST)->parent=0;object(PAGE)->live=0;
+  }
+  unsigned walks=tree_calls,parents=parent_calls,rendered=draws,adds=add_calls;
+  uint32_t saved_clip[4];memcpy(saved_clip,layer_clip,sizeof(saved_clip));
+  forbid_mutation=1;forbid_page_coords=which!=0;
+  unsigned frames=which?1u:128u;
+  for(unsigned n=0;n<frames;++n) p67_surface_event(e);
+  assert(tree_calls==walks && add_calls==adds);
+  assert(draws==rendered+(which?0u:frames));
+  assert(!memcmp(saved_clip,layer_clip,sizeof(saved_clip)));
+  if(!which) assert(parent_calls==parents+frames*(list_draw?3u:2u));
+  else assert(parent_calls-parents<=17u);
+  forbid_mutation=forbid_page_coords=0;
+  s->owner=s->page=s->root=s->list=0;s->path[0]=0;
+ }
+ p67_blur_source=0;
+}
+static void check_draw_ancestry(void) {
+ for(unsigned i=0;i<3;++i) for(unsigned blur=0;blur<2;++blur)
+ for(unsigned which=0;which<5;++which) {
+  struct p67_surface *s=bind_blur(i);position(s,0);completed_capture();
+  if(!blur) strcpy(s->path,"/data/static.bin");
+  s->list=FOREGROUND;object(FOREGROUND)->parent=LIST;
+  if(which==0) {
+   /* Allocation lifetime is distinct from registry membership: a native draw
+    * of an off-screen tree still has a valid target and attached ancestors. */
+   for(unsigned n=0;n<5;++n) objects[n].off_tree=1;
+   assert(!p67_live(PAGE));
+  }
+  if(which==1) object(FOREGROUND)->parent=0;
+  if(which==2) object(FOREGROUND)->parent=NEW_LIST;
+  if(which>=3) {
+   unsigned depth=which==3?14u:15u;
+   for(unsigned n=0;n<depth;++n) {
+    ancestors[n].id=600u+100u*n;ancestors[n].live=1;
+    ancestors[n].parent=n+1u==depth?LIST:700u+100u*n;
+   }
+   object(FOREGROUND)->parent=ancestors[0].id;
+  }
+  unsigned walks=tree_calls,parents=parent_calls,rendered=draws;
+  uint32_t e[5],saved[4];event(e,FOREGROUND,FOREGROUND,25,s->generation);
+  memcpy(saved,layer_clip,sizeof(saved));
+  unsigned accepted=which==0 || which==3;
+  forbid_mutation=1;forbid_page_coords=!accepted;p67_surface_event(e);
+  forbid_mutation=forbid_page_coords=0;
+  assert(tree_calls==walks && draws==rendered+accepted);
+  assert(!memcmp(saved,layer_clip,sizeof(saved)));
+  if(which==0) assert(parent_calls==parents+3u);
+  if(which==3) assert(parent_calls==parents+17u);
+  if(which==4) assert(parent_calls==parents+16u);
+  s->owner=s->page=s->root=s->list=0;s->path[0]=0;
+ }
+ p67_blur_source=0;
+}
+/* Event12 stays mutation-free even when a list appears or is recreated.
+ * Only the UI-owner poll repairs its subscription; root draws remain valid. */
+static void check_scroll_list_repair(void) {
+ for(unsigned i=1;i<3;++i) for(unsigned blur=0;blur<2;++blur) {
+  struct p67_surface *s=bind_blur(i);position(s,i==1?-100:100);completed_capture();
+  if(!blur) strcpy(s->path,"/data/static.bin");
+  s->moving=s->swapped=1;
+  populated=FOREGROUND;object(FOREGROUND)->clz=0x2cdba28cu;
+  object(FOREGROUND)->parent=LIST;
+  uint32_t generation=s->generation,e[5];
+  for(unsigned recreated=0;recreated<2;++recreated) {
+   unsigned walks=tree_calls,parents=parent_calls,adds=add_calls;
+   forbid_mutation=1;
+   scroll_event(s,12,LIST,PAGE,0);
+   forbid_mutation=0;
+   assert(tree_calls==walks && parent_calls==parents && add_calls==adds && !s->list);
+   p67_surface_poll(s);
+   assert(s->list==FOREGROUND && s->generation==generation);
+   assert(object(FOREGROUND)->count==1 && !hidden_root && hidden_image);
+   position(s,0);walks=tree_calls;parents=parent_calls;
+   unsigned rendered=draws;
+   event(e,FOREGROUND,FOREGROUND,25,generation);
+   forbid_mutation=1;p67_surface_event(e);forbid_mutation=0;
+   assert(tree_calls==walks && parent_calls==parents+3u && draws==rendered+1u);
+   position(s,i==1?-100:100);
+   /* List-only DELETE preserves the page token, but old list draws are gated. */
+   event(e,FOREGROUND,FOREGROUND,36,generation);p67_surface_event(e);
+   object(FOREGROUND)->live=0;object(FOREGROUND)->count=0;populated=0;
+   walks=tree_calls;parents=parent_calls;
+   event(e,FOREGROUND,FOREGROUND,25,generation);
+   forbid_page_coords=forbid_mutation=1;p67_surface_event(e);
+   forbid_page_coords=forbid_mutation=0;
+   assert(tree_calls==walks && parent_calls==parents && !s->list);
+   assert(s->generation==generation && s->moving && s->swapped);
+   object(FOREGROUND)->live=1;populated=FOREGROUND;
+   /* Reusing the same address cannot enable draws before listener repair. */
+   walks=tree_calls;parents=parent_calls;rendered=draws;
+   forbid_page_coords=forbid_mutation=1;p67_surface_event(e);
+   forbid_page_coords=forbid_mutation=0;
+   assert(tree_calls==walks && parent_calls==parents && draws==rendered && !s->list);
+  }
+  p67_surface_detach(s);s->path[0]=0;
+ }
+ p67_blur_source=0;populated=0;
+}
 int main(void) {
+ check_draw_ancestry();
+ check_scroll_list_repair();
+ check_draw_binding();
  check_terminal_ends();
  check_blur_sessions();
  check_idle_list_repair();
@@ -716,12 +861,7 @@ int main(void) {
    object(FOREGROUND)->live=1;object(FOREGROUND)->count=0;populated=FOREGROUND;
    p67_surface_poll(s);assert(s->moving && s->list==FOREGROUND);
   }
-  if(i==1) check_notification_scroll(s);
-  else {
-   unsigned walks=tree_calls;
-   event(e,OWNER,LIST,12,PAGE);p67_surface_scroll_for(s,e);
-   assert(forwards[12]==1 && s->swapped && tree_calls>walks);
-  }
+  check_steady_scroll(s);
   object(PAGE)->y=120;object(PAGE)->bounds[3]=599;
   layer_clip[1]=100;layer_clip[3]=600;expected_clip[1]=120;expected_clip[3]=479;
   uint32_t saved[4];memcpy(saved,layer_clip,sizeof(saved));
@@ -846,7 +986,7 @@ int main(void) {
   forbid_mutation=0;
   /* Blur steady scroll must not mutate listeners, capture or visibility. */
   object(OWNER)->d[0][0]=p67_scroll_fn(s);
-  s->moving=1;check_notification_scroll(s);s->moving=0;
+  s->moving=1;check_steady_scroll(s);s->moving=0;
   p67_blur_source=0;s->owner=s->page=s->root=0;s->path[0]=0;
  }
  puts("p67 three native-owned live surfaces and deferred blur modes passed");return 0;

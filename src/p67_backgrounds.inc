@@ -147,10 +147,10 @@ static void p67_surface_scroll_for(struct p67_surface *s,void *event) {
         }
         /* ALL also receives layout and render notifications. Only the audited
          * gesture callbacks may restore/swap visibility or refresh listeners. */
-        /* Notification SCROLL (12) only updates the native direction icon;
-         * it needs no snapshot visibility restoration or listener refresh. */
-        if((code!=9 && code!=11 && code!=12) ||
-           (code==12 && (s==&p67_surfaces[1] || rh_background_is_blur(p67_surface_path(s))))) {
+        /* SCROLL (12) is a native no-op for CC/widgets and only updates the
+         * notification direction icon. Neither static nor blur backgrounds
+         * need visibility restoration here; UI-owner polling repairs lists. */
+        if(code!=9 && code!=11) {
             ((void (*)(void *))(uintptr_t)P67_NATIVE(s->callback))(event);
             return;
         }
@@ -183,6 +183,26 @@ static void p67_surface_scroll_for(struct p67_surface *s,void *event) {
         return;
     }
 }
+/* Only called for a current-target DRAW_MAIN_END with matching generation.
+ * Native dispatch owns obj's lifetime. Follow its attached parents, never a
+ * retained page/root pointer, to prove the viewport is still its ancestor.
+ * A native draw of an off-tree hierarchy still owns these object lifetimes;
+ * registry membership alone is neither required nor a stale-pointer proof.
+ * Parent getters are read-only; mutation-capable paths keep global live checks. */
+static int p67_surface_draw_binding(struct p67_surface *s,uint32_t obj) {
+    unsigned n;
+    if(!s->owner || !s->page || !s->root || load32(s->root_slot)!=s->root) return 0;
+    for(n=0;n<16 && obj;++n) {
+        if(obj==s->root) {
+            uint32_t page=((uint32_t (*)(uint32_t))(uintptr_t)
+                P67_NATIVE(0x0c589579u))(obj);
+            return page==s->page && ((uint32_t (*)(uint32_t))(uintptr_t)
+                P67_NATIVE(0x0c589579u))(page)==s->owner;
+        }
+        obj=((uint32_t (*)(uint32_t))(uintptr_t)P67_NATIVE(0x0c589579u))(obj);
+    }
+    return 0;
+}
 static void p67_surface_event(void *event) {
     uint32_t obj=*(uint32_t *)event, target=*((uint32_t *)event+1);
     unsigned code=*(uint16_t *)((char *)event+8)&0x7fffu,i,j;
@@ -210,7 +230,7 @@ static void p67_surface_event(void *event) {
             return;
         }
         if(code!=25 || (obj!=s->root && obj!=s->list) || s->busy || !p67_surface_path(s)[0] ||
-           !p67_live(s->page) || load32(s->root_slot)!=s->root) return;
+           !p67_surface_draw_binding(s,obj)) return;
         layer=*((uint32_t *)event+4); if(!layer) return;
         for(j=0;j<4;++j) {
             int32_t bound=(int32_t)P67_U32(s->page+28+4*j);
