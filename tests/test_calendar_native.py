@@ -1,12 +1,13 @@
-"""Exact .177 read-only calendar receipts and source-compiled native adapter.
+"""Exact selected Band11 AP receipts and source-compiled native adapter.
 
 Native leaves model UI/clock/files/GPU, NOT physical pixels or GPU fault safety.
-The stock C547870 instructions execute to compare default object attributes;
+The selected stock generator instructions execute to compare default object attributes;
 compiled replacement C executes for metadata, write, ownership and date guards.
 Run with a Python providing unicorn, capstone, pyelftools; optionally set
-RH_CALENDAR_FIRMWARE to the fingerprinted .177 vela_ap.bin.
+RH_CALENDAR_TARGET and RH_CALENDAR_FIRMWARE (or RH_AP_<version>).
 """
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -23,29 +24,43 @@ from unicorn.arm_const import (UC_CPU_ARM_CORTEX_M33, UC_ARM_REG_R0,
     UC_ARM_REG_SP, UC_ARM_REG_LR)
 
 ROOT = Path(__file__).resolve().parents[1]
-SDK = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus'))
-if not SDK.exists():
-    SDK = ROOT.parent / 'Canopus-Private'
-AP = Path(os.environ.get('RH_CALENDAR_FIRMWARE',
-    SDK / 'fwbins/xiaomi-band-11-4.100.177/vela_ap.bin'))
+SDK_DEFAULT = ROOT.parent / 'Canopus'
+if not SDK_DEFAULT.exists():
+    SDK_DEFAULT = ROOT.parent / 'Canopus-Private'
+SDK = Path(os.environ.get('CANOPUS_ROOT', SDK_DEFAULT))
+TARGET = os.environ.get('RH_CALENDAR_TARGET', '177')
+AP = Path(os.environ.get('RH_CALENDAR_FIRMWARE', os.environ.get('RH_AP_' + TARGET,
+    str(SDK / ('fwbins/xiaomi-band-11-4.100.' + TARGET) / 'vela_ap.bin'))))
 SHA = 'ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b'
+ADDRESS_MAP = {}
+if TARGET in ('139', '155'):
+    evidence = json.loads((ROOT / ('targets/xiaomi-band-11-4.100.' + TARGET) /
+        'background-calendar-evidence.json').read_text())
+    SHA = evidence['ap_sha256']
+    for entry in evidence['symbols'].values():
+        ADDRESS_MAP[int(entry['reference'], 16) & ~1] = int(entry['address'], 16) & ~1
+    ADDRESS_MAP.update({0x200c45dc: 0x200c475c, 0x200c5af0: 0x200c5d78})
+    generator = evidence['symbols']['CAL_GENERATE']
+    ADDRESS_MAP[0xc547a0e] = max(int(b['address'], 16) + b['size'] for b in generator['blocks'])
+def A(address):
+    return ADDRESS_MAP.get(address, address)
 BASE, STOP = 0x0c0c0000, 0x1c73ff00
 REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3]
-LEAVES = [0xc34d45c, 0xc34fcec, 0xc382ff0, 0xc3836d2, 0xc502de0,
-    0xc3ae134, 0xc3b2b8c, 0xc3ab228, 0xc3b38ac, 0xc3839ae, 0xc383a10,
-    0xc3839e4, 0xc38361c, 0xc50934c, 0xc495008, 0xc4924fc, 0xc542cdc,
-    0xc6a29c8, 0xc6a2a24, 0xc384488, 0xc91e58c, 0xc92e5f4, 0xc721248,
-    0xc907918, 0xc8b7720, 0xc38e44c]
+LEAVES = [A(0xc34d45c), A(0xc34fcec), A(0xc382ff0), A(0xc3836d2), A(0xc502de0),
+    A(0xc3ae134), A(0xc3b2b8c), A(0xc3ab228), A(0xc3b38ac), A(0xc3839ae), A(0xc383a10),
+    A(0xc3839e4), A(0xc38361c), A(0xc50934c), A(0xc495008), A(0xc4924fc), A(0xc542cdc),
+    A(0xc6a29c8), A(0xc6a2a24), A(0xc384488), A(0xc91e58c), A(0xc92e5f4), A(0xc721248),
+    A(0xc907918), A(0xc8b7720), A(0xc38e44c)]
 
 
 class NativeCalendar(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not AP.exists():
-            raise unittest.SkipTest('exact .177 AP unavailable; set RH_CALENDAR_FIRMWARE')
+            raise unittest.SkipTest('exact selected AP unavailable; set RH_CALENDAR_FIRMWARE')
         cls.firmware = AP.read_bytes()
         if hashlib.sha256(cls.firmware).hexdigest() != SHA:
-            raise RuntimeError('wrong .177 firmware fingerprint')
+            raise RuntimeError('wrong selected firmware fingerprint')
         cls.tmp = tempfile.TemporaryDirectory(prefix='rh-calendar-native-')
         cls.addClassCleanup(cls.tmp.cleanup)
         tmp = Path(cls.tmp.name)
@@ -79,10 +94,10 @@ class NativeCalendar(unittest.TestCase):
     def setUp(self):
         self.machine()
 
-    def machine(self, target='177'):
+    def machine(self, target=TARGET):
         self.u = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
         self.u.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M33)
-        for p, n in [(0xc000000, 0x1000000), (0x2c000000, 0x1000000),
+        for p, n in [(A(0xc000000), 0x1000000), (0x2c000000, 0x1000000),
                      (0x20000000, 0x200000), (0x3c700000, 0x200000),
                      (0x1c700000, 0x40000)]:
             self.u.mem_map(p, n)
@@ -163,48 +178,48 @@ class NativeCalendar(unittest.TestCase):
     def leaf(self, a):
         r = [self.u.reg_read(reg) for reg in REGS]
         self.trace.append((a, *r))
-        if a == 0xc34d45c:
+        if a == A(0xc34d45c):
             self.u.mem_write(r[0], bytes(20)); return 0
-        if a == 0xc34fcec:
+        if a == A(0xc34fcec):
             self.u.mem_write(r[1], struct.pack('<11i', 0, 0, 12, 23, 8, 126, 3, 0, 0, 0, 0)); return r[1]
-        if a == 0xc382ff0:
+        if a == A(0xc382ff0):
             self.image_count = 0
             self.objects[self.root] = {'kind': 'root'}; return self.root
-        if a == 0xc3ae134:
+        if a == A(0xc3ae134):
             self.image_count += 1
             p = self.image if self.image_count == 1 else self.mem(128)
             self.objects[p] = {'kind': 'image', 'parent': r[0]}; return p
-        if a == 0xc3ab228:
+        if a == A(0xc3ab228):
             p = self.mem(128); self.labels.append(p)
             self.objects[p] = {'kind': 'label', 'parent': r[0]}; return p
-        if a == 0xc3836d2:
+        if a == A(0xc3836d2):
             self.objects[r[0]]['size'] = (r[1], r[2])
-        if a == 0xc3b2b8c:
+        if a == A(0xc3b2b8c):
             self.objects[r[0]]['source'] = self.string(r[1])
             self.word(r[0] + 52, r[1]); self.word(r[0] + 68, 64); self.word(r[0] + 72, 40)
-        if a == 0xc3b38ac:
+        if a == A(0xc3b38ac):
             self.objects[r[0]]['text'] = self.string(r[1])
-        if a == 0xc3839ae:
+        if a == A(0xc3839ae):
             self.objects[r[0]]['color'] = r[1] & 0xffffff
-        if a == 0xc383a10:
+        if a == A(0xc383a10):
             self.objects[r[0]]['text-align'] = r[1]
-        if a == 0xc3839e4:
+        if a == A(0xc3839e4):
             self.objects[r[0]]['font'] = r[1]
-        if a == 0xc38361c:
+        if a == A(0xc38361c):
             self.objects[r[0]]['align'] = tuple(r[1:])
-        if a == 0xc50934c:
-            return 0x20010000 if r[0] == 0x200c45dc else 0x20010100
-        if a == 0xc495008:
-            if not self.alloc_ok: return 0x2ca12930
+        if a == A(0xc50934c):
+            return 0x20010000 if r[0] == A(0x200c45dc) else 0x20010100
+        if a == A(0xc495008):
+            if not self.alloc_ok: return A(0x2ca12930)
             p = self.mem(64); self.fonts.append(p); return p
-        if a == 0xc542cdc:
+        if a == A(0xc542cdc):
             self.u.mem_write(r[1], self.locale.encode()[:15] + b'\0')
-        if a == 0xc6a29c8:
+        if a == A(0xc6a29c8):
             self.assertEqual(r[:2], [self.image, 16] if not getattr(self, 'stock', False) else [self.image, 18])
             return self.snap if self.snapshot_ok else 0
-        if a == 0xc91e58c:
+        if a == A(0xc91e58c):
             return self.fences.pop(0) if self.fences else 0
-        if a == 0xc38e44c:
+        if a == A(0xc38e44c):
             if not self.info_ok: return 0
             self.u.mem_write(r[1], struct.pack('<BB5H', 25, 16, 0, 64, 40, 256, 0)); return 1
         return 0
@@ -230,15 +245,15 @@ class NativeCalendar(unittest.TestCase):
         actual = list(self.objects.values())
         self.assertEqual(len(actual), 4)
         self.assertEqual([x['color'] for x in actual if x['kind'] == 'label'], [0, 0x3482ff])
-        self.assertEqual(len(self.events(0xc495008)), 0, 'defaults must use shared style wrappers without ownership')
-        self.assertEqual(len(self.events(0xc4924fc)), 0)
+        self.assertEqual(len(self.events(A(0xc495008))), 0, 'defaults must use shared style wrappers without ownership')
+        self.assertEqual(len(self.events(A(0xc4924fc))), 0)
         self.assertEqual(self.writes[:12], struct.pack('<BB5H', 25, 16, 1, 112, 112, 448, 0))
         self.assertEqual(len(self.writes), 12 + 448 * 112)
         self.machine()
         self.stock = True
         md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
         targets = {int(i.op_str.lstrip('#'), 16) for i in md.disasm(
-            self.firmware[0xc547870 - BASE:0xc547a0e - BASE], 0xc547870) if i.mnemonic == 'bl'}
+            self.firmware[A(0xc547870) - BASE:A(0xc547a0e) - BASE], A(0xc547870)) if i.mnemonic == 'bl'}
         def zero():
             p, _, size = [self.u.reg_read(x) for x in REGS[:3]]
             self.u.mem_write(p, bytes(size)); return p
@@ -247,28 +262,28 @@ class NativeCalendar(unittest.TestCase):
             text = self.string(fmt).replace('%ld', str(value))
             self.u.mem_write(p, text.encode()[:size - 1] + b'\0'); return len(text)
         for a in targets - set(LEAVES):
-            self.hook(a, zero if a == 0xc720f08 else format_text if a == 0xc34af78 else lambda: 0)
-        self.hook(0xc4f87fc, lambda: self.objects[self.image].update(align=(9, 0, 0)) or 0)
-        self.call(0xc547870)
+            self.hook(a, zero if a == A(0xc720f08) else format_text if a == A(0xc34af78) else lambda: 0)
+        self.hook(A(0xc4f87fc), lambda: self.objects[self.image].update(align=(9, 0, 0)) or 0)
+        self.call(A(0xc547870))
         native = list(self.objects.values())
         # Handle numbers differ, so compare all native attributes except parent identity.
         normalize = lambda xs: [{k: v for k, v in x.items() if k != 'parent'} for x in xs]
         self.assertEqual(normalize(actual), normalize(native))
 
     def test_native_color_packer_and_argb_premultiply_bytes(self):
-        # Execute .177 C3839AE, not a replacement: it packs the 3-byte color
+        # Execute the selected native color setter, not a replacement: it packs the 3-byte color
         # as low16 + BYTE2 at high16 for property 88, with no R/B swap.
-        self.u.hook_del(self.native_hooks[0xc3839ae])
+        self.u.hook_del(self.native_hooks[A(0xc3839ae)])
         packed = []
-        self.hook(0xc383434, lambda: packed.append(
+        self.hook(A(0xc383434), lambda: packed.append(
             [self.u.reg_read(r) for r in REGS]) or 0)
-        self.call(0xc3839ae, self.root, 0x3482ff, 0)
+        self.call(A(0xc3839ae), self.root, 0x3482ff, 0)
         self.assertEqual(packed, [[self.root, 88, 0x3482ff, 0]])
         self.assertEqual(struct.pack('<I', packed[0][2]), b'\xff\x82\x34\0')
         # C384C40 in lv_draw_buf conversion uses byte +3 alpha; native
         # premultiply is >>8, not divide by 255. Test unequal components.
         self.u.mem_write(self.pixels, b'\xff\x82\x34\x80')
-        self.call(0xc384c40, self.pixels)
+        self.call(A(0xc384c40), self.pixels)
         self.assertEqual(bytes(self.u.mem_read(self.pixels, 4)), b'\x7f\x41\x1a\x80')
 
     def test_date_locale_and_bad_date_leave_output_unchanged(self):
@@ -287,16 +302,16 @@ class NativeCalendar(unittest.TestCase):
         self.word(self.config + 96 + 16, 37)
         self.fences = [0, 1]
         self.assertNotEqual(self.render(), 0)
-        self.assertEqual(len(self.events(0xc495008)), 1)
-        for a in (0xc384488, 0xc6a2a24, 0xc4924fc, 'rh_platform_open'):
+        self.assertEqual(len(self.events(A(0xc495008))), 1)
+        for a in (A(0xc384488), A(0xc6a2a24), A(0xc4924fc), 'rh_platform_open'):
             self.assertEqual(self.events(a), [])
         self.fences = [1]
         self.assertNotEqual(self.render(), 0)
-        self.assertEqual(len(self.events(0xc495008)), 1, 'no unbounded pending generations')
+        self.assertEqual(len(self.events(A(0xc495008))), 1, 'no unbounded pending generations')
         self.fences = [0, 0]
         self.assertEqual(self.render(), 0)
-        self.assertEqual(len(self.events(0xc4924fc)), 2)
-        self.assertEqual(len(self.events(0xc6a2a24)), 2)
+        self.assertEqual(len(self.events(A(0xc4924fc))), 2)
+        self.assertEqual(len(self.events(A(0xc6a2a24))), 2)
 
     def test_malformed_snapshot_and_short_writes_never_claim_success(self):
         for values in [dict(cf=18), dict(width=111), dict(height=111),
@@ -306,7 +321,7 @@ class NativeCalendar(unittest.TestCase):
                 self.machine(); self.metadata(**values)
                 self.assertNotEqual(self.render(), 0)
                 self.assertEqual(self.events('rh_platform_open'), [])
-                self.assertEqual(len(self.events(0xc6a2a24)), 1)
+                self.assertEqual(len(self.events(A(0xc6a2a24))), 1)
         for results in ([12, 5, 0], [12, -1], [13]):
             with self.subTest(results=results):
                 self.machine(); self.write_results = list(results)
@@ -334,38 +349,38 @@ class NativeCalendar(unittest.TestCase):
         self.word(self.config + 96 + 16, 37)
         self.alloc_ok = False
         self.assertNotEqual(self.render(), 0)
-        self.assertEqual(len(self.events(0xc495008)), 1)
-        self.assertEqual(self.events(0xc4924fc), [], 'never destroy the system fallback')
+        self.assertEqual(len(self.events(A(0xc495008))), 1)
+        self.assertEqual(self.events(A(0xc4924fc)), [], 'never destroy the system fallback')
         self.assertEqual(self.events('rh_platform_open'), [])
         self.machine(); self.snapshot_ok = False
         self.assertNotEqual(self.render(), 0)
-        self.assertEqual(len(self.events(0xc384488)), 1)
-        self.assertEqual(self.events(0xc6a2a24), [])
+        self.assertEqual(len(self.events(A(0xc384488))), 1)
+        self.assertEqual(self.events(A(0xc6a2a24)), [])
         self.assertEqual(self.events('rh_platform_open'), [])
 
     def test_clock_output_is_validated_not_saved_basepri_return(self):
-        self.u.hook_del(self.native_hooks[0xc34d45c])
+        self.u.hook_del(self.native_hooks[A(0xc34d45c)])
         def valid_clock():
             self.u.mem_write(self.u.reg_read(UC_ARM_REG_R0), struct.pack('<QI', 0, 0))
             return 0x80  # Native ABI returns prior BASEPRI, not success/failure.
-        handle = self.hook(0xc34d45c, valid_clock)
+        handle = self.hook(A(0xc34d45c), valid_clock)
         self.assertEqual(self.call('rh_calendar_native_date', self.date), 0)
         previous = bytes(self.u.mem_read(self.date, 20))
         self.u.hook_del(handle)
         # An unwritten timestamp must not be converted from zeroed storage.
-        self.hook(0xc34d45c, lambda: 0)
+        self.hook(A(0xc34d45c), lambda: 0)
         self.assertNotEqual(self.call('rh_calendar_native_date', self.date), 0)
         self.assertEqual(bytes(self.u.mem_read(self.date, 20)), previous)
 
     def test_wrong_receipt_is_failure_not_silent_unsupported(self):
-        self.u.mem_write(0xc547870, b'\0\0\0\0')
+        self.u.mem_write(A(0xc547870), b'\0\0\0\0')
         self.assertEqual(self.call('rh_calendar_native_supported'), 1)
         self.assertNotEqual(self.call('rh_calendar_native_date', self.date), 0)
         self.assertNotEqual(self.render(), 0)
         self.assertEqual(self.trace, [])
 
     def test_other_targets_make_no_native_calls(self):
-        for target in ('139', '155', '1043'):
+        for target in ('155', '1043'):
             with self.subTest(target=target):
                 self.machine(target)
                 self.assertEqual(self.call('rh_calendar_native_supported'), 0)

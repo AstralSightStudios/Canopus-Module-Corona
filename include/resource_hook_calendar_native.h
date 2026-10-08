@@ -2,7 +2,7 @@
 #define RESOURCE_HOOK_CALENDAR_NATIVE_H
 #include "resource_hook_calendar.h"
 
-/* Capability is compile-target based (.177 only); receipt mismatch fails the
+/* Capability is compile-target based (exact Band 11 targets); receipt mismatch fails the
  * date/render operation rather than silently disabling configured overrides.
  * Other builds return unsupported/-1 without native calls.
  * UI owner, serialized with LVGL, outside the IRQ lock. output is an inactive

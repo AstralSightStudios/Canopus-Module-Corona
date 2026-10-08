@@ -1,6 +1,7 @@
 #include "canopus_abi.h"
 #include "canopus_module_registration.h"
 #include "resource_hook_platform.h"
+#include "resource_hook_target.h"
 #include "resource_hook_quickapp.h"
 #include "resource_hook_font_reload.h"
 #include "resource_hook_background.h"
@@ -36,7 +37,7 @@ static int configured;
  * Autonomous QuickApp resolution has an independently recoverable error. */
 static int32_t config_error, quickapp_error, calendar_config_error, calendar_error;
 static unsigned calendar_started;
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || \
+#if RH_Q66_BACKGROUND || \
     (defined(RH_TARGET_1043) && RH_TARGET_1043 && \
      ((defined(RH_P67_LIVE_LAUNCHER) && RH_P67_LIVE_LAUNCHER) || \
       (defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)))

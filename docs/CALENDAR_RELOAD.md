@@ -2,7 +2,9 @@
 
 ## Current scope
 
-The replacement renderer is recovered for **Xiaomi Band 11 4.100.177 only**,
+The replacement renderer is recovered for **Xiaomi Band 11 4.100.177 and .139**.
+The .139 backport has static/model validation only (NOT_PROBED); see
+`targets/xiaomi-band-11-4.100.139/background-calendar.md`. Existing .177 evidence:
 AP SHA256 `ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`.
 It has host/Unicorn coverage and **USER_REPORTED_PASS** for the visible calendar
 workflow: on 2026-10-07 the user reported successful device validation. This is
