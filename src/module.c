@@ -140,6 +140,183 @@ static void startup_record(const char *stage, int32_t rc, int error, uintptr_t d
     rh_platform_close(fd);
 }
 
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+#define RH_P67_BLUR_LOG_PATH "/data/offlinelog/resource-hook-p67-blur.log"
+#define RH_P67_BLUR_LOG_BYTES 1024u
+#define RH_P67_BLUR_LOG_LIMIT 8u
+#define RH_P67_BLUR_REPAIR_POLLS 32u
+/* Separate from startup/Manager protocols. Only the serialized one-second UI
+ * watcher calls this; neither a display callback nor the 50ms refresh retries
+ * may do diagnostic I/O. AstroBox log export can read /data/offlinelog. */
+static char blur_log[RH_P67_BLUR_LOG_BYTES];
+static char blur_logged_key[RH_P67_BLUR_LOG_BYTES];
+static char blur_attempted_lifecycle[512];
+static uint32_t blur_logged_size, blur_lifecycle_size;
+static uint32_t blur_log_epoch, blur_log_attempts, blur_log_publications;
+static unsigned blur_log_observed, blur_log_needs_repair;
+static uint32_t blur_log_repair_cooldown;
+static int blur_bytes_equal(const char *a, const char *b, uint32_t size) {
+    uint32_t i;
+    for (i = 0; i < size; i++) if (a[i] != b[i]) return 0;
+    return 1;
+}
+static int blur_field_is(const char *line, uint32_t size, const char *name) {
+    uint32_t i = 0;
+    while (name[i]) {
+        if (i >= size || line[i] != name[i]) return 0;
+        i++;
+    }
+    return i < size && line[i] == '=';
+}
+static int blur_counter(const char *line, uint32_t size) {
+    uint32_t name_size = 0;
+    while (name_size < size && line[name_size] != '=') name_size++;
+    /* Provider counters may grow new operation-specific *_calls fields. */
+    if (name_size >= 6u && name_size < size &&
+        blur_bytes_equal(line+name_size-6u,"_calls",6u)) return 1;
+    return blur_field_is(line,size,"frame52") || blur_field_is(line,size,"attempts") ||
+        blur_field_is(line,size,"copies") || blur_field_is(line,size,"publishes") ||
+        blur_field_is(line,size,"wakes") || blur_field_is(line,size,"draws") ||
+        blur_field_is(line,size,"fences") || blur_field_is(line,size,"capture_calls") ||
+        blur_field_is(line,size,"input_allocs") ||
+        blur_field_is(line,size,"output_allocs") || blur_field_is(line,size,"destroys") ||
+        blur_field_is(line,size,"pm_stays") || blur_field_is(line,size,"pm_relaxes");
+}
+static int blur_lifecycle(const char *line, uint32_t size) {
+    /* Core error gates and wake-budget pending/armed bits can oscillate on
+     * every poll without any lifecycle transition. They remain in the stable
+     * key, but must not bypass the per-epoch error budget. */
+    return blur_field_is(line,size,"source") || blur_field_is(line,size,"root") ||
+        blur_field_is(line,size,"root_generation") || blur_field_is(line,size,"display") ||
+        blur_field_is(line,size,"config_epoch") ||
+        blur_field_is(line,size,"refresh_pending") || blur_field_is(line,size,"cache_dropped") ||
+        blur_field_is(line,size,"fonts_done") || blur_field_is(line,size,"calendar_done") ||
+        blur_field_is(line,size,"images_done") ||
+        blur_field_is(line,size,"background_initialized");
+}
+/* Keys here are fixed literals, at most 22 bytes; the 48-byte local line also
+ * fits a sign and every int32 value. Errors are signed decimal (-1 means -1,
+ * not an unsigned word needing two's-complement decoding). */
+static int blur_append_module_field(uint32_t *size, const char *name, int32_t value) {
+    char line[48], *p = log_text(line,name);
+    uint32_t count, i;
+    *p++ = '=';
+    if (value < 0) *p++ = '-';
+    p = result_number(p,value < 0 ? 0u-(uint32_t)value : (uint32_t)value);
+    *p++ = '\n';
+    count = (uint32_t)(p-line);
+    if (count >= sizeof(blur_log)-*size) return 0;
+    for (i = 0; i < count; i++) blur_log[(*size)++] = line[i];
+    blur_log[*size] = 0;
+    return 1;
+}
+static uint32_t blur_field_number(const char *line, uint32_t size) {
+    uint32_t i = 0, value = 0;
+    while (i < size && line[i] != '=') i++;
+    while (++i < size && line[i] >= '0' && line[i] <= '9')
+        value = value * 10u + (uint32_t)(line[i] - '0');
+    return value;
+}
+static void poll_blur_diagnostics(void) {
+    char key[RH_P67_BLUR_LOG_BYTES], lifecycle[512];
+    uint32_t size, at, end, i, key_size = 0, lifecycle_size = 0;
+    uint32_t epoch = 0, publications = 0, used = 0;
+    int fd, written, important;
+    /* Only the existing one-second UI watch advances this cooldown. No new
+     * timer, draw/display I/O, GPU work, or clock reads are involved. */
+    if (blur_log_needs_repair && blur_log_repair_cooldown)
+        blur_log_repair_cooldown--;
+    size = rh_platform_p67_blur_diagnostics(blur_log,sizeof(blur_log));
+    /* Never persist an incomplete/truncated observation. All parsing/copying
+     * stays inside the snapshot's byte count; no unbounded string operations. */
+    if (size < 9u || size >= sizeof(blur_log) ||
+        !blur_bytes_equal(blur_log,"P67BLUR1\n",9u) || blur_log[size-1u] != '\n') return;
+    /* The core cannot see module-private reload gates. Append them to the same
+     * bounded snapshot after the accepted control transaction, never RHST/RHRS.
+     * Stage transitions bypass the error budget so a delayed ACK's blocker and
+     * eventual progress remain visible even after recurring capture failures. */
+    if (!blur_append_module_field(&size,"refresh_pending",(int32_t)refresh_pending) ||
+        !blur_append_module_field(&size,"cache_dropped",(int32_t)cache_dropped) ||
+        !blur_append_module_field(&size,"fonts_done",(int32_t)fonts_done) ||
+        !blur_append_module_field(&size,"calendar_done",(int32_t)calendar_done) ||
+        !blur_append_module_field(&size,"images_done",(int32_t)images_done) ||
+        !blur_append_module_field(&size,"font_result",font_result) ||
+        !blur_append_module_field(&size,"calendar_error",calendar_error) ||
+        !blur_append_module_field(&size,"config_error",config_error)) return;
+#if RH_BACKGROUND_ADAPTER
+    /* Mapping config_error does not describe backgrounds.cfg parse/stage or
+     * commit failures. Keep that coordinator's own state alongside the gates. */
+    if (!blur_append_module_field(&size,"background_error",background_error) ||
+        !blur_append_module_field(&size,"background_initialized",(int32_t)background_initialized)) return;
+#else
+    /* Native-only host/build selections have no compiled background adapter. */
+    if (!blur_append_module_field(&size,"background_error",0) ||
+        !blur_append_module_field(&size,"background_initialized",0)) return;
+#endif
+    /* A truncated log cannot be mistaken for a complete diagnostic snapshot. */
+    if (!blur_append_module_field(&size,"snapshot_complete",1)) return;
+    for (at = 9u; at < size; at = end + 1u) {
+        for (end = at; end < size && blur_log[end] != '\n'; end++) {}
+        if (blur_field_is(blur_log+at,end-at,"config_epoch"))
+            epoch = blur_field_number(blur_log+at,end-at);
+        if (blur_field_is(blur_log+at,end-at,"publishes"))
+            publications = blur_field_number(blur_log+at,end-at);
+        if (!blur_counter(blur_log+at,end-at)) {
+            for (i = at; i <= end; i++) key[key_size++] = blur_log[i];
+        }
+        if (blur_lifecycle(blur_log+at,end-at)) {
+            if (end-at+1u > sizeof(lifecycle)-lifecycle_size) return;
+            for (i = at; i <= end; i++) lifecycle[lifecycle_size++] = blur_log[i];
+        }
+    }
+    if (!blur_log_observed || epoch != blur_log_epoch) {
+        blur_log_epoch = epoch;
+        blur_log_attempts = 0;
+    }
+    if (key_size == blur_logged_size &&
+        blur_bytes_equal(key,blur_logged_key,key_size)) return;
+    important = !blur_log_observed || lifecycle_size != blur_lifecycle_size ||
+        !blur_bytes_equal(lifecycle,blur_attempted_lifecycle,lifecycle_size) ||
+        publications != blur_log_publications;
+    if (!important && blur_log_attempts >= RH_P67_BLUR_LOG_LIMIT &&
+        !(blur_log_needs_repair && !blur_log_repair_cooldown)) return;
+    /* Limit attempts too: an unavailable log path cannot turn alternating
+     * capture errors into endless writes. New publications/root/config/lifecycle
+     * transitions bypass the budget, but counters alone never invalidate key. */
+    for (i = 0; i < lifecycle_size; i++) blur_attempted_lifecycle[i] = lifecycle[i];
+    blur_lifecycle_size = lifecycle_size;
+    blur_log_publications = publications;
+    blur_log_observed = 1;
+    if (blur_log_attempts < RH_P67_BLUR_LOG_LIMIT) blur_log_attempts++;
+    /* A post-budget repair attempt, including an open failure, consumes its
+     * cooldown. Permanent failures get at most one repair per 32 watch polls. */
+    if (blur_log_needs_repair) blur_log_repair_cooldown = RH_P67_BLUR_REPAIR_POLLS;
+    fd = rh_platform_open(RH_P67_BLUR_LOG_PATH, RH_STARTUP_LOG_FLAGS);
+    if (fd < 0) return;
+    /* Best-effort, NOT atomic: O_TRUNC discards the last complete snapshot.
+     * A failed replacement may temporarily leave a partial file. Invalidate
+     * dedup and retain bounded repair eligibility even after attempt eight, so
+     * recovered I/O can restore a complete current snapshot without a reload. */
+    blur_logged_size = 0;
+    blur_log_needs_repair = 1;
+    blur_log_repair_cooldown = RH_P67_BLUR_REPAIR_POLLS;
+    while (used < size) {
+        written = rh_platform_write(fd,blur_log+used,size-used);
+        if (written <= 0 || (uint32_t)written > size-used) break;
+        used += (uint32_t)written;
+    }
+    rh_platform_close(fd);
+    /* Commit dedup only after a complete write. Short writes are completed in
+     * this transaction; failures can retry on a later watch, never change reload. */
+    if (used != size) return;
+    blur_log_needs_repair = 0;
+    blur_log_repair_cooldown = 0;
+    for (i = 0; i < key_size; i++) blur_logged_key[i] = key[i];
+    blur_logged_size = key_size;
+}
+#endif
+
 /* One request, coalesced across activations. The temporary UI timer retries only
  * until the selected target's verified retirement/owner stages and dirty-area
  * request complete; a failed adapter never counts as a completed retirement. */
@@ -790,6 +967,12 @@ static void watch_step(void *timer) {
         refreshing = 0;
     }
     rh_platform_unlock(irq);
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    /* Observe accepted control-file commits/config epochs, not the state from
+     * before reload. Keep the reservation through best-effort diagnostic I/O. */
+    poll_blur_diagnostics();
+#endif
     irq = rh_platform_lock();
     control_busy = 0;
     rh_platform_unlock(irq);

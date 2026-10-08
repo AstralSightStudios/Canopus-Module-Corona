@@ -98,11 +98,12 @@ static void p67_surface_scroll_for(struct p67_surface *s,void *event) {
         /* Notification SCROLL (12) only updates the native direction icon;
          * it needs no snapshot visibility restoration or listener refresh. */
         if((code!=9 && code!=11 && code!=12) ||
-           (code==12 && s==&p67_surfaces[1])) {
+           (code==12 && (s==&p67_surfaces[1] || rh_background_is_blur(p67_surface_path(s))))) {
             ((void (*)(void *))(uintptr_t)P67_NATIVE(s->callback))(event);
             return;
         }
         uint32_t generation=s->generation;
+        if(code==9 && rh_background_is_blur(p67_surface_path(s))) p67_blur_request();
         s->busy=1;
         p67_surface_native(s);
         if(generation!=s->generation) { s->busy=0; return; }
@@ -115,7 +116,7 @@ static void p67_surface_scroll_for(struct p67_surface *s,void *event) {
         p67_surface_refresh_list(s);
         if(code==9) s->moving=1;
         if(code==11 && p67_terminal(s,page)) s->moving=0;
-        if(s->moving && p67_surface_pair(s)) {
+        if(s->moving && p67_source(p67_surface_path(s)) && p67_surface_pair(s)) {
             int hidden=((int (*)(uint32_t,uint32_t))(uintptr_t)
                 P67_NATIVE(0x0c5881c1u))(s->root,1);
             if(hidden) {
@@ -165,7 +166,9 @@ static void p67_surface_event(void *event) {
         }
         if(clip[0]>clip[2] || clip[1]>clip[3]) return;
         ((void (*)(void *))(uintptr_t)P67_NATIVE(0x0c588269u))(descriptor);
-        ((unsigned char *)descriptor)[32]=0; descriptor[30]=(uint32_t)(uintptr_t)p67_surface_path(s);
+        ((unsigned char *)descriptor)[32]=0; descriptor[30]=(uint32_t)p67_source(p67_surface_path(s));
+        if(!descriptor[30]) return;
+        if(rh_background_is_blur(p67_surface_path(s))) p67_blur_draw_seen();
         for(j=0;j<4;++j) P67_U32(layer+24+4*j)=(uint32_t)clip[j];
         ((void (*)(uint32_t,const void *,const int32_t *))(uintptr_t)
             P67_NATIVE(0x0c588351u))(layer,descriptor,area);
@@ -247,7 +250,9 @@ static void p67_surface_poll(struct p67_surface *s) {
     d[0]=p67_scroll_fn(s);
 }
 void rh_platform_backgrounds_poll(void) {
-    unsigned i; p67_launcher_poll();
+    unsigned i; int demand=rh_background_is_blur(p67_path[p67_path_index]);
+    for(i=0;i<3;++i) demand |= rh_background_is_blur(p67_surface_path(&p67_surfaces[i]));
+    p67_blur_watch(demand); p67_launcher_poll();
     for(i=0;i<3;++i) p67_surface_poll(&p67_surfaces[i]);
 }
 int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
@@ -264,7 +269,6 @@ int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
 int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     struct rh_backgrounds one; const char *paths[3]; unsigned i,j; int rc;
     if(!bg) return -2142;
-    if(rh_background_is_blur(bg->control_center) || rh_background_is_blur(bg->notifications) || rh_background_is_blur(bg->widgets)) return -2144;
     for(i=0;i<3;++i) if(!p67_surface_idle(&p67_surfaces[i])) return -2145;
     one.control_center[0]=one.notifications[0]=one.widgets[0]=0;
     for(j=0;j<RH_PATH;++j) { one.launcher[j]=bg->launcher[j]; if(!bg->launcher[j]) break; }

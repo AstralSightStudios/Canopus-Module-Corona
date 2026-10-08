@@ -32,6 +32,7 @@ done
 CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
 CC="$CC" python3 "$ROOT/tests/test_blur_background_native.py"
 python3 "$ROOT/tests/test_p67_launcher_native.py"
+CC="$CC" python3 "$ROOT/tests/test_p67_blur_provider.py"
 # Four-surface opt-in must reach the actual shared transaction, not only native mocks.
 "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
     -DRH_TARGET_1043=1 -DRH_P67_LIVE_BACKGROUNDS=1 -I"$ROOT/include" -I"$SDK/sdk/c" \

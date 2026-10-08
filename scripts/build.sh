@@ -17,7 +17,10 @@ esac
 # Explicit exact-target experiment. Default builds retain p67 background no-op.
 if [ "${RH_P67_LIVE_BACKGROUNDS:-0}" = 1 ]; then
     [ "$TARGET_ID" = xiaomi-band-10-pro-3.101.043 ] || { printf 'Live backgrounds requires exact .043 target.\n' >&2; exit 1; }
-    TARGET_DEFINE="$TARGET_DEFINE -DRH_P67_LIVE_BACKGROUNDS=1"
+    TARGET_DEFINE="$TARGET_DEFINE -DRH_P67_LIVE_BACKGROUNDS=1 -DRH_P67_BLUR_NATIVE=1"
+fi
+if [ "${RH_P67_BLUR_NATIVE:-0}" = 1 ]; then
+    [ "$TARGET_ID" = xiaomi-band-10-pro-3.101.043 ] && [ "${RH_P67_LIVE_BACKGROUNDS:-0}" = 1 ] || { printf 'Native static blur requires exact .043 four-surface opt-in.\n' >&2; exit 1; }
 fi
 if [ "${RH_P67_LIVE_LAUNCHER:-0}" = 1 ]; then
     [ "$TARGET_ID" = xiaomi-band-10-pro-3.101.043 ] || {
@@ -76,7 +79,7 @@ done
 printf 'Built resource-hook.elf for %s. Static/build verification only; this artifact and .177 device behavior: NOT_PROBED.\n' "$TARGET_ID"
 printf 'GPU recovery and framework restart safety remain unsupported.\n'
 if [ "${RH_P67_LIVE_BACKGROUNDS:-0}" = 1 ]; then
-    printf 'EXPERIMENTAL p67 four-surface LIVE foreground; device rendering/frame time NOT_PROBED.\n'
+    printf 'EXPERIMENTAL p67 four-surface LIVE foreground / ACTIVE module-owned snapshot RGB565 static blur; rendering/GPU/cache/frame time NOT_PROBED.\n'
 fi
 if [ "${RH_P67_LIVE_LAUNCHER:-0}" = 1 ] && [ "${RH_P67_LIVE_BACKGROUNDS:-0}" != 1 ]; then
     printf 'EXPERIMENTAL p67 launcher-only LIVE foreground: no alpha snapshots; rendering and frame time NOT_PROBED.\n'

@@ -139,13 +139,15 @@ def main():
     live_experiment = live_launcher or live_backgrounds
     if live_experiment and targets != ['xiaomi-band-10-pro-3.101.043']:
         parser.error('Live background experiment requires only the exact p67 .043 target')
-    module_description = ('experimental four-page live-foreground module' if live_backgrounds
+    module_description = ('experimental four-page live-foreground / ACTIVE module-owned snapshot static-blur module' if live_backgrounds
                           else 'experimental launcher-only live-foreground module' if live_launcher
                           else 'normal module with transactional font reload')
     experiment_note = ('\n\nEXPERIMENTAL: static screen-fixed wallpapers for launcher, '
                        'notifications, Control Center and widgets. Native foreground remains '
                        'live; unused transition snapshots remain firmware-owned. '
-                       'No alpha snapshots or blur. Device rendering and frame time are NOT_PROBED. '
+                       'Blur captures when needed into module-owned BGR888 input and produces owned RGB565 output; '
+                       'no native pool access, alpha snapshots or inline patch. Static blur rendering, '
+                       'GPU/cache behavior and frame time are NOT_PROBED. '
                        'Restore system while idle; do not unload while callbacks are attached.\n'
                        if live_backgrounds else
                        '\n\nEXPERIMENTAL: static launcher wallpaper only; native launcher '
@@ -257,6 +259,8 @@ def main():
                 manifest['launcher_background_device_status'] = 'NOT_PROBED'
             if live_backgrounds:
                 manifest['p67_live_backgrounds'] = True
+                manifest['background_blur_mode'] = 'active_module_owned_snapshot_static_rgb565'
+                manifest['background_blur_device_status'] = 'NOT_PROBED'
                 manifest['background_targets'] = ['launcher', 'control_center', 'notifications', 'widgets']
                 manifest['background_device_status'] = 'NOT_PROBED'
             manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
@@ -334,6 +338,8 @@ def main():
             shutil.copyfile(ROOT / 'docs/P67_BACKGROUNDS.md', package / 'docs/P67_BACKGROUNDS.md')
         if live_backgrounds:
             build_meta['p67_live_backgrounds'] = True
+            build_meta['background_blur_mode'] = 'active_module_owned_snapshot_static_rgb565'
+            build_meta['background_blur_device_status'] = 'NOT_PROBED'
             build_meta['background_targets'] = ['launcher', 'control_center', 'notifications', 'widgets']
             build_meta['background_device_status'] = 'NOT_PROBED'
         if len(targets) == 1:

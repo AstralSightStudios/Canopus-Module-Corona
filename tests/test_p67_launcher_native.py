@@ -20,6 +20,16 @@ class P67LiveLauncher(unittest.TestCase):
                             str(ROOT / 'tests/p67_launcher_harness.c'),
                             '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
+    def test_blur_cpu_and_injected_lifecycle(self):
+        with tempfile.TemporaryDirectory(prefix="rh-p67-blur-") as directory:
+            binary = Path(directory) / "test"
+            subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-Wall",
+                            "-Wextra", "-Werror", "-fsanitize=address,undefined",
+                            "-I" + str(ROOT / "include"),
+                            str(ROOT / "tests/p67_blur_harness.c"),
+                            "-o", str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_four_surface_native_lifecycle(self):
         with tempfile.TemporaryDirectory(prefix='rh-p67-four-') as directory:
             binary = Path(directory) / 'test'

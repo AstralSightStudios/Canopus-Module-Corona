@@ -29,6 +29,15 @@ static int fail_result_write, fail_result_open, fail_result_after;
 static char startup_record[2049];
 static unsigned startup_position, startup_writes, startup_opens;
 static int fail_startup_open, fail_startup_write, clobber_startup_errno;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+static char blur_record[1024];
+static unsigned blur_position, blur_opens, blur_writes, blur_gets;
+static int blur_write_fault, blur_open_fault, blur_bad_snapshot;
+static uint32_t blur_epoch, blur_root = 42u, blur_counters, blur_publications;
+static uint32_t blur_core_gate = 1u, blur_pending, blur_armed = 1u, blur_cleanup_armed;
+static int blur_capture_result = -7;
+#endif
 static int registration_fd = 10;
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
@@ -42,6 +51,30 @@ static const char *backend_expected = (RH_THEME_ROOT "current/icon.bin") + 1;
 struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+uint32_t rh_platform_p67_blur_diagnostics(char *out, uint32_t capacity) {
+    int size;
+    assert(in_ui_timer && !locked);
+    blur_gets++;
+    if (blur_bad_snapshot) return capacity;
+    size = snprintf(out, capacity,
+        "P67BLUR1\ncore_gate=%u\ndemand=1\npending=%u\narmed=%u\ncleanup_armed=%u\nsource=123\n"
+        "root=%u\nroot_generation=1\ndisplay=456\nconfig_epoch=%u\n"
+        "native_error=0\nidle_error=0\nlast_gpu=0\ncapture_result=%d\n"
+        "input=789\nwidth=100\nheight=100\nstride=400\nnonzero=1\n"
+        "frame52=%u\nattempts=%u\ncopies=%u\npublishes=%u\nwakes=%u\ndraws=%u\n"
+        "fences=%u\ninput_allocs=%u\noutput_allocs=%u\ndestroys=%u\ncapture_calls=%u\nwake_calls=%u\n"
+        "pm_stays=%u\npm_relaxes=%u\n",
+        blur_core_gate, blur_pending, blur_armed, blur_cleanup_armed,
+        blur_root, blur_epoch, blur_capture_result,
+        blur_counters, blur_counters, blur_counters, blur_publications,
+        blur_counters, blur_counters, blur_counters, blur_counters, blur_counters, blur_counters,
+        blur_counters, blur_counters, blur_counters, blur_counters);
+    assert(size > 0 && (uint32_t)size < capacity);
+    return (uint32_t)size;
+}
+#endif
 static int calendar_mode, calendar_rc;
 static unsigned calendar_hook_mode, calendar_hook_fail, calendar_hook_calls;
 static unsigned calendar_poll_calls, calendar_reenter_poll;
@@ -91,6 +124,10 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     background_commits++;
     if (background_commit_rc) return background_commit_rc;
     committed_backgrounds = *bg;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    blur_epoch++;
+#endif
     strcpy(committed_background, bg->launcher);
     return 0;
 }
@@ -207,6 +244,17 @@ static int other(void *d, const char *p, int mode) { (void)d; (void)p; (void)mod
 static rh_open_fn slot = backend;
 int rh_platform_open(const char *path, int mode) {
     assert(!locked);
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    if (!strcmp(path, "/data/offlinelog/resource-hook-p67-blur.log")) {
+        assert(in_ui_timer && mode == 0x26 && mode == RH_STARTUP_LOG_FLAGS);
+        blur_opens++;
+        if (blur_open_fault) return -1;
+        blur_position = 0;
+        memset(blur_record, 0, sizeof(blur_record));
+        return 17;
+    }
+#endif
     if (!strcmp(path, RH_STARTUP_LOG_PATH)) {
         assert(mode == RH_STARTUP_LOG_FLAGS);
         startup_opens++;
@@ -306,6 +354,21 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
 }
 int rh_platform_write(int fd, const void *data, uint32_t size) {
     const struct canopus_module_registration_v1 *r = data;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    if (fd == 17) {
+        assert(in_ui_timer && !locked);
+        blur_writes++;
+        if (blur_write_fault == 1 && blur_position >= 13u) return -1;
+        if (blur_write_fault == 2) return 0;
+        if (blur_write_fault == 3) return (int)size + 1;
+        if (size > 13u) size = 13u;
+        assert(blur_position + size < sizeof(blur_record));
+        memcpy(blur_record + blur_position, data, size);
+        blur_position += size;
+        return (int)size;
+    }
+#endif
     if (fd == 15) {
         assert(!locked);
         startup_writes++;
@@ -347,6 +410,10 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
 void rh_platform_close(int fd) {
     assert(!locked);
     if(fd==14 || fd==15) return;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    if (fd == 17) { assert(in_ui_timer); return; }
+#endif
 #if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     if (fd == 16) { background_closes++; return; }
 #endif
@@ -1770,7 +1837,239 @@ static int test_quickapp_integration(void) {
     puts("QuickApp UI polling, install/reinstall/uninstall, @system restore, revisions, LKG, OOM and pins passed");
     return 0;
 }
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE && \
+    defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS
+static int test_blur_diagnostic_writer(void) {
+    unsigned opens, gets, i;
+    char saved_startup[sizeof(startup_record)];
+    background_config = "version=1\nmode=image\nimage=themes/current/start.bin\n";
+    control_config = config;
+    assert(canopus_module_descriptor.activate(NULL) == 0);
+    memcpy(saved_startup, startup_record, sizeof(saved_startup));
+    assert(!blur_opens && !blur_gets);
+    fire_timers(50u);
+    assert(!blur_opens && !blur_gets);
+    fire_timers(1000u);
+    assert(blur_opens == 1u && blur_gets == 1u && blur_epoch == 1u);
+    assert(strstr(blur_record,"P67BLUR1\n") == blur_record);
+    assert(strstr(blur_record,"config_epoch=1\n")); /* After accepted commit. */
+    assert(strstr(blur_record,"refresh_pending=0\ncache_dropped=1\nfonts_done=1\n"));
+    assert(strstr(blur_record,"calendar_done=1\nimages_done=1\nfont_result=0\n"));
+    assert(strstr(blur_record,"calendar_error=0\nconfig_error=0\n"));
+    assert(strstr(blur_record,"background_error=0\nbackground_initialized=1\n"));
+    assert(blur_writes > blur_opens); /* Completes partial writes. */
+    assert(!memcmp(saved_startup,startup_record,sizeof(saved_startup)));
+    opens = blur_opens;
+    for (i = 1; i <= 12u; i++) {
+        blur_counters = i;
+        blur_publications = i;
+        fire_timers(1000u);
+    }
+    assert(blur_opens == opens); /* Every monotonic counter excluded from key. */
+    assert(strstr(blur_record,"frame52=0\n"));
+    blur_capture_result = -8;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u && strstr(blur_record,"frame52=12\n"));
+    opens = blur_opens;
+    for (i = 0; i < 20u; i++) fire_timers(1000u);
+    assert(blur_opens == opens); /* Persistent failure written once. */
+    for (i = 0; i < 20u; i++) {
+        blur_capture_result = -20 - (int)i;
+        fire_timers(1000u);
+    }
+    assert(blur_opens == 8u); /* Alternating errors bounded per config epoch. */
+    opens = blur_opens;
+    blur_root++;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u && strstr(blur_record,"root=43\n"));
+    blur_capture_result = 0;
+    blur_publications++;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 2u && strstr(blur_record,"capture_result=0\n"));
+    /* A real accepted same-map reload resets the budget and observes new epoch.
+     * Diagnostic failure does not contaminate its RHRS2 result. */
+    blur_write_fault = 1;
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tblur-log-fault\n";
+    fire_timers(1000u);
+    assert(blur_epoch == 2u);
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(blur_position == 13u);
+    opens = blur_opens;
+    gets = blur_gets;
+    fire_timers(50u);
+    assert(blur_opens == opens && blur_gets == gets);
+    blur_write_fault = 0;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u && strstr(blur_record,"config_epoch=2\n"));
+    for (i = 2; i <= 3u; i++) {
+        blur_epoch++;
+        blur_write_fault = (int)i;
+        fire_timers(1000u);
+        opens = blur_opens;
+        blur_write_fault = 0;
+        fire_timers(1000u);
+        assert(blur_opens == opens + 1u && blur_position > 13u);
+    }
+    blur_epoch++;
+    blur_open_fault = 1;
+    fire_timers(1000u);
+    opens = blur_opens;
+    blur_open_fault = 0;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u);
+    /* O_TRUNC failure must invalidate the old dedup key, even if the next
+     * observation returns to the formerly logged state. */
+    blur_capture_result = -99;
+    blur_write_fault = 1;
+    fire_timers(1000u);
+    assert(blur_position == 13u);
+    opens = blur_opens;
+    blur_write_fault = 0;
+    blur_capture_result = 0;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u && strstr(blur_record,"capture_result=0\n"));
+    blur_bad_snapshot = 1;
+    blur_root++;
+    opens = blur_opens;
+    fire_timers(1000u);
+    assert(blur_opens == opens);
+    blur_bad_snapshot = 0;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u && strstr(blur_record,"root=44\n"));
+    assert(active_timers(1000u) == 1u && !active_timers(50u));
+    assert_reload_status(0, 0, 0, 0, 1);
+    assert(!memcmp(saved_startup,startup_record,sizeof(saved_startup)));
+    /* Model a slow ACK one retirement stage at a time. The same P67 snapshot
+     * names the blocker; no diagnostic writes run in the fast refresh timer. */
+    control_config = "/resource/\tthemes/next/\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tblur-slow-ack\n";
+    calendar_mode = 1;
+    calendar_rc = -1;
+    font_rc = 1;
+    reject_metadata = 1;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"refresh_pending=1\ncache_dropped=1\nfonts_done=0\n"));
+    assert(strstr(blur_record,"calendar_done=0\nimages_done=0\nfont_result=1\n"));
+    opens = blur_opens;
+    gets = blur_gets;
+    for (i = 0; i < 20u; i++) fire_timers(50u);
+    assert(blur_opens == opens && blur_gets == gets);
+    font_rc = -1;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"fonts_done=1\ncalendar_done=0\nimages_done=0\nfont_result=-1\n"));
+    assert(strstr(blur_record,"calendar_error=-1\n"));
+    calendar_rc = 0;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"calendar_done=1\nimages_done=0\n"));
+    reject_metadata = 0;
+    reject_redraw = 1;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"refresh_pending=1\n"));
+    assert(strstr(blur_record,"images_done=1\n"));
+    reject_redraw = 0;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"refresh_pending=0\n"));
+    opens = blur_opens;
+    fire_timers(50u); /* The completed watch's stale refresh handle self-deletes. */
+    assert(blur_opens == opens);
+    assert(active_timers(1000u) == 1u && !active_timers(50u));
+    control_config = "invalid mapping\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tblur-invalid-config\n";
+    fire_timers(1000u);
+    assert(strstr(blur_record,"config_error=-2103\n"));
+    control_config = "/resource/\tthemes/next/\n";
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tblur-background-stage\n";
+    background_stage_rc = -88;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"background_error=-88\nbackground_initialized=1\n"));
+    background_stage_rc = 0;
+    background_commit_rc = -89;
+    control_signal = "resource-hook-reload-v2\tng.lst.corona\tblur-background-commit\n";
+    fire_timers(1000u);
+    assert(strstr(blur_record,"background_error=-89\nbackground_initialized=1\n"));
+    background_commit_rc = 0;
+    font_rc = 0;
+    fire_timers(1000u);
+    assert(strstr(blur_record,"background_error=0\nbackground_initialized=1\n"));
+    assert(strstr(blur_record,"config_error=0\n"));
+    /* Error-gate/wake-budget oscillation is not an important lifecycle event.
+     * No publication, root/source/display or module stage changes in 1000 polls. */
+    control_signal = NULL;
+    blur_epoch++;
+    opens = blur_opens;
+    for (i = 0; i < 1000u; i++) {
+        blur_core_gate = i % 2u ? 7u : 3u;
+        blur_pending = i % 2u;
+        blur_armed = 1u - blur_pending;
+        blur_cleanup_armed = blur_pending;
+        fire_timers(1000u);
+    }
+    assert(blur_opens == opens + 8u);
+    /* The eighth attempt truncates a previously complete file and fails. Once
+     * I/O recovers, exactly one cooldown-delayed repair restores CURRENT state,
+     * with no new epoch/reload and no immediate retry burst. */
+    blur_epoch++;
+    opens = blur_opens;
+    for (i = 0; i < 7u; i++) {
+        blur_capture_result = -1000 - (int)i;
+        fire_timers(1000u);
+    }
+    assert(blur_opens == opens + 7u && blur_position > 13u);
+    blur_capture_result = -2000;
+    blur_write_fault = 1;
+    fire_timers(1000u);
+    assert(blur_opens == opens + 8u && blur_position == 13u);
+    opens = blur_opens;
+    blur_write_fault = 0;
+    blur_capture_result = -2001;
+    blur_counters++;
+    for (i = 0; i < 31u; i++) fire_timers(1000u);
+    assert(blur_opens == opens && blur_position == 13u);
+    fire_timers(1000u);
+    assert(blur_opens == opens + 1u && blur_position > 13u);
+    assert(strstr(blur_record,"capture_result=-2001\n"));
+    assert(strstr(blur_record,"frame52=13\n"));
+    opens = blur_opens;
+    for (i = 0; i < 100u; i++) fire_timers(1000u);
+    assert(blur_opens == opens); /* Successful repair restores stable dedup. */
+    /* Permanently failing writes remain bounded to one repair per 32 polls. */
+    blur_epoch++;
+    for (i = 0; i < 7u; i++) {
+        blur_capture_result = -3000 - (int)i;
+        fire_timers(1000u);
+    }
+    blur_write_fault = 1;
+    blur_capture_result = -4000;
+    fire_timers(1000u);
+    assert(blur_position == 13u);
+    opens = blur_opens;
+    for (i = 0; i < 1000u; i++) {
+        fire_timers(1000u);
+        assert(blur_opens == opens + (i+1u)/32u);
+        assert(blur_position == 13u);
+    }
+    /* A repair open failure also consumes the cooldown rather than spinning. */
+    blur_write_fault = 0;
+    blur_open_fault = 1;
+    opens = blur_opens;
+    for (i = 0; i < 32u; i++) fire_timers(1000u);
+    assert(blur_opens == opens + 1u);
+    blur_open_fault = 0;
+    opens = blur_opens;
+    for (i = 0; i < 24u; i++) fire_timers(1000u);
+    assert(blur_opens == opens + 1u && blur_position > 13u);
+    puts(".043 blur log: bounded gate oscillation, truncation repair and reload/background gates passed");
+    return 0;
+}
+#endif
 int main(int argc, char **argv) {
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
+    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE && \
+    defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS
+    if (argc == 2 && !strcmp(argv[1], "--blur-diagnostics"))
+        return test_blur_diagnostic_writer();
+#endif
     test_relative_config();
 #if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     if (argc == 2 && !strcmp(argv[1], "--launcher-background"))

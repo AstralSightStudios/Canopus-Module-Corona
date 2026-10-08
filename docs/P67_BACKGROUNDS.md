@@ -1,22 +1,130 @@
 # p67 3.101.043 background adapter feasibility audit
 
-## Status
+## Status: ACTIVE module-owned static snapshot
 
-The four-way configuration transport is implemented. Default builds keep native
-p67 backgrounds disabled. An explicit `RH_P67_LIVE_LAUNCHER=1` build now includes
-an experimental **launcher-only live-foreground** static wallpaper adapter. This
-is not the alpha-snapshot prototype or full four-page support. It suppresses the
-launcher's native opaque snapshot on scroll begin, preserving the live moving
-foreground, while painting the wallpaper at screen coordinates. Native scroll
-end/scroll bookkeeping is forwarded unchanged. Device rendering, scroll frame
-time, reversal/cancellation and restoration acceptance are **NOT_PROBED**.
-Existing resource mapping and fonts are unchanged; widgets remain a no-op.
+Default builds retain disabled p67 backgrounds. Exact .043
+`RH_P67_LIVE_BACKGROUNDS=1` automatically defines `RH_P67_BLUR_NATIVE=1`
+for all four pages; launcher-only opt-in remains image-only. Resource mapping,
+fonts and calendar are unchanged. The borrowed-pool design is superseded;
+its restricted symbol/evidence records remain for existing dependencies, not
+as permission to access source-pool userdata, cached flags or cross-view observers.
 
-Tasks completed: four-key parser, bounded configuration staging, Manager
-serialization/resolution/file checks, unsupported Band11 widgets no-op tests,
-maximum-length and widget-only transaction tests, host and exact-target builds.
-Tasks blocked: target-scoped foreground snapshot replacement, lifecycle integration
-for all four pages, device transition acceptance. Blur is intentionally not ported.
+```sh
+RH_P67_LIVE_BACKGROUNDS=1 sh scripts/build.sh xiaomi-band-10-pro-3.101.043
+```
+
+Existing version=1 configuration accepts `blur` for launcher, control_center,
+notifications and widgets. No parser change or extra opt-in is required.
+Capture is static and demand-driven at REFR_START (52): one prewarm after
+activation and a fresh request on page gesture begin. Each request/UI-owner
+poll grants one consumable attempt. A failed attempt keeps pending work but
+cannot request another whole-screen repaint every READY (53). The one-second
+watcher rearms and schedules the next attempt; it performs no capture or GPU
+fence before control-file processing. Successful output is not recaptured on
+ordinary frames. Same-root reload preserves the previous immutable result. Restore system
+while idle; finish gestures before reload; do not unload attached callbacks.
+
+Input is a default drawbuf-create format15 BGR888 module-owned 336x480 buffer.
+Output is format18 RGB565, at most two owned output buffers. All four pages
+share the processed result: 4x downsampling to 84x120, two radius-2 separable
+box passes, 30% darkening, bilinear 336x480 output. No native source-pool lease,
+alpha capture or inline patch is introduced. Output retirement requires explicit
+raw GPU completion and a task-free native layer chain; snapshot return status
+alone is insufficient. Input allocation is bounded to one descriptor, even after
+fence failure; normal capture frees it after copying. The filter scratch is
+40,320 bytes, input pixels 483,840 bytes, and two output pixel buffers 645,120
+bytes, plus native descriptor/alignment overhead. Cache clean precedes the
+large-range invalidator, like Band 11, to preserve unrelated dirty CPU writes.
+
+### Exact-target static evidence gates
+
+`EVID-P67-ACTIVE-STATIC-BLUR-001` records the narrow callable
+`P67_BLUR_SNAPSHOT_TO_BUFFER` at `0x0CAC0879`, prototype
+`int snapshot_to_buffer(uint32_t root, uint32_t format, uint32_t owned_drawbuf)`.
+The thunk reaches native `lv_snapshot_take_to_draw_buf` at `0x1C06030C`.
+Cover search `0x002BB46C` returns 0 for a HIDDEN root; fallback direct rendering
+`0x002BA788` ignores root HIDDEN while children respect visibility.
+Success is 1. Firmware task-driver/GPU errors are not propagated by the integer
+return: an explicit raw GPU fence is required before CPU reads/retirement.
+
+REFR_START52 emits at `0x002BB8A2` before the display+58 decimal (`+0x3A`) rendering mask `0x02`
+is set at `0x002BBA20`. REFR_READY53 emits at `0x002BBC98` after that mask
+is cleared at `0x002BBC3E`. Prior raw GPU/cache/create/destroy records remain
+restricted; cache ABI is `(id,address,length)`, id1 Dcache, with module barriers.
+These static findings do not prove hardware coherency.
+
+The stock `miwear_snapshot` wrapper at `0x0CA5FB40` also calls PM stay
+`0x0C1A78F1` before snapshot and relax `0x0C1A79B5` afterward, with the native
+116-byte `miwear-snapshot` lock at `0x200EB538` (domain0/state0). Active COPY
+now keeps that balanced power contract through capture/fencing; every raw GPU
+fence also uses a balanced bracket. Lock fields are never modified directly.
+Both PM APIs may invoke governor/driver callbacks and are treated as blocking.
+The missing guard was statically confirmed, but its role in device symptoms is
+not established.
+
+Snapshot, generic event-list, and PM stay/relax/lock records are
+restricted `STATIC_RECOVERED`, approval `PENDING`, device `not_probed`.
+Static audit: `/Users/lesetong/develop/mifw/analysis-p67-043/ACTIVE_BLUR_AUDIT.md`.
+Official generators produce C/Rust bindings; no firmware ranges are broadened
+and no public approval is implied. The full frozen host suite and exact .043
+ELF verifier passed. ASan/UBSan covers the actual provider plus core together:
+owned input, static reuse, failed-fence bounds, old-result preservation,
+next-frame recovery and disabling with pinned storage. Separate core tests cover
+wake return convention, reentry, root/display generations and stale publication.
+Device rendering, GPU/cache recovery, retirement, latency and frame time remain
+**NOT_PROBED**. Earlier image-background feedback is not blur acceptance.
+Device feedback for the earlier active package: black/system backgrounds and
+approximately25-second reload response. This is a failed device report, not
+functional blur acceptance. The bounded-retry/PM/diagnostic revision still needs
+device verification. Existing older installation outputs are archived under
+`dist/archive/`. Do not hot-unload callbacks; restore system while idle and reboot
+when replacing the module. The verified ELF is `build/resource-hook.elf`.
+
+### Diagnostic build and device probe
+
+The native .043 build records memory-only stage/counter data. Only the one-second
+UI-owner watcher writes `/data/offlinelog/resource-hook-p67-blur.log`, after the
+control transaction. RHST1/RHRS2/Manager receipt fields are unchanged. Logs dedup
+stable state, exclude counters, and limit recurring errors to eight attempts per
+config epoch. Lifecycle/publication progress remains reportable. A failed
+truncating write can temporarily lose a complete snapshot; exhausted-budget
+repair retries occur once per32 watcher polls. Only a file ending with
+`snapshot_complete=1` is a complete observation. No file I/O occurs in DRAW or
+refresh callbacks, and no pixels, filenames or key material are logged.
+
+After installing/rebooting the diagnostic package, enable blur, reload once,
+open a page, then export the AstroBox offline logs. Keep the complete P67 log.
+Compare a system-background reload while idle if possible; do not repeatedly
+press reload against a stalled device.
+
+Key interpretation:
+
+- `core_gate`:0 idle,1 unsupported,2 disabled/cleanup,3 owner unsafe,4 display
+  invalid,5 root unregistered,6 identity mismatch,7 COPY failed,8 publication
+  failed,9 stale lifecycle,10 completed.
+- `idle_error`:1 invalid display range,2 rendering,3 invalid layer,4 queued
+  native tasks,5 unbounded/cyclic layers,6 display/render phase changed.
+- `native_error`:1 no root,2 unsafe phase,3 pinned input,4 pre-fence,
+  5 input allocation,6 input descriptor,7 snapshot return,8 post-fence,
+  9 post-capture phase,10 root changed,11 reshaped descriptor,12 downsample,
+  13 output slots pinned,14 output allocation,15 output descriptor,16 upscale,
+  17 invalid/reentrant arguments;0 means no latched native failure.
+- `nonzero` counts nonblack pixels in the last successfully downsampled input,
+  before blur/darkening; it is not a raster acceptance test.
+- `publishes`/`source` distinguish missing output from a black captured image.
+  `draws` counts submitted module blur-background rectangles, not GPU pixels.
+- `pm_stays`/`pm_relaxes`, `capture_result`, `last_gpu`, PM returns and owned-input
+  state identify native progress/failure. Native integer fields are32-bit words
+  (values>=2147483648 can represent negative returns); module errors are signed.
+- `refresh_pending`, cache/font/calendar/image completion flags, font/calendar
+  errors and `background_error` identify a slow reload's coordinator stage.
+
+A source with nonzero input and zero draws points toward attachment/visibility;
+zero publications points toward preparation/publication; all-black input after
+native success still requires checking custom watchfaces and cache coherence.
+Do not infer the device cause from host fixtures.
+
+## Historical launcher-only experiment
 
 ## Experimental launcher test build and use
 
@@ -173,7 +281,8 @@ restored around audited scroll lifecycle callbacks only. Other ALL-filter events
 are forwarded without adapter visibility or callback-registration changes. No pool
 or buffer is modified. Wallpaper destinations remain screen-fixed with explicit page clips.
 Full-page roots and widget/notification lists receive foreground draw handlers.
-Band11 widget behavior is unchanged. Blur/calendar behavior is unchanged.
+Band11 widget behavior and calendar behavior are unchanged. This historical
+image-only extension predates the static-blur integration described above.
 This retains the cost of opaque native captures, but does not display them.
 Idle system restoration removes callbacks; active transitions reject reload.
 Device rendering and frame-time acceptance for the added surfaces is NOT_PROBED.

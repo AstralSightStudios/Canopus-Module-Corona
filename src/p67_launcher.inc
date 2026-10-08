@@ -52,6 +52,13 @@ static uint32_t *p67_descriptor(uint32_t object, uint32_t callback) {
     }
     return match;
 }
+#if defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+#include "p67_blur_native.inc"
+#ifndef P67_BLUR_OWNER_SAFE
+#define P67_BLUR_OWNER_SAFE() p67_blur_native_idle()
+#endif
+#endif
+#include "p67_blur.inc"
 static void p67_remove_event(uint32_t object) {
     ((int (*)(uint32_t, uint32_t))(uintptr_t)P67_NATIVE(0x002bf811u))
         (object, (uint32_t)(uintptr_t)p67_event);
@@ -113,7 +120,9 @@ static void p67_event(void *event) {
     if (clip[0] > clip[2] || clip[1] > clip[3]) return;
     ((void (*)(void *))(uintptr_t)P67_NATIVE(0x0c588269u))(descriptor);
     ((unsigned char *)descriptor)[32] = 0;
-    descriptor[30] = (uint32_t)(uintptr_t)p67_path[p67_path_index];
+    descriptor[30] = (uint32_t)p67_source(p67_path[p67_path_index]);
+    if (!descriptor[30]) return;
+    if (rh_background_is_blur(p67_path[p67_path_index])) p67_blur_draw_seen();
     for (i = 0; i < 4u; ++i) P67_U32(layer + 24u + 4u * i) = (uint32_t)clip[i];
     ((void (*)(uint32_t, const void *, const int32_t *))
         (uintptr_t)P67_NATIVE(0x0c588351u))(layer, descriptor, area);
@@ -122,10 +131,12 @@ static void p67_event(void *event) {
 static void p67_scroll(void *event) {
     unsigned code = *(uint16_t *)((unsigned char *)event + 8) & 0x7fffu;
     uint32_t page = *(uint32_t *)((unsigned char *)event + 12);
+    if (code == 9u && p67_owner && page == p67_page &&
+        rh_background_is_blur(p67_path[p67_path_index])) p67_blur_request();
     /* The native callback's C588310 getter returns USER DATA, not a target.
      * Bubbled events are intentional. Binding identity scopes this wrapper. */
     if (p67_owner && page == p67_page && code == 9u &&
-        p67_path[p67_path_index][0]) {
+        p67_source(p67_path[p67_path_index])) {
         int32_t y = (int32_t)P67_U32(page + 32u);
         if (y <= 480) {
             P67_U8(0x201102d9u) = 1;
@@ -140,9 +151,8 @@ int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
     uint32_t header[3] = {0, 0, 0}, cache;
     int fd;
     if (!bg) return -2142;
-    if (bg->control_center[0] || bg->notifications[0] ||
-        rh_background_is_blur(bg->launcher)) return -2144;
-    if (!bg->launcher[0]) return 0;
+    if (bg->control_center[0] || bg->notifications[0]) return -2144;
+    if (!bg->launcher[0] || rh_background_is_blur(bg->launcher)) return 0;
     fd = rh_platform_open(bg->launcher, 0);
     if (fd < 0) return -2143;
     rh_platform_close(fd);
@@ -158,6 +168,9 @@ int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
 void rh_platform_backgrounds_poll(void) {
     uint32_t owner, page, foreground, list, generation, *d, *owner_event, *draw_event;
     if (p67_busy) return;
+#ifndef rh_platform_backgrounds_poll
+    p67_blur_watch(rh_background_is_blur(p67_path[p67_path_index]));
+#endif
     if (p67_wake_pending && !rh_platform_request_full_redraw()) p67_wake_pending = 0;
     if (!p67_path[p67_path_index][0]) return;
     /* Never install over an existing native snapshot or during scroll. */
@@ -198,12 +211,12 @@ void rh_platform_backgrounds_poll(void) {
 }
 int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     unsigned i, next = p67_path_index ^ 1u;
-    if (!bg || bg->control_center[0] || bg->notifications[0] ||
-        rh_background_is_blur(bg->launcher)) return -2144;
+    if (!bg || bg->control_center[0] || bg->notifications[0]) return -2144;
     /* Cancellation/reload is deferred to an idle native owner; do not restore
      * snapshot-taking behavior midway through an experimental live swipe. */
     if (p67_busy || load32(P67_IMAGE_SLOT) || P67_U8(0x201102d9u)) return -2145;
     p67_detach();
+    p67_blur_reset();
     for (i = 0; i < RH_PATH; ++i) {
         p67_path[next][i] = bg->launcher[i];
         if (!bg->launcher[i]) break;

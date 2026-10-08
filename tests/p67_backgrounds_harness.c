@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 #include "resource_hook_background.h"
 #define RH_TARGET_1043 1
 #define RH_RELOAD_LIMIT 1024u
@@ -37,7 +38,7 @@ static int forbid_mutation;
 static unsigned tree_calls;
 static uint32_t layer_clip[4];
 static int32_t expected_clip[4];
-static uint32_t last_prepared;
+static uint32_t last_prepared, last_draw_source;
 static struct object *object(uint32_t id) {
     for (unsigned i = 0; i < 5; ++i) if (objects[i].id == id) return &objects[i];
     assert(!"unknown object"); return 0;
@@ -115,9 +116,10 @@ static void rect_draw(uint32_t layer, const void *d, const int32_t *area) {
     assert(layer == 77 && ((const uint32_t *)d)[30]);
     assert(!area[0] && !area[1] && area[2] == 335 && area[3] == 479);
     for (unsigned i = 0; i < 4; ++i) assert((int32_t)layer_clip[i] == expected_clip[i]);
+    last_draw_source=((const uint32_t *)d)[30];
     ++draws;
 }
-static int image_info(const char *p, void *out) { (void)out; assert(p[0]); return 1; }
+static int image_info(const char *p, void *out) { (void)out; assert(p[0] && !rh_background_is_blur(p)); return 1; }
 static void flag_add(uint32_t o,uint32_t f) { assert(f==1 && !forbid_mutation);
  if(delete_on_flag && o==NEW_LIST) {
   delete_on_flag=0;
@@ -218,7 +220,7 @@ static void check_notification_scroll(struct p67_surface *s) {
     memcpy(saved_objects,objects,sizeof(objects));
     unsigned walks=tree_calls, calls=forwards[12], adds=add_calls;
     unsigned snapshots=captures, released=cleanup;
-    assert(selected==1 && s->moving && s->swapped);
+    assert((selected==1 || rh_background_is_blur(p67_surface_path(s))) && s->moving);
     forbid_mutation=1;
     for(unsigned n=0;n<128;++n) {
         dispatch(s,OWNER,12);
@@ -350,5 +352,45 @@ int main(void) {
  assert(native_widget_calls==1 && !native_cc_calls && !native_notify_calls);
  p67_scroll_cc(e);assert(native_cc_calls==1 && native_widget_calls==1);
  event(e,LIST,LIST,20,PAGE);p67_scroll_widget(e);assert(native_widget_calls==1);
- puts("p67 three native-owned live surfaces passed");return 0;
+ /* Deferred blur configuration accepts mixed/static/system and all blur.
+  * No literal token reaches image-info/draw; missing generation stays native. */
+ reset();shared_mode=0;surface_root=surface_image=populated=0;
+ for(unsigned i=0;i<3;++i) memset(&p67_surfaces[i].owner,0,
+     sizeof(p67_surfaces[i])-offsetof(struct p67_surface,owner));
+ struct rh_backgrounds blur_bg;memset(&blur_bg,0,sizeof(blur_bg));
+ strcpy(blur_bg.launcher,":blur");strcpy(blur_bg.control_center,"/data/static.bin");
+ strcpy(blur_bg.widgets,":blur");
+ assert(!rh_platform_backgrounds_stage(&blur_bg));
+ assert(!rh_platform_backgrounds_commit(&blur_bg));
+ assert(!p67_source(p67_path[p67_path_index]));
+ assert(!p67_source(p67_surface_path(&p67_surfaces[2])));
+ strcpy(blur_bg.control_center,":blur");strcpy(blur_bg.notifications,":blur");
+ assert(!rh_platform_backgrounds_stage(&blur_bg));
+ assert(!rh_platform_backgrounds_commit(&blur_bg));
+ assert(rh_background_is_blur(p67_surface_path(&p67_surfaces[1])));
+ /* Launcher consumes exactly the same immutable source as all three pages. */
+ draws=0;p67_blur_source=0;
+ event(e,LIST,LIST,25,p67_generation);p67_event(e);assert(!draws);
+ p67_blur_source=0x20001000u;
+ event(e,LIST,LIST,25,p67_generation);p67_event(e);
+ assert(draws==1 && last_draw_source==p67_blur_source);
+ for(unsigned i=0;i<3;++i) {
+  reset();selected=i;p67_path[0][0]=0;populated=0;
+  struct p67_surface *s=&p67_surfaces[i];
+  s->owner=OWNER;s->page=PAGE;s->root=LIST;s->list=0;s->busy=s->moving=s->swapped=0;
+  s->generation=900+i;s->path_index=0;strcpy(s->path,":blur");
+  surface_root=LIST;surface_image=NEW_LIST;hidden_root=0;hidden_image=1;
+  object(LIST)->parent=object(NEW_LIST)->parent=PAGE;
+  object(LIST)->clz=0x2cdba8b4u;object(NEW_LIST)->clz=RH_FW_IMAGE_CLASS;
+  p67_blur_source=0;
+  event(e,LIST,LIST,25,s->generation);p67_surface_event(e);assert(!draws);
+  p67_blur_source=0x20001000u;
+  event(e,LIST,LIST,25,s->generation);p67_surface_event(e);
+  assert(draws==1 && last_draw_source==p67_blur_source);
+  /* Blur steady scroll must not mutate listeners, capture or visibility. */
+  object(OWNER)->d[0][0]=p67_scroll_fn(s);
+  s->moving=1;check_notification_scroll(s);s->moving=0;
+  p67_blur_source=0;s->owner=s->page=s->root=0;s->path[0]=0;
+ }
+ puts("p67 three native-owned live surfaces and deferred blur modes passed");return 0;
 }
