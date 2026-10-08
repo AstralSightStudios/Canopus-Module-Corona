@@ -68,30 +68,24 @@ static inline int p67_blur_filter_rgb565(uint16_t *src, uint16_t *tmp,
     }
     return 1;
 }
-/* Inherited 4x bilinear arithmetic on individual RGB565 channels, vertical
- * then horizontal truncation. Output is little-endian native format18;
- * unaligned padded strides are supported, and padding is untouched. */
-static inline int p67_blur_upscale_rgb565(const uint16_t *in, void *pixels,
-                                         size_t stride, size_t size) {
+/* Publish a separate immutable 84x120 format18 image. Native image drawing
+ * performs the 4x transform; CPU work never expands this to screen resolution.
+ * Little-endian pixels support unaligned padded rows without touching padding. */
+static inline int p67_blur_store_rgb565(const uint16_t *in, void *pixels,
+                                       size_t stride, size_t size) {
     unsigned x,y;
     unsigned char *out=pixels;
-    if(!in || !out || stride<336u*2 || stride>SIZE_MAX/480 || size<stride*480) return 0;
-    for(y=0;y<480;++y) {
-        unsigned yy=y/4, fy=y%4, yn=yy<119?yy+1:yy;
-        for(x=0;x<336;++x) {
-            unsigned xx=x/4, fx=x%4, xn=xx<83?xx+1:xx;
-            unsigned a=in[yy*84+xx],b=in[yy*84+xn],c=in[yn*84+xx],d=in[yn*84+xn];
-            unsigned r0=((a>>11)*(4-fy)+(c>>11)*fy)>>2;
-            unsigned r1=((b>>11)*(4-fy)+(d>>11)*fy)>>2;
-            unsigned g0=(((a>>5)&63)*(4-fy)+((c>>5)&63)*fy)>>2;
-            unsigned g1=(((b>>5)&63)*(4-fy)+((d>>5)&63)*fy)>>2;
-            unsigned b0=((a&31)*(4-fy)+(c&31)*fy)>>2;
-            unsigned b1=((b&31)*(4-fy)+(d&31)*fy)>>2;
-            unsigned r=(r0*(4-fx)+r1*fx)>>2,g=(g0*(4-fx)+g1*fx)>>2;
-            unsigned bl=(b0*(4-fx)+b1*fx)>>2,v=(r<<11)|(g<<5)|bl;
-            out[y*stride+x*2]=(unsigned char)v;
-            out[y*stride+x*2+1]=(unsigned char)(v>>8);
-        }
+    if(!in || !out || stride<P67_BLUR_WIDTH*2u ||
+       stride>SIZE_MAX/P67_BLUR_HEIGHT || size<stride*P67_BLUR_HEIGHT) return 0;
+    /* Publication storage must not alias scratch, even with overlapping rows. */
+    const uintptr_t source=(uintptr_t)in,target=(uintptr_t)out;
+    const size_t input_bytes=P67_BLUR_PIXELS*sizeof(*in),output_bytes=stride*P67_BLUR_HEIGHT;
+    if(source>UINTPTR_MAX-input_bytes || target>UINTPTR_MAX-output_bytes ||
+       (target>=source ? target-source<input_bytes : source-target<output_bytes)) return 0;
+    for(y=0;y<P67_BLUR_HEIGHT;++y) for(x=0;x<P67_BLUR_WIDTH;++x) {
+        unsigned v=in[y*P67_BLUR_WIDTH+x];
+        out[y*stride+x*2u]=(unsigned char)v;
+        out[y*stride+x*2u+1u]=(unsigned char)(v>>8);
     }
     return 1;
 }

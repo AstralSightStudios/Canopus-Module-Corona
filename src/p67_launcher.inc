@@ -59,6 +59,32 @@ static uint32_t *p67_descriptor(uint32_t object, uint32_t callback) {
 #endif
 #endif
 #include "p67_blur.inc"
+static struct p67_blur_session p67_launcher_session;
+/* Exact .043 image ABI: 112-byte descriptor, source+28, scale+48/+52,
+ * pivot+64/+68. Rectangle backgrounds only center/tile and cannot upscale.
+ * Both adapters install their bounded layer clip before submitting this task. */
+static void p67_draw_background(uint32_t layer, const char *path, const int32_t *area) {
+    uint32_t source = (uint32_t)p67_source(path);
+    if (!source) return;
+    if (rh_background_is_blur(path)) {
+        uint32_t descriptor[28];
+        const int32_t source_area[4] = {0, 0, P67_BLUR_WIDTH - 1u, P67_BLUR_HEIGHT - 1u};
+        ((void (*)(void *))(uintptr_t)P67_NATIVE(0x0c5882b9u))(descriptor);
+        descriptor[7] = source;
+        descriptor[12] = descriptor[13] = 4u * 256u;
+        descriptor[16] = descriptor[17] = 0;
+        p67_blur_draw_seen();
+        ((void (*)(uint32_t, const void *, const int32_t *))(uintptr_t)
+            P67_NATIVE(0x0c5882a1u))(layer, descriptor, source_area);
+    } else {
+        uint32_t descriptor[47];
+        ((void (*)(void *))(uintptr_t)P67_NATIVE(0x0c588269u))(descriptor);
+        ((unsigned char *)descriptor)[32] = 0;
+        descriptor[30] = source;
+        ((void (*)(uint32_t, const void *, const int32_t *))(uintptr_t)
+            P67_NATIVE(0x0c588351u))(layer, descriptor, area);
+    }
+}
 static void p67_remove_event(uint32_t object) {
     ((int (*)(uint32_t, uint32_t))(uintptr_t)P67_NATIVE(0x002bf811u))
         (object, (uint32_t)(uintptr_t)p67_event);
@@ -66,6 +92,7 @@ static void p67_remove_event(uint32_t object) {
 static void p67_detach(void) {
     uint32_t owner = p67_owner, draw = p67_draw_owner;
     uint32_t *d;
+    p67_blur_session_clear(&p67_launcher_session,1u);
     p67_owner = p67_page = p67_draw_owner = 0;
     ++p67_generation;
     if (p67_live(owner)) {
@@ -79,7 +106,6 @@ static void p67_event(void *event) {
     uint32_t obj = *(uint32_t *)event;
     uint32_t target = *((uint32_t *)event + 1);
     unsigned code = *(uint16_t *)((unsigned char *)event + 8) & 0x7fffu;
-    uint32_t descriptor[47];
     int32_t saved_clip[4], clip[4];
     unsigned i;
     int32_t area[4] = {0, 0, 335, 479};
@@ -90,11 +116,13 @@ static void p67_event(void *event) {
          * currently dispatching subscription or walk the deleting subtree.
          * The survivor is removed on the next idle poll/detach. */
         if (obj == p67_owner) {
+            p67_blur_session_clear(&p67_launcher_session,1u);
             uint32_t *d = p67_descriptor(obj, (uint32_t)(uintptr_t)p67_scroll);
             if (d) d[0] = P67_SCROLL_CB;
             p67_owner = p67_page = 0;
             ++p67_generation;
         } else if (obj == p67_draw_owner) {
+            p67_blur_session_clear(&p67_launcher_session,1u);
             p67_draw_owner = 0;
             ++p67_generation;
         }
@@ -118,24 +146,29 @@ static void p67_event(void *event) {
         }
     }
     if (clip[0] > clip[2] || clip[1] > clip[3]) return;
-    ((void (*)(void *))(uintptr_t)P67_NATIVE(0x0c588269u))(descriptor);
-    ((unsigned char *)descriptor)[32] = 0;
-    descriptor[30] = (uint32_t)p67_source(p67_path[p67_path_index]);
-    if (!descriptor[30]) return;
-    if (rh_background_is_blur(p67_path[p67_path_index])) p67_blur_draw_seen();
     for (i = 0; i < 4u; ++i) P67_U32(layer + 24u + 4u * i) = (uint32_t)clip[i];
-    ((void (*)(uint32_t, const void *, const int32_t *))
-        (uintptr_t)P67_NATIVE(0x0c588351u))(layer, descriptor, area);
+    p67_draw_background(layer, p67_path[p67_path_index], area);
     for (i = 0; i < 4u; ++i) P67_U32(layer + 24u + 4u * i) = (uint32_t)saved_clip[i];
 }
 static void p67_scroll(void *event) {
     unsigned code = *(uint16_t *)((unsigned char *)event + 8) & 0x7fffu;
     uint32_t page = *(uint32_t *)((unsigned char *)event + 12);
-    if (code == 9u && p67_owner && page == p67_page &&
-        rh_background_is_blur(p67_path[p67_path_index])) p67_blur_request();
+    unsigned blur=rh_background_is_blur(p67_path[p67_path_index]),entry_binding=0;
+    if (blur && p67_owner && page == p67_page && *(uint32_t *)event == p67_owner &&
+        (code == 9u || code == 11u || code == 12u)) {
+        /* Root DELETE can leave the owner's wrapper/userdata until idle detach.
+         * Validate membership only at begin, never on every SCROLL frame. */
+        entry_binding=page && p67_draw_owner && p67_generation &&
+            load32(P67_ROOT_SLOT)==p67_draw_owner &&
+            (code != 9u || (p67_live(p67_owner) && p67_live(page) && p67_live(p67_draw_owner)));
+        if (entry_binding)
+            p67_blur_session_event(&p67_launcher_session,1u,p67_generation,page,code,
+                (int32_t)P67_U32(page + 32u),480,*((uint32_t *)event + 1)==p67_owner);
+        else p67_blur_session_clear(&p67_launcher_session,1u);
+    }
     /* The native callback's C588310 getter returns USER DATA, not a target.
      * Bubbled events are intentional. Binding identity scopes this wrapper. */
-    if (p67_owner && page == p67_page && code == 9u &&
+    if (p67_owner && page == p67_page && code == 9u && (!blur || entry_binding) &&
         p67_source(p67_path[p67_path_index])) {
         int32_t y = (int32_t)P67_U32(page + 32u);
         if (y <= 480) {

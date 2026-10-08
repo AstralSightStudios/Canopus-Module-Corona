@@ -13,6 +13,7 @@ struct p67_surface {
     unsigned moving, swapped, busy, dirty, epoch;
     char path[RH_PATH], alternate[RH_PATH];
     unsigned path_index;
+    struct p67_blur_session session;
 };
 static struct p67_surface p67_surfaces[3] = {
     { .root_slot=0x2010fe50u, .image_slot=0x2010fe64u, .callback=0x0c5036c5u },
@@ -38,9 +39,18 @@ static uint32_t p67_event_fn(struct p67_surface *s) {
     void (*f[3])(void *)={p67_event_cc,p67_event_notify,p67_event_widget};
     return (uint32_t)(uintptr_t)f[s-p67_surfaces];
 }
+static inline unsigned p67_surface_entry_bit(struct p67_surface *s) {
+    return 2u << (unsigned)(s-p67_surfaces);
+}
+static inline int32_t p67_surface_position(struct p67_surface *s,uint32_t page) {
+    return (int32_t)P67_U32(page+(s==&p67_surfaces[1]?32u:28u));
+}
+static inline int32_t p67_surface_closed(struct p67_surface *s) {
+    return s==&p67_surfaces[0]?-336:s==&p67_surfaces[1]?-480:336;
+}
 static int p67_terminal(struct p67_surface *s,uint32_t page) {
-    int32_t pos=(int32_t)P67_U32(page+(s==&p67_surfaces[1]?32u:28u));
-    return pos==0 || pos==(s==&p67_surfaces[0]?-336:s==&p67_surfaces[1]?-480:336);
+    int32_t pos=p67_surface_position(s,page);
+    return pos==0 || pos==p67_surface_closed(s);
 }
 static void p67_hidden(uint32_t obj, int hide) {
     if (p67_live(obj) &&
@@ -48,8 +58,9 @@ static void p67_hidden(uint32_t obj, int hide) {
         ((void (*)(uint32_t,uint32_t))(uintptr_t)
         P67_NATIVE(hide ? 0x0c588961u : 0x0c5891b1u))(obj, 1);
 }
-/* Restore precisely the native swap before forwarding: widget/CC end handlers
- * test these flags before releasing their native buffers. Never touch buffers. */
+/* Restore the native swap for begin, nonterminal end and detach. The audited
+ * CC/widget terminal-end buffer frees are outside their visibility predicate;
+ * notification end instead deletes its image (with native DELETE cleanup). */
 static int p67_surface_pair(struct p67_surface *s) {
     uint32_t image=load32(s->image_slot);
     if(!p67_live(s->root) || load32(s->root_slot)!=s->root ||
@@ -71,8 +82,38 @@ static void p67_surface_native(struct p67_surface *s) {
         s->swapped=0;
     } else if(!s->swapped) s->swapped=0;
 }
+static int p67_surface_end_flags_safe(struct p67_surface *s) {
+    uint32_t resume;
+    if(s!=&p67_surfaces[1]) return p67_terminal(s,s->page);
+    /* C527BBC y=0 queues C526A18/C52778C, then resets/resumes its timer.
+     * The timer resume hook can run synchronously: accept only NULL. The
+     * audited native scheduling-only hook is not target-pack allowlisted;
+     * all non-NULL hooks keep the native swap. y=-480 may synchronously pop
+     * systray (C4C33FC dynamic callback), so keep its swap as well. */
+    if((int32_t)P67_U32(s->page+32u)!=0) return 0;
+    resume=load32(0x20103218u);
+    return !resume;
+}
+static void p67_surface_end(struct p67_surface *s) {
+    /* C5036C4/C50ABB4 terminal code 11 restores flags only when root is hidden
+     * AND image is visible; their buffer frees are outside that predicate.
+     * Notify C526B88 DELETE reads image source (+0x34), drops decoder cache,
+     * returns its pool slot, clears ED8/ED4 and restores root unconditionally.
+     * Generic DELETE gates on deleting (+0x33 bit 4), not HIDDEN (+0x2c bit 0).
+     * With audited pre-DELETE calls and final flags already present, preserve
+     * them and forward the WHOLE callback, including native image DELETE. */
+    if(s->swapped && p67_surface_pair(s) &&
+       p67_surface_end_flags_safe(s) &&
+       !((int (*)(uint32_t,uint32_t))(uintptr_t)P67_NATIVE(0x0c5881c1u))(s->root,1) &&
+       ((int (*)(uint32_t,uint32_t))(uintptr_t)P67_NATIVE(0x0c5881c1u))(load32(s->image_slot),1)) {
+        s->swapped=0;
+        return;
+    }
+    p67_surface_native(s);
+}
 static void p67_surface_detach(struct p67_surface *s) {
     uint32_t *d;
+    p67_blur_session_clear(&s->session,p67_surface_entry_bit(s));
     p67_surface_native(s);
     if (p67_live(s->owner)) {
         d=p67_descriptor(s->owner,p67_scroll_fn(s));
@@ -93,6 +134,17 @@ static void p67_surface_scroll_for(struct p67_surface *s,void *event) {
     {
         if (!s->owner || s->page!=page || *(uint32_t *)event!=s->owner) return;
         if(s->busy) return;
+        if(rh_background_is_blur(p67_surface_path(s)) &&
+           (code==9 || code==11 || code==12)) {
+            /* A deleting root leaves owner userdata until idle detach. Scalar
+             * identity gates SCROLL; begin alone revalidates tree membership. */
+            if(page && s->root && s->generation && load32(s->root_slot)==s->root &&
+               (code!=9 || (p67_live(s->owner) && p67_live(page) && p67_live(s->root))))
+                p67_blur_session_event(&s->session,p67_surface_entry_bit(s),
+                    s->generation,page,code,p67_surface_position(s,page),p67_surface_closed(s),
+                    *((uint32_t *)event+1)==s->owner);
+            else p67_blur_session_clear(&s->session,p67_surface_entry_bit(s));
+        }
         /* ALL also receives layout and render notifications. Only the audited
          * gesture callbacks may restore/swap visibility or refresh listeners. */
         /* Notification SCROLL (12) only updates the native direction icon;
@@ -103,9 +155,9 @@ static void p67_surface_scroll_for(struct p67_surface *s,void *event) {
             return;
         }
         uint32_t generation=s->generation;
-        if(code==9 && rh_background_is_blur(p67_surface_path(s))) p67_blur_request();
         s->busy=1;
-        p67_surface_native(s);
+        if(code==11) p67_surface_end(s);
+        else p67_surface_native(s);
         if(generation!=s->generation) { s->busy=0; return; }
         /* Forward ALL begin bookkeeping, including widget first-entry cache,
          * timer cancellation and notification list repositioning. Capture is
@@ -136,11 +188,14 @@ static void p67_surface_event(void *event) {
     unsigned code=*(uint16_t *)((char *)event+8)&0x7fffu,i,j;
     for(i=0;i<3;++i) {
         struct p67_surface *s=&p67_surfaces[i];
-        uint32_t layer, descriptor[47];
+        uint32_t layer;
         int32_t saved[4],clip[4],area[4]={0,0,335,479};
         if(obj!=target || (obj!=s->owner && obj!=s->root && obj!=s->list) ||
            *((uint32_t *)event+3)!=s->generation) continue;
         if(code==36) {
+            /* A transient list DELETE is not the root entry lifecycle. */
+            if(obj==s->owner || obj==s->root)
+                p67_blur_session_clear(&s->session,p67_surface_entry_bit(s));
             ++s->epoch;
             if(obj==s->owner) {
                 uint32_t *d=p67_descriptor(obj,p67_scroll_fn(s));
@@ -165,13 +220,8 @@ static void p67_surface_event(void *event) {
             if(j>=2 && clip[j]>area[j]) clip[j]=area[j];
         }
         if(clip[0]>clip[2] || clip[1]>clip[3]) return;
-        ((void (*)(void *))(uintptr_t)P67_NATIVE(0x0c588269u))(descriptor);
-        ((unsigned char *)descriptor)[32]=0; descriptor[30]=(uint32_t)p67_source(p67_surface_path(s));
-        if(!descriptor[30]) return;
-        if(rh_background_is_blur(p67_surface_path(s))) p67_blur_draw_seen();
         for(j=0;j<4;++j) P67_U32(layer+24+4*j)=(uint32_t)clip[j];
-        ((void (*)(uint32_t,const void *,const int32_t *))(uintptr_t)
-            P67_NATIVE(0x0c588351u))(layer,descriptor,area);
+        p67_draw_background(layer,p67_surface_path(s),area);
         for(j=0;j<4;++j) P67_U32(layer+24+4*j)=(uint32_t)saved[j];
         return;
     }
@@ -195,32 +245,70 @@ static int p67_surface_descendant(uint32_t obj,uint32_t root) {
     }
     return 0;
 }
+static inline uint32_t p67_surface_list_slot(struct p67_surface *s) {
+    return s==&p67_surfaces[1]?load32(0x20110ee8u):
+           s==&p67_surfaces[2]?load32(0x201100dcu):0;
+}
+/* Idle repair must distinguish a replaced list from a replaced root binding.
+ * Only the installed native wrapper, exact parent chain and current root slot
+ * prove that list repair can preserve this entry's generation and budget. */
+static inline int p67_surface_binding_valid(struct p67_surface *s) {
+    uint32_t root=s->root,page=s->page,owner=s->owner,generation=s->generation,*d;
+    if(!root || !page || !owner || !generation || load32(s->root_slot)!=root ||
+       !p67_live(root) || load32(root)!=0x2cdba8b4u || !p67_live(page) || !p67_live(owner) ||
+       ((uint32_t (*)(uint32_t))(uintptr_t)P67_NATIVE(0x0c589579u))(root)!=page ||
+       ((uint32_t (*)(uint32_t))(uintptr_t)P67_NATIVE(0x0c589579u))(page)!=owner) return 0;
+    d=p67_descriptor(owner,p67_scroll_fn(s));
+    return d && d[1]==page && !d[2] && s->root==root && s->page==page &&
+           s->owner==owner && s->generation==generation && load32(s->root_slot)==root;
+}
 static void p67_surface_refresh_list(struct p67_surface *s) {
-    uint32_t list=0;
-    uint32_t *added;
-    if(!s->owner || !p67_live(s->root)) return;
-    if(s==&p67_surfaces[1]) list=load32(0x20110ee8u);
-    if(s==&p67_surfaces[2]) list=load32(0x201100dcu);
+    uint32_t root=s->root,generation=s->generation,epoch=s->epoch,list;
+    uint32_t *added,*d;
+    if(!s->owner || !p67_live(root)) return;
+    list=p67_surface_list_slot(s);
     if(list==s->list) return;
     if(list && (!p67_live(list) || load32(list)!=0x2cdba28cu ||
-       !p67_surface_descendant(list,s->root))) return;
+       !p67_surface_descendant(list,root))) return;
+    if(s->epoch!=epoch || s->generation!=generation || s->root!=root ||
+       load32(s->root_slot)!=root || p67_surface_list_slot(s)!=list) return;
     if(p67_live(s->list)) ((int (*)(uint32_t,uint32_t))(uintptr_t)
         P67_NATIVE(0x002bf811u))(s->list,p67_event_fn(s));
+    if(s->epoch!=epoch || s->generation!=generation || s->root!=root ||
+       load32(s->root_slot)!=root || p67_surface_list_slot(s)!=list) return;
     s->list=0;
     if(!list) return;
     added=((uint32_t *(*)(uint32_t,uint32_t,uint32_t,uint32_t))(uintptr_t)
-       P67_NATIVE(0x0c5883f1u))(list,p67_event_fn(s),0,s->generation);
-    if(added) s->list=list;
+       P67_NATIVE(0x0c5883f1u))(list,p67_event_fn(s),0,generation);
+    if(!added) return;
+    if(s->epoch==epoch && s->generation==generation && s->root==root &&
+       load32(s->root_slot)==root && p67_surface_list_slot(s)==list && p67_live(list)) {
+        d=p67_descriptor(list,p67_event_fn(s));
+        if(d && d[1]==generation && !d[2] && s->epoch==epoch &&
+           s->generation==generation && s->root==root &&
+           load32(s->root_slot)==root && p67_surface_list_slot(s)==list) {
+            s->list=list; return;
+        }
+    }
+    /* Registration can synchronously invalidate the list/root. Do not revive
+     * its identity or leave an untracked subscription for the next poll. */
+    if(p67_live(list)) {
+        d=p67_descriptor(list,p67_event_fn(s));
+        if(d && d[1]==generation && !d[2])
+            ((int (*)(uint32_t,uint32_t))(uintptr_t)P67_NATIVE(0x002bf811u))
+                (list,p67_event_fn(s));
+    }
 }
 static void p67_surface_poll(struct p67_surface *s) {
     uint32_t root,page,owner,*d,*a,*b,*c=0,g,list=0;
     if(!s->busy && s->owner && s->moving) p67_surface_refresh_list(s);
     if(!p67_surface_idle(s) || !p67_surface_path(s)[0]) return;
-    root=load32(s->root_slot);
-    if(s->owner && !s->dirty && s->root==root && p67_live(root) && p67_live(s->owner) &&
-       (s!=&p67_surfaces[1] || s->list==load32(0x20110ee8u)) &&
-       (s!=&p67_surfaces[2] || s->list==load32(0x201100dcu))) return;
+    if(p67_surface_binding_valid(s)) {
+        p67_surface_refresh_list(s);
+        if(p67_surface_binding_valid(s)) { s->dirty=0; return; }
+    }
     if(s->owner || s->root || s->swapped || s->list) p67_surface_detach(s);
+    root=load32(s->root_slot);
     if(!p67_live(root) || load32(root)!=0x2cdba8b4u) return;
     page=((uint32_t (*)(uint32_t))(uintptr_t)P67_NATIVE(0x0c589579u))(root);
     if(!p67_live(page)) return;

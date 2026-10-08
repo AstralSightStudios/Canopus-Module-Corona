@@ -82,6 +82,56 @@ static void p67_blur_request(void) {
  ++p67_blur_request_serial; p67_blur_pending=1;
  p67_blur_armed=1; p67_blur_request_wake=1;
 }
+/* Before gesture direction is known, retain the existing initialization/config
+ * prewarm. Once scoped, only an accepted closed->page entry permits capture. */
+static unsigned p67_blur_entry_scoped,p67_blur_allowed_entries;
+struct p67_blur_session { uint32_t generation,page; };
+static uint32_t p67_blur_begin_skips;
+static inline int p67_blur_capture_allowed(void) {
+ return !p67_blur_entry_scoped || p67_blur_allowed_entries;
+}
+static inline void p67_blur_cancel_budget(void) {
+ /* Invalidate in-flight publication, but keep the immutable published source. */
+ ++p67_blur_epoch; ++p67_blur_request_serial;
+ p67_blur_pending=0; p67_blur_armed=0; p67_blur_request_wake=0;
+}
+static inline void p67_blur_session_clear(struct p67_blur_session *s,unsigned bit) {
+ unsigned previous=p67_blur_allowed_entries;
+ /* Explicit words preserve zero-import ARM (__aeabi_memclr4 is unavailable). */
+ s->generation=0; s->page=0;
+ p67_blur_allowed_entries &= ~bit;
+ if(previous && !p67_blur_allowed_entries && p67_blur_entry_scoped)
+  p67_blur_cancel_budget();
+}
+/* Called only for a verified native binding, with its PAGE coordinate. No
+ * target, input, or animation parameter is needed: both kinds of 9 precede
+ * the first coordinate update. Partial begins cannot establish provenance.
+ * exit_intent is a pure current-owner/original-target equality, not retained. */
+static inline void p67_blur_session_event(struct p67_blur_session *s,unsigned bit,
+ uint32_t generation,uint32_t page,unsigned code,int32_t position,int32_t closed,
+ unsigned exit_intent) {
+ unsigned scoped=p67_blur_entry_scoped,previous=p67_blur_allowed_entries;
+ if(code!=9 && code!=11 && code!=12) return;
+ if(code==9 && (position!=0 || exit_intent)) p67_blur_entry_scoped=1;
+ if(s->generation!=generation || s->page!=page)
+  p67_blur_session_clear(s,bit);
+ if(code!=9) {
+  if(position==closed) p67_blur_session_clear(s,bit);
+  return;
+ }
+ if(position==0 && !exit_intent) {
+  ++p67_blur_begin_skips; return; /* Bubbled content scroll, not a page exit. */
+ }
+ if(position==closed && !(p67_blur_allowed_entries & bit)) {
+  s->generation=generation; s->page=page;
+  p67_blur_allowed_entries |= bit;
+  p67_blur_request();
+  return; /* First 9 at closed is the entry, not its terminal cancellation. */
+ }
+ ++p67_blur_begin_skips; /* exit, partial/snap/reversal, or repeated begin */
+ if(position==0) p67_blur_session_clear(s,bit);
+ if(!scoped && !previous && !p67_blur_allowed_entries) p67_blur_cancel_budget();
+}
 static uintptr_t p67_source(const char *path) {
  return !path || !path[0]?0:rh_background_is_blur(path)?p67_blur_source:(uintptr_t)path;
 }
@@ -93,11 +143,13 @@ static void p67_blur_drop(void) {
  /* Lifecycle invalidation waits for the next UI poll to retry. It must not
   * replenish an attempt consumed before a failing root/owner gate. */
  ++p67_blur_request_serial; p67_blur_pending=1;
+ if(!p67_blur_capture_allowed()) { p67_blur_armed=0; p67_blur_request_wake=0; }
 }
 static void p67_blur_reset(void) {
  /* No native reads here (reset may run inside DELETE or publication). The
   * next safe START/watch checks root identity; same-root immutable pixels stay. */
- ++p67_blur_config_epoch; ++p67_blur_epoch; p67_blur_request();
+ ++p67_blur_config_epoch; ++p67_blur_epoch;
+ p67_blur_entry_scoped=0; p67_blur_request();
 }
 static void p67_blur_release(void) {
  uintptr_t old=p67_blur_retired;
@@ -225,8 +277,9 @@ static void p67_blur_display_event(void *event) {
  if(code==53) {
   epoch=p67_blur_epoch; generation=p67_blur_display_generation;
   request=p67_blur_request_serial;
-  if(p67_blur_wake || (p67_blur_pending && p67_blur_armed && p67_blur_request_wake &&
-                       p67_blur_demand && p67_blur_visible)) {
+  if(p67_blur_capture_allowed() &&
+     (p67_blur_wake || (p67_blur_pending && p67_blur_armed && p67_blur_request_wake &&
+                       p67_blur_demand && p67_blur_visible))) {
    int status;
    /* Invalidation may synchronously dispatch READY, reset, or DELETE. */
    p67_blur_busy=1;
@@ -270,8 +323,10 @@ static void p67_blur_display_event(void *event) {
   p67_blur_busy=0;
   return;
  }
+ if(!p67_blur_capture_allowed()) return;
  visible=!!P67_BLUR_VISIBLE();
- if(visible && !p67_blur_visible) p67_blur_request();
+ if(visible && !p67_blur_visible && !p67_blur_entry_scoped && !p67_blur_pending)
+  p67_blur_request();
  p67_blur_visible=visible;
  if(!visible || !p67_blur_pending || !p67_blur_armed) return;
  p67_blur_armed=0; p67_blur_request_wake=0; ++p67_blur_attempts;
@@ -292,16 +347,19 @@ static void p67_blur_display_event(void *event) {
  p67_blur_release();
  P67_BLUR_MAINTAIN();
  if(epoch!=p67_blur_epoch || generation!=p67_blur_root_generation ||
-    display_generation!=p67_blur_display_generation) { p67_blur_core_gate=9; goto done; }
+    display_generation!=p67_blur_display_generation || request!=p67_blur_request_serial ||
+    !p67_blur_capture_allowed()) { p67_blur_core_gate=9; goto done; }
  if(!p67_blur_display_valid()) { p67_blur_core_gate=4; goto done; }
  ++p67_blur_copies;
  if(!P67_BLUR_COPY(p67_blur_plane,&identity)) {
   p67_blur_core_gate=(epoch!=p67_blur_epoch || generation!=p67_blur_root_generation ||
-   display_generation!=p67_blur_display_generation)?9u:7u;
+   display_generation!=p67_blur_display_generation || request!=p67_blur_request_serial ||
+   !p67_blur_capture_allowed())?9u:7u;
   goto done;
  }
  if(epoch!=p67_blur_epoch || generation!=p67_blur_root_generation ||
-    display_generation!=p67_blur_display_generation) { p67_blur_core_gate=9; goto done; }
+    display_generation!=p67_blur_display_generation || request!=p67_blur_request_serial ||
+    !p67_blur_capture_allowed()) { p67_blur_core_gate=9; goto done; }
  if(!p67_blur_display_valid()) { p67_blur_core_gate=4; goto done; }
  if(!p67_blur_root_registered) { p67_blur_core_gate=5; goto done; }
  if(identity!=p67_blur_root || identity!=P67_BLUR_WATCHFACE()) { p67_blur_core_gate=6; goto done; }
@@ -309,11 +367,13 @@ static void p67_blur_display_event(void *event) {
  next=P67_BLUR_PUBLISH(p67_blur_plane,epoch);
  if(!next) {
   p67_blur_core_gate=(epoch!=p67_blur_epoch || generation!=p67_blur_root_generation ||
-   display_generation!=p67_blur_display_generation)?9u:8u;
+   display_generation!=p67_blur_display_generation || request!=p67_blur_request_serial ||
+   !p67_blur_capture_allowed())?9u:8u;
   goto done;
  }
  if(epoch!=p67_blur_epoch || generation!=p67_blur_root_generation ||
-    display_generation!=p67_blur_display_generation) p67_blur_core_gate=9;
+    display_generation!=p67_blur_display_generation || request!=p67_blur_request_serial ||
+    !p67_blur_capture_allowed()) p67_blur_core_gate=9;
  else if(!p67_blur_display_valid()) p67_blur_core_gate=4;
  else if(!p67_blur_root_registered) p67_blur_core_gate=5;
  else if(identity!=P67_BLUR_WATCHFACE()) p67_blur_core_gate=6;
@@ -334,7 +394,7 @@ static void p67_blur_poll_rearm(void) {
  p67_blur_cleanup_armed=0;
  if(!P67_BLUR_AVAILABLE) return;
  if(p67_blur_demand) {
-  if(p67_blur_pending) {
+  if(p67_blur_capture_allowed() && p67_blur_pending) {
    p67_blur_armed=1; p67_blur_request_wake=0; p67_wake_pending=1;
   }
  } else if(p67_blur_cleanup_pending()) {
@@ -345,7 +405,8 @@ static void p67_blur_poll_rearm(void) {
 static void p67_blur_watch(int demand) {
  uint32_t display,epoch;
  if(p67_blur_busy || p67_blur_polling) return;
- if(demand && !p67_blur_demand) p67_blur_request();
+ if(demand && !p67_blur_demand && !p67_blur_entry_scoped && !p67_blur_pending)
+  p67_blur_request();
  p67_blur_demand=!!demand;
  if(!demand) {
   p67_blur_visible=0;
@@ -429,11 +490,12 @@ static void p67_blur_diag_value(struct p67_blur_diag_writer *w,const char *key,u
 uint32_t rh_platform_p67_blur_diagnostics(char *out,uint32_t capacity) {
  static const char *const keys[]={"core_gate","demand","pending","armed","source",
   "root","root_generation","display","frame52","attempts","copies","publishes",
-  "wakes","draws","config_epoch","cleanup_armed"};
+  "wakes","draws","config_epoch","cleanup_armed","begin_skips"};
  const uint32_t values[]={p67_blur_core_gate,p67_blur_demand,p67_blur_pending,
   p67_blur_armed,(uint32_t)p67_blur_source,p67_blur_root,p67_blur_root_generation,
   p67_blur_display,p67_blur_frame52,p67_blur_attempts,p67_blur_copies,
-  p67_blur_publishes,p67_blur_wakes,p67_blur_draws,p67_blur_config_epoch,p67_blur_cleanup_armed};
+  p67_blur_publishes,p67_blur_wakes,p67_blur_draws,p67_blur_config_epoch,p67_blur_cleanup_armed,
+  p67_blur_begin_skips};
  struct p67_blur_diag_writer writer={0,0,capacity,0};
  unsigned pass,i;
  if(!out || !capacity) return 0;

@@ -18,7 +18,7 @@ static uint32_t watchface=0x3c280100u, display=0x200d0000u, layer=0x200d1000u;
 static unsigned rendering,tasks,cyclic,fence_fail,fail_after,capture_fail,root_switch;
 static unsigned root_live=1,hidden=1,allocations,destroys,captures,clean_calls,invalidate_calls,fence_calls;
 static unsigned power_depth, power_stays, power_relaxes;
-static unsigned barriers,malformed_input,malformed_output,alive[3];
+static unsigned barriers,malformed_input,malformed_output,alive[3],output_stride;
 static uint32_t event_records[8][3];
 static unsigned event_count,root_count,wake_calls;
 static uint32_t root_record[3];
@@ -64,18 +64,27 @@ static int invalidate(uint32_t id,uint32_t address,uint32_t length) {
     ++invalidate_calls; op('I'); return 0;
 }
 static void describe(uint32_t d,unsigned format,uint32_t allocation) {
-    uint32_t *p=pixels_at(d),bytes=format==15?1008u:672u;
-    p[0]=25u|(format<<8)|(0x30u<<16); p[1]=336u|(480u<<16); p[2]=bytes;
-    p[3]=bytes*480u; p[4]=allocation+64u; p[5]=allocation+1u; p[6]=0x20103244u;
+    uint32_t width=format==15?336u:P67_BLUR_WIDTH;
+    uint32_t height=format==15?480u:P67_BLUR_HEIGHT;
+    uint32_t *p=pixels_at(d),bytes=format==15?1008u:output_stride;
+    p[0]=25u|(format<<8)|(0x30u<<16); p[1]=width|(height<<16); p[2]=bytes;
+    p[3]=bytes*height; p[4]=allocation+64u; p[5]=allocation+1u; p[6]=0x20103244u;
 }
 static uint32_t create(uint32_t width,uint32_t height,uint32_t format,uint32_t stride) {
     unsigned slot;
-    assert(width==336 && height==480 && (format==15 || format==18) && !stride);
-    if(format==15) { slot=0; assert(!alive[0]); }
-    else { slot=!alive[1]?1:2; assert(!alive[slot]); }
+    assert((format==15 || format==18) && !stride);
+    if(format==15) { assert(width==336 && height==480); slot=0; assert(!alive[0]); }
+    else {
+        assert(width==P67_BLUR_WIDTH && height==P67_BLUR_HEIGHT);
+        slot=!alive[1]?1:2; assert(!alive[slot]);
+    }
     ++allocations; alive[slot]=1; op('A');
     uint32_t d=0x3c280800u+64u*slot;
     describe(d,format,slot?0x3c340000u+0x100000u*(slot-1):0x3c2a0000u);
+    if(slot) {
+        uint32_t *header=pixels_at(d);
+        memset(pixels_at(header[4]),0x5a,header[3]+16u);
+    }
     if((format==15 && malformed_input) || (format==18 && malformed_output)) {
         ((uint32_t *)pixels_at(d))[1]=0; malformed_input=malformed_output=0;
     }
@@ -151,8 +160,9 @@ static void reset(void) {
     rendering=tasks=cyclic=fence_fail=fail_after=capture_fail=root_switch=0;
     allocations=destroys=captures=clean_calls=invalidate_calls=fence_calls=barriers=0;
     operation_count=malformed_input=malformed_output=event_count=0;
+    output_stride=P67_BLUR_WIDTH*2u;
     memset(alive,0,sizeof(alive)); memset(p67_blur_native_outputs,0,sizeof(p67_blur_native_outputs));
-    p67_blur_native_input=p67_blur_native_capturing=0;
+    p67_blur_native_input=p67_blur_native_capturing=p67_blur_native_power_depth=0;
     root_count=wake_calls=0; p67_wake_pending=0;
     p67_blur_source=p67_blur_retired=0; p67_blur_epoch=p67_blur_config_epoch=0;
     p67_blur_root=p67_blur_root_generation=p67_blur_root_serial=0;
@@ -163,6 +173,7 @@ static void reset(void) {
     p67_blur_armed=p67_blur_request_wake=p67_blur_cleanup_armed=0;
     p67_blur_frame52=p67_blur_attempts=p67_blur_copies=p67_blur_publishes=p67_blur_wakes=p67_blur_draws=0;
     p67_blur_core_gate=0;
+    p67_blur_entry_scoped=p67_blur_allowed_entries=p67_blur_begin_skips=0;
     power_depth=power_stays=power_relaxes=0;
     p67_blur_native_pm_stays=p67_blur_native_pm_relaxes=0;
 }
@@ -205,7 +216,85 @@ static void integrated_lifecycle(void) {
     char diag[1024];
     assert(rh_platform_p67_blur_diagnostics(diag,sizeof(diag)) && strstr(diag,"native_error=") && strstr(diag,"pm_stays="));
 }
+static void integrated_entry_exit(void) {
+    reset();p67_blur_reset();p67_blur_watch(1);frame(52);frame(53);
+    assert(captures==1 && p67_blur_source); /* Existing explicit initialization. */
+    p67_wake_pending=0; /* Model launcher's consumption of the owner-poll wake. */
+    struct p67_blur_session session={0};
+    p67_blur_session_event(&session,1u,1u,300u,9u,480,480,1u);
+    frame(52);frame(53);assert(captures==2 && !p67_blur_pending);
+    p67_wake_pending=0;
+    uintptr_t source=p67_blur_source;
+    unsigned taken=captures,allocated=allocations,fences=fence_calls;
+    uint32_t requested=p67_blur_request_serial;
+    p67_blur_session_event(&session,1u,1u,300u,9u,120,480,1u);
+    p67_blur_session_event(&session,1u,1u,300u,11u,120,480,1u);
+    assert(p67_blur_request_serial==requested && p67_blur_source==source);
+    p67_blur_session_event(&session,1u,1u,300u,11u,0,480,1u);
+    p67_blur_session_event(&session,1u,1u,300u,9u,0,480,1u); /* Exit. */
+    assert(!p67_blur_capture_allowed() && !p67_blur_pending && p67_blur_source==source);
+    for(unsigned i=0;i<3;++i) {
+        p67_blur_watch(1);frame(52);frame(53);
+        assert(!p67_blur_armed && !p67_wake_pending && p67_blur_source==source);
+    }
+    assert(captures==taken && allocations==allocated && fence_calls==fences);
+    /* A dirty lifecycle after exit cannot revive screenshot work at home. */
+    p67_blur_drop();p67_blur_watch(1);frame(53); /* One source-removal repaint is valid. */
+    unsigned wakes=wake_calls;
+    for(unsigned i=0;i<20;++i) { frame(52);frame(53); }
+    assert(captures==taken && allocations==allocated && fence_calls==fences);
+    assert(p67_blur_pending && !p67_blur_armed && wake_calls==wakes);
+    p67_blur_session_event(&session,1u,1u,300u,12u,480,480,1u);
+    p67_blur_session_event(&session,1u,1u,300u,9u,480,480,1u);
+    frame(52);frame(53);assert(captures==taken+1 && p67_blur_source);
+    source=p67_blur_source;
+    p67_blur_session_event(&session,1u,1u,300u,11u,0,480,1u);
+    p67_blur_session_event(&session,1u,1u,300u,9u,0,480,1u);
+    p67_blur_session_event(&session,1u,1u,300u,12u,480,480,1u);
+    p67_blur_session_event(&session,1u,1u,300u,9u,480,480,1u);
+    fail_after=fence_calls+2u;frame(52);
+    assert(p67_blur_pending && p67_blur_native_input && p67_blur_source==source);
+    taken=captures;fences=fence_calls;
+    p67_blur_session_event(&session,1u,1u,300u,9u,0,480,1u);
+    p67_blur_watch(1);frame(52);frame(53);
+    assert(captures==taken && fence_calls==fences && p67_blur_native_input);
+    assert(p67_blur_source==source && !p67_blur_armed);
+    /* Exit does not bypass retirement safety. System restore still performs
+     * disabled cleanup even when no entry is allowed, after fence recovery. */
+    p67_blur_watch(0);frame(52);assert(p67_blur_native_input);
+    fail_after=fence_fail=0;p67_blur_watch(0);frame(52);p67_blur_watch(0);
+    assert(!p67_blur_native_input && !alive[0] && !alive[1] && !alive[2]);
+    assert(!event_count && !power_depth && !p67_blur_native_power_depth);
+}
+static void lowres_storage(void) {
+    uint16_t input[P67_BLUR_PIXELS];
+    unsigned char pixels[(P67_BLUR_WIDTH*2u+3u)*P67_BLUR_HEIGHT+2u];
+    const size_t stride=P67_BLUR_WIDTH*2u+3u,size=stride*P67_BLUR_HEIGHT;
+    for(unsigned i=0;i<P67_BLUR_PIXELS;++i) input[i]=(uint16_t)(i*31u);
+    memset(pixels,0x5a,sizeof(pixels));
+    assert(!p67_blur_store_rgb565(0,pixels+1u,stride,size));
+    assert(!p67_blur_store_rgb565(input,0,stride,size));
+    assert(!p67_blur_store_rgb565(input,pixels+1u,P67_BLUR_WIDTH*2u-1u,size));
+    assert(!p67_blur_store_rgb565(input,pixels+1u,stride,size-1u));
+    assert(!p67_blur_store_rgb565(input,pixels+1u,SIZE_MAX,size));
+    for(unsigned i=0;i<sizeof(pixels);++i) assert(pixels[i]==0x5a);
+    assert(!p67_blur_store_rgb565(input,input,168u,sizeof(input)));
+    assert(!p67_blur_store_rgb565(input,input+1u,168u,sizeof(input)));
+    assert(!p67_blur_store_rgb565(input+1u,input,168u,sizeof(input)));
+    for(unsigned i=0;i<P67_BLUR_PIXELS;++i) assert(input[i]==(uint16_t)(i*31u));
+    assert(p67_blur_store_rgb565(input,pixels+1u,stride,size));
+    assert(pixels[0]==0x5a && pixels[sizeof(pixels)-1u]==0x5a);
+    for(unsigned y=0;y<P67_BLUR_HEIGHT;++y) {
+        const unsigned char *row=pixels+1u+y*stride;
+        for(unsigned x=0;x<P67_BLUR_WIDTH;++x) {
+            unsigned v=input[y*P67_BLUR_WIDTH+x];
+            assert(row[x*2u]==(unsigned char)v && row[x*2u+1u]==(unsigned char)(v>>8));
+        }
+        for(unsigned x=P67_BLUR_WIDTH*2u;x<stride;++x) assert(row[x]==0x5a);
+    }
+}
 int main(void) {
+    lowres_storage();
     memory=calloc(1,0x400000u); assert(memory);
     uint16_t plane[P67_BLUR_PIXELS]; uint32_t identity=0;
     struct p67_blur_pixel_view view;
@@ -214,7 +303,11 @@ int main(void) {
     for(unsigned i=0;i<P67_BLUR_PIXELS;++i) assert(plane[i]==0xf800);
     assert(captures==1 && allocations==1 && destroys==1 && !alive[0]);
     assert(clean_calls==2 && invalidate_calls==1 && barriers);
-    assert(!power_depth && power_stays==power_relaxes);
+    assert(fence_calls==3 && power_stays==1 && power_relaxes==1);
+    assert(!power_depth && !p67_blur_native_power_depth);
+    /* A standalone fence still acquires its own native PM protection. */
+    assert(p67_blur_native_fence() && power_stays==2 && power_relaxes==2);
+    assert(fence_calls==4 && !power_depth && !p67_blur_native_power_depth);
     assert(strchr(operations,'S') && !p67_blur_native_input);
     assert(p67_blur_native_display_add(display,0x12341,9));
     assert(p67_blur_native_display_count(display)==1);
@@ -232,25 +325,67 @@ int main(void) {
     tasks=1; assert(!p67_blur_native_copy(plane,&identity)); tasks=0;
     cyclic=1; assert(!p67_blur_native_copy(plane,&identity)); cyclic=0;
     root_live=0; assert(!p67_blur_native_copy(plane,&identity)); root_live=1;
+    /* A low-resolution output shape must never pass the input validator. */
+    describe(manual,18,0x3c340000u);
+    assert(p67_blur_native_output_descriptor(manual,&view));
+    assert(view.width==P67_BLUR_WIDTH && view.height==P67_BLUR_HEIGHT && view.stride==168u);
+    assert(!p67_blur_native_descriptor(manual,18,&view));
+    d[1]=336u|(480u<<16); assert(!p67_blur_native_output_descriptor(manual,&view));
+    describe(manual,18,0x3c340000u);
+    d[2]=169u;d[3]=169u*P67_BLUR_HEIGHT;
+    assert(!p67_blur_native_output_descriptor(manual,&view));
+    describe(manual,18,0x3c340000u);d[3]--;
+    assert(!p67_blur_native_output_descriptor(manual,&view));
     malformed_input=1; assert(!p67_blur_native_copy(plane,&identity) && !alive[0]);
     capture_fail=1; assert(!p67_blur_native_copy(plane,&identity) && !alive[0]); capture_fail=0;
     root_switch=1; assert(!p67_blur_native_copy(plane,&identity) && !alive[0]); reset();
     fail_after=2; assert(!p67_blur_native_copy(plane,&identity));
     assert(allocations==1 && !destroys && p67_blur_native_input && alive[0] && !invalidate_calls);
     assert(!p67_blur_native_copy(plane,&identity) && allocations==1);
-    assert(!power_depth && power_stays==power_relaxes);
+    assert(!power_depth && !p67_blur_native_power_depth && power_stays==power_relaxes);
     fail_after=fence_fail=0;
     assert(p67_blur_native_copy(plane,&identity) && !p67_blur_native_input && destroys==2);
-    uintptr_t first=p67_blur_native_publish(plane,1),second=p67_blur_native_publish(plane,1);
-    assert(first && second && first!=second);
+    output_stride=192u; /* GPU-aligned padded output, still only 84x120. */
+    uintptr_t first=p67_blur_native_publish(plane,1);
+    assert(first);
     uint32_t *output=pixels_at((uint32_t)first);
-    assert(*(uint16_t *)pixels_at(output[4])==0xf800);
+    assert(output[1]==(P67_BLUR_WIDTH|(P67_BLUR_HEIGHT<<16)) && output[2]==192u);
+    const unsigned char *published=pixels_at(output[4]);
+    for(unsigned y=0;y<P67_BLUR_HEIGHT;++y) {
+        for(unsigned x=0;x<P67_BLUR_WIDTH;++x)
+            assert(published[y*output_stride+x*2u]==0 && published[y*output_stride+x*2u+1u]==0xf8);
+        for(unsigned x=P67_BLUR_WIDTH*2u;x<output_stride;++x)
+            assert(published[y*output_stride+x]==0x5a);
+    }
+    assert(published[output[3]]==0x5a);
+    for(unsigned i=0;i<P67_BLUR_PIXELS;++i) plane[i]=(uint16_t)(i*31u);
+    uintptr_t second=p67_blur_native_publish(plane,1);
+    assert(second && first!=second);
+    assert(*(const uint16_t *)published==0xf800); /* Scratch writes cannot mutate the live GPU source. */
+    uint32_t *replacement=pixels_at((uint32_t)second);
+    const unsigned char *pixels2=pixels_at(replacement[4]);
+    for(unsigned y=0;y<P67_BLUR_HEIGHT;++y) for(unsigned x=0;x<P67_BLUR_WIDTH;++x) {
+        unsigned v=plane[y*P67_BLUR_WIDTH+x];
+        assert(pixels2[y*output_stride+x*2u]==(unsigned char)v);
+        assert(pixels2[y*output_stride+x*2u+1u]==(unsigned char)(v>>8));
+        assert(published[y*output_stride+x*2u+1u]==0xf8);
+    }
     unsigned allocated=allocations,freed=destroys;
     assert(!p67_blur_native_publish(plane,1) && allocations==allocated);
     p67_blur_native_retire(first); p67_blur_native_retire(second);
     assert(destroys==freed); /* RETIRE does not fence or destroy. */
     rendering=1; p67_blur_native_maintain(); assert(destroys==freed); rendering=0;
-    tasks=1; p67_blur_native_maintain(); assert(destroys==freed); tasks=0;
+    tasks=1; p67_blur_native_maintain(); assert(destroys==freed);
+    assert(!p67_blur_native_publish(plane,2) && allocations==allocated);
+    /* Model delayed consumption of the previously submitted image source. Its
+     * copied descriptor still resolves to live, immutable pixels after retire;
+     * CPU scratch/output replacement must not free or overwrite that storage. */
+    assert(alive[1] && alive[2] && p67_blur_native_output_descriptor((uint32_t)first,&view));
+    for(unsigned y=0;y<P67_BLUR_HEIGHT;++y) for(unsigned x=0;x<P67_BLUR_WIDTH;++x) {
+        const unsigned char *queued=view.pixels+y*view.stride+x*2u;
+        assert(queued[0]==0 && queued[1]==0xf8);
+    }
+    tasks=0;
     fence_fail=1; p67_blur_native_maintain(); assert(destroys==freed);
     assert(!p67_blur_native_publish(plane,1) && allocations==allocated); fence_fail=0;
     p67_blur_native_maintain(); assert(destroys==freed+2);
@@ -258,6 +393,7 @@ int main(void) {
     p67_blur_native_maintain(); assert(destroys==freed+3);
     assert(p67_blur_native_publish(plane,1));
     integrated_lifecycle();
+    integrated_entry_exit();
     free(memory);
     puts("p67 active blur provider: OK (host seams, not device cache acceptance)");
     return 0;

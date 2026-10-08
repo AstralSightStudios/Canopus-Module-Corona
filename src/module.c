@@ -178,7 +178,7 @@ static int blur_counter(const char *line, uint32_t size) {
     return blur_field_is(line,size,"frame52") || blur_field_is(line,size,"attempts") ||
         blur_field_is(line,size,"copies") || blur_field_is(line,size,"publishes") ||
         blur_field_is(line,size,"wakes") || blur_field_is(line,size,"draws") ||
-        blur_field_is(line,size,"fences") || blur_field_is(line,size,"capture_calls") ||
+        blur_field_is(line,size,"begin_skips") || blur_field_is(line,size,"fences") || blur_field_is(line,size,"capture_calls") ||
         blur_field_is(line,size,"input_allocs") ||
         blur_field_is(line,size,"output_allocs") || blur_field_is(line,size,"destroys") ||
         blur_field_is(line,size,"pm_stays") || blur_field_is(line,size,"pm_relaxes");

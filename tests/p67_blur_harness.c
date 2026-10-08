@@ -8,7 +8,7 @@ static uint32_t wf_root=100,record[3],display_record[3],host_display=200;
 static unsigned display_count,wakes,wake_fail,wake_reenter,wake_reset,wake_delete;
 static unsigned copy_display_delete,publish_display_delete,copy_display_change,publish_display_change;
 static unsigned count,adds,copies,publishes,retires,maintains,fail_copy,fail_publish,wf_visible=1;
-static unsigned delete_copy,reset_publish,phase;
+static unsigned delete_copy,reset_publish,phase,exit_copy,exit_publish;
 static unsigned owner_safe=1,owner_checks,native_calls;
 static int p67_wake_pending;
 static uint16_t output[2][P67_BLUR_PIXELS];
@@ -52,6 +52,7 @@ static void event(unsigned);
  X("native_error", 52) X("native_unsigned", UINT32_MAX) X("native_truncated64", UINT64_MAX)
 #endif
 #include "../src/p67_blur.inc"
+static struct p67_blur_session entry_test_session;
 static void deleted(void) {
  uint32_t e[5]={wf_root,wf_root,36,p67_blur_root_generation,0};
  p67_blur_root_event(e); wf_root=0; count=0;
@@ -85,6 +86,9 @@ static int copy(uint16_t *p,uint32_t *i) {
  if(delete_copy) { delete_copy=0;deleted();return 1; }
  if(copy_display_delete) { copy_display_delete=0;event(36);display_count=0; }
  if(copy_display_change) { copy_display_change=0;++host_display;display_count=0; }
+ if(exit_copy) {
+  exit_copy=0;p67_blur_session_event(&entry_test_session,1,77,301,9,0,480,1);
+ }
  if(pin_copy) owned_input=1;
  if(fail_copy) return 0;
  if(wrong_identity) { wrong_identity=0;++*i; }
@@ -94,6 +98,9 @@ static int copy(uint16_t *p,uint32_t *i) {
 static uintptr_t publish(const uint16_t *p,uint32_t epoch) {
  (void)p;(void)epoch;assert(phase==52);++publishes;
  if(reset_publish) { reset_publish=0;p67_blur_reset(); }
+ if(exit_publish) {
+  exit_publish=0;p67_blur_session_event(&entry_test_session,1,77,301,9,0,480,1);
+ }
  if(publish_display_delete) { publish_display_delete=0;event(36);display_count=0; }
  if(publish_display_change) { publish_display_change=0;++host_display;display_count=0; }
  if(fail_publish) return 0;
@@ -158,6 +165,7 @@ static void diagnostics(void) {
  assert(diagnostic_value(text,"wakes")==w);
  assert(diagnostic_value(text,"draws")==p67_blur_draws);
  assert(diagnostic_value(text,"config_epoch")==p67_blur_config_epoch);
+ assert(diagnostic_value(text,"begin_skips")==p67_blur_begin_skips);
 #ifdef HARNESS_NATIVE_DIAGNOSTICS
  assert(diagnostic_value(text,"native_error")==52);
  assert(diagnostic_value(text,"native_unsigned")==UINT32_MAX);
@@ -272,6 +280,106 @@ static void cleanup_budget(void) {
  /* Return to active demand for subsequent lifecycle tests. */
  poll(1);event(52);event(53);assert(p67_blur_source && p67_blur_core_gate==10);
 }
+static void entry_policy(void) {
+ struct p67_blur_session other={0,0};
+ struct p67_blur_session *s=&entry_test_session;
+ assert(p67_blur_source);event(53);
+ uint32_t serial=p67_blur_request_serial;
+ p67_blur_session_event(s,1,77,301,9,480,480,1);
+ assert(p67_blur_request_serial==serial+1 && s->generation==77 && s->page==301);
+ assert(p67_blur_entry_scoped && p67_blur_allowed_entries==1 && p67_blur_pending);
+ serial=p67_blur_request_serial;
+ p67_blur_session_event(s,1,77,301,9,480,480,1);
+ p67_blur_session_event(s,1,77,301,9,200,480,1);
+ assert(p67_blur_request_serial==serial && p67_blur_armed);
+ /* First visible START must consume the explicit entry, not request again. */
+ p67_blur_visible=0;unsigned c=copies;
+ event(52);assert(copies==c+1 && p67_blur_request_serial==serial && !p67_blur_pending);
+ event(53);uintptr_t old=p67_blur_source;
+ wf_visible=0;event(52);wf_visible=1;event(52);
+ assert(copies==c+1 && p67_blur_request_serial==serial && p67_blur_source==old);
+ p67_blur_session_event(s,1,77,301,11,200,480,1);
+ p67_blur_session_event(s,1,77,301,11,0,480,1);
+ assert(s->page==301 && p67_blur_allowed_entries==1);
+ /* Failed entry capture still owns only its first begin; partial snap cannot
+  * request or rearm after failure. A UI poll may retry until the exit begins. */
+ p67_blur_session_event(s,1,77,301,12,480,480,1);
+ assert(!p67_blur_allowed_entries && !s->page);
+ p67_blur_session_event(s,1,77,301,9,480,480,1);
+ fail_copy=1;event(52);c=copies;serial=p67_blur_request_serial;
+ for(unsigned n=0;n<10;++n) p67_blur_session_event(s,1,77,301,9,200,480,1);
+ event(52);event(53);
+ assert(copies==c && p67_blur_request_serial==serial && p67_blur_pending && !p67_blur_armed);
+ poll(1);assert(p67_blur_armed);event(52);assert(copies==c+1);
+ serial=p67_blur_request_serial;
+ p67_blur_session_event(s,1,77,301,9,0,480,0); /* Bubbled open-page content scroll. */
+ assert(p67_blur_request_serial==serial && p67_blur_allowed_entries==1);
+ assert(p67_blur_pending && !p67_blur_armed && p67_blur_source==old);
+ uint32_t epoch=p67_blur_epoch;serial=p67_blur_request_serial;
+ p67_blur_session_event(s,1,77,301,9,0,480,1);
+ assert(p67_blur_epoch==epoch+1 && p67_blur_request_serial==serial+1);
+ assert(!s->page && !p67_blur_allowed_entries && !p67_blur_pending && !p67_blur_armed);
+ assert(p67_blur_source==old && !p67_blur_request_wake);
+ fail_copy=0;c=copies;unsigned p=publishes,w=wakes;
+ serial=p67_blur_request_serial;
+ for(unsigned n=0;n<10;++n) {
+  poll(1);assert(!p67_wake_pending && !p67_blur_armed);
+  wf_visible=n&1;event(52);event(53);
+  p67_blur_session_event(s,1,77,301,9,n&1?200:0,480,1);
+ }
+ wf_visible=1;
+ assert(copies==c && publishes==p && wakes==w && p67_blur_request_serial==serial);
+ assert(p67_blur_source==old);
+ /* Reentrant exit during COPY aborts filtering/publication; during PUBLISH,
+  * retire only the rejected result, never the previous immutable source. */
+ p67_blur_session_event(s,1,77,301,9,480,480,1);exit_copy=1;event(52);
+ assert(copies==c+1 && publishes==p && p67_blur_source==old && !p67_blur_pending);
+ p67_blur_session_event(s,1,77,301,9,480,480,1);exit_publish=1;
+ unsigned r=retires;event(52);
+ assert(publishes==p+1 && retires==r+1 && p67_blur_source==old);
+ assert(!p67_blur_allowed_entries && !p67_blur_pending && p67_blur_core_gate==9);
+ c=copies;p=publishes;serial=p67_blur_request_serial;
+ poll(1);event(52);event(53);
+ assert(copies==c && publishes==p && p67_blur_request_serial==serial);
+ /* Each viewbit is independent. Exiting one page cannot cancel another's
+  * pending work, even if the bindings share an owner (the core has no owner). */
+ p67_blur_session_event(s,1,77,301,9,480,480,1);
+ p67_blur_session_event(&other,4,88,302,9,-480,-480,1);
+ serial=p67_blur_request_serial;epoch=p67_blur_epoch;
+ p67_blur_session_event(s,1,77,301,9,0,480,1);
+ assert(p67_blur_allowed_entries==4 && p67_blur_pending && p67_blur_armed);
+ assert(p67_blur_request_serial==serial && p67_blur_epoch==epoch);
+ event(52);assert(p67_blur_source && !p67_blur_pending);event(53);
+ p67_blur_session_clear(&other,4);assert(!p67_blur_allowed_entries);
+ /* Root/display lifecycle invalidation may leave dirty work while closed,
+  * but neither poll nor READY/visible rise may wake/rearm/capture it. */
+ deleted();wf_root=100;c=copies;p=publishes;w=wakes;serial=p67_blur_request_serial;
+ assert(p67_blur_pending && !p67_blur_armed && !p67_blur_source);
+ for(unsigned n=0;n<10;++n) {
+  poll(1);assert(!p67_wake_pending && !p67_blur_armed);
+  event(52);event(53);
+ }
+ assert(copies==c && publishes==p && wakes==w && p67_blur_request_serial==serial);
+ event(36);display_count=0;
+ poll(1);assert(display_count && p67_blur_pending && !p67_blur_armed && !p67_wake_pending);
+ event(52);event(53);assert(copies==c && publishes==p && wakes==w);
+ p67_blur_session_event(s,1,78,301,9,200,480,1);
+ assert(!s->page && !p67_blur_allowed_entries && !p67_blur_armed);
+ p67_blur_session_event(s,1,78,301,9,480,480,1);event(52);event(53);
+ assert(p67_blur_source && !p67_blur_pending && copies==c+1);
+ p67_blur_session_clear(s,1);old=p67_blur_source;
+ /* Explicit config reset is the prewarm exception, not an exit request. */
+ serial=p67_blur_request_serial;p67_blur_reset();
+ assert(!p67_blur_entry_scoped && !p67_blur_allowed_entries && p67_blur_capture_allowed());
+ assert(p67_blur_request_serial==serial+1 && p67_blur_source==old);
+ p67_blur_visible=0;serial=p67_blur_request_serial;event(52);event(53);
+ assert(p67_blur_source && !p67_blur_pending && p67_blur_request_serial==serial);
+ /* Enter direction management again before testing demand-off cleanup. */
+ p67_blur_session_event(s,1,78,301,9,480,480,1);
+ p67_blur_session_event(s,1,78,301,9,0,480,1);
+ assert(!p67_blur_capture_allowed() && !p67_blur_pending);
+ diagnostics();
+}
 int main(void) {
  poll(1);poll(1);assert(adds==1 && !copies);
  event(25);assert(!copies);event(52);assert(copies==1 && p67_blur_source && !p67_wake_pending);
@@ -342,6 +450,7 @@ int main(void) {
  assert(p67_blur_source==old && p67_blur_core_gate==6 && p67_blur_pending);
  diagnostics();poll(1);event(52);event(53);
  cleanup_budget();
+ entry_policy();
  /* Demand-off clears logical state even while owner gates are closed. */
  owner_safe=0;before=native_calls;p67_blur_watch(0);
  assert(!p67_blur_source && !p67_blur_pending && !p67_blur_armed && native_calls==before);

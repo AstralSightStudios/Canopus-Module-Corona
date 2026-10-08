@@ -59,6 +59,22 @@ class P67LiveLauncher(unittest.TestCase):
         self.assertNotIn('d[2] =', source)
         self.assertIn('if (match) return 0;', source)
         self.assertIn('event + 12) != p67_generation', source)
+    def test_gpu_blur_uses_low_resolution_image_contract(self):
+        source = (ROOT / 'src/p67_launcher.inc').read_text()
+        provider = (ROOT / 'src/p67_blur_native.inc').read_text()
+        self.assertIn('uint32_t descriptor[28]', source)
+        self.assertIn('P67_NATIVE(0x0c5882b9u)', source)
+        self.assertIn('P67_NATIVE(0x0c5882a1u)', source)
+        self.assertIn('descriptor[7] = source', source)
+        self.assertIn('descriptor[12] = descriptor[13] = 4u * 256u', source)
+        self.assertIn('descriptor[16] = descriptor[17] = 0', source)
+        self.assertIn('P67_BLUR_WIDTH - 1u, P67_BLUR_HEIGHT - 1u', source)
+        self.assertIn('p67_draw_background(layer', source)
+        self.assertIn('p67_blur_native_output_descriptor', provider)
+        self.assertIn('P67_BLUR_WIDTH, P67_BLUR_HEIGHT, 18u, 0u', provider)
+        self.assertIn('p67_blur_store_rgb565', provider)
+        self.assertNotIn('p67_blur_upscale_rgb565', provider)
+
     def test_exact_rectangle_and_screen_coordinates(self):
         source = (ROOT / 'src/p67_launcher.inc').read_text()
         self.assertIn('uint32_t descriptor[47]', source)

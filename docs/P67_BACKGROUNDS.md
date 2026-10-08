@@ -16,8 +16,10 @@ RH_P67_LIVE_BACKGROUNDS=1 sh scripts/build.sh xiaomi-band-10-pro-3.101.043
 Existing version=1 configuration accepts `blur` for launcher, control_center,
 notifications and widgets. No parser change or extra opt-in is required.
 Capture is static and demand-driven at REFR_START (52): one prewarm after
-activation and a fresh request on page gesture begin. Each request/UI-owner
-poll grants one consumable attempt. A failed attempt keeps pending work but
+activation and a fresh request only for a new page entry from its fully closed
+endpoint, matching the Band11 entry-only policy. Exiting to the watchface, partial
+reversal and release snap do not start another generation. Each allowed
+request/UI-owner poll grants one consumable attempt. A failed attempt keeps pending work but
 cannot request another whole-screen repaint every READY (53). The one-second
 watcher rearms and schedules the next attempt; it performs no capture or GPU
 fence before control-file processing. Successful output is not recaptured on
@@ -25,16 +27,139 @@ ordinary frames. Same-root reload preserves the previous immutable result. Resto
 while idle; finish gestures before reload; do not unload attached callbacks.
 
 Input is a default drawbuf-create format15 BGR888 module-owned 336x480 buffer.
-Output is format18 RGB565, at most two owned output buffers. All four pages
-share the processed result: 4x downsampling to 84x120, two radius-2 separable
-box passes, 30% darkening, bilinear 336x480 output. No native source-pool lease,
-alpha capture or inline patch is introduced. Output retirement requires explicit
+Output is format18 RGB565 at 84x120, at most two owned immutable output buffers.
+All four pages share the processed result: 4x downsampling, two radius-2 separable
+box passes and 30% darkening. Every new entry from the watchface requests a fresh
+capture; exit and ordinary frames retain the published result with native 4x GPU
+scaling. The
+CPU never expands the output to 336x480. No native source-pool lease, alpha capture
+or inline patch is introduced. Output retirement requires explicit
 raw GPU completion and a task-free native layer chain; snapshot return status
 alone is insufficient. Input allocation is bounded to one descriptor, even after
 fence failure; normal capture frees it after copying. The filter scratch is
-40,320 bytes, input pixels 483,840 bytes, and two output pixel buffers 645,120
-bytes, plus native descriptor/alignment overhead. Cache clean precedes the
+40,320 bytes, input pixels 483,840 bytes, and two output pixel buffers 40,320
+bytes at default stride168, plus native descriptor/alignment overhead. This saves
+604,800 output pixel bytes relative to the previous full-screen CPU upscale. Cache clean precedes the
 large-range invalidator, like Band 11, to preserve unrelated dirty CPU writes.
+
+### GPU-scaled blur output
+
+The shared draw helper keeps static file backgrounds on the existing 188-byte
+rectangle path. Blur uses image init `0x0C5882B9` (entity `0x1C0327D4`) and image
+draw `0x0C5882A1` (entity `0x1C032B20`): the image descriptor is 112 bytes, source
+at +28, scale_x/y at +48/+52, and pivot_x/y at +64/+68. Scale1024 is 4x; pivot
+and rotation stay zero. Original image area is [0,0,83,119], not a full-screen
+area scaled again. The existing page/screen/layer intersection is installed
+before submission and restored afterward. Native tasks copy both the descriptor
+and current clip; published source storage remains separately owned and immutable.
+Draw does not capture, filter, allocate module buffers or change object visibility.
+
+Firmware rectangle backgrounds only center or tile images; swapping their source
+for a small image would not upscale it. VG-Lite image evaluator `0x1C045520`
+accepts format18, and image renderer `0x1C046854` builds the transform and submits
+GPU blit/pattern work. RGB565 maps to VG format5; the audited linear path permits
+stride168 (four-byte alignment) and width84. Output validation checks exactly
+84x120, format18, a four-byte-aligned stride and bounded storage without loosening
+the full-screen snapshot input validator. Filter scratch is never used directly
+as a queued GPU source. Fences, PM, cache maintenance and retirement are unchanged.
+
+Static evidence: `four_way_draw.txt:1754-1768,1832-1843,1936-1947,2470-2530` and
+`lvgl_thunks.txt:2530-2535,2554-2559` under the analysis directory below, plus
+read-only IDA inspection of the exact saved AP database. The new calls are narrow
+exact-target static-recovered evidence, not public approval or device acceptance.
+No firmware ranges or source-pool permissions are broadened.
+
+GPU linear filtering is not pixel-identical to the previous CPU's per-channel
+truncation and edge replication. Hardware sampling phase, final row/column,
+clipped reveals and frame time remain NOT_PROBED. Scaling now happens on each
+background draw; reduced CPU preparation and memory do not guarantee a net GPU
+frame-time improvement. Device comparison should cover gradients/edge colors,
+all four directions, partial reveals, content scrolling, repeated gestures,
+reversal/cancellation and system restoration. Host regressions cover the actual
+image ABI/dispatch, clipping restoration, zero/stale sources, busy suppression,
+immutable padded output and existing failed-fence lifecycle bounds.
+
+### Entry-only generation, not every SCROLL_BEGIN
+
+The earlier event-driven implementation incorrectly requested a new blur for exit
+as well as entry. The intermediate input-session dedup only removed some release
+snaps; it did not fix that semantic error. It is superseded by the page-entry policy,
+without retaining the input-registry observer or parameter-pointer identities.
+
+Read the validated binding's PAGE, not its content root/list, before forwarding
+native code9. Exact closed endpoints and open position are:
+
+| Surface | Page coordinate | Closed | Open |
+|---|---|---:|---:|
+| Launcher | signed page+32, y1 | 480 | 0 |
+| Control Center | signed page+28, x1 | -336 | 0 |
+| Notifications | signed page+32, y1 | -480 | 0 |
+| Widgets | signed page+28, x1 | 336 | 0 |
+
+Native callbacks read these coordinates at `0x0C517DBE`, `0x0C5036E0`,
+`0x0C527BD8` and `0x0C50ABD4`. Finger begin at `0x1C0530B4` precedes movement
+(`0x1C052F82 -> 0x1C02E410`); animated begin at `0x1C02D768/0x1C02D82C` also
+precedes animation start. Therefore a code9 at the exact closed endpoint is a
+new entry intent, whether its parameter is NULL or an animation template. Code9
+at open0 is exit; at partial coordinates it is continuation/reversal, not another
+new entry. Animation parameters need not be dereferenced or treated as direction.
+
+Lock the entry as soon as it is accepted, even before output exists or publication
+succeeds. A continuation keeps that original pending budget; it does not replenish
+it. Returning fully closed rearms the next entry, including cancellation that
+reaches closed on event12 without a final END. An unknown partial binding after
+recreation fails closed rather than inferring entry merely from visible pixels.
+Content-list-only replacement under an unchanged owner/page/root preserves the
+entry session and pending retry budget: idle polling repairs list subscriptions
+without detaching the stable page binding. Root/owner replacement still invalidates
+that entry. Bubbled content scrolling at open0 does not cancel a page's pending
+entry; only a native owner-target exit does.
+Explicit activation/reload initialization retains the existing prewarm, so the
+first transition does not lose its source to an opaque native snapshot.
+
+A per-surface mask separates overlapping entries from exits. Once gesture direction
+is managed, losing the last active entry cancels capture intent and invalidates
+in-flight work, but never drops the published immutable image. START/owner poll
+cannot rebuild or repeatedly wake for a pending invalidation while all entries
+are closed/exiting. Disabled GPU cleanup remains independent. Native begin/end
+bookkeeping, resource ownership, rendering isolation and GPU/PM protection are
+unchanged. No new input callback seam or firmware permission is introduced.
+
+`begin_skips` counts BEGIN events suppressed by the entry policy, not elapsed time
+or GPU work. Like other counters it does not alone trigger diagnostic I/O. Host
+regressions cover all four closed/open endpoints, NULL/animated begins, exit,
+partial snap while pending/failed, reversal, closed cancellation without END,
+new entry, overlapping bindings and lifecycle/configuration changes. Device
+request counts and boundary frame time remain NOT_PROBED.
+
+### Terminal-end visibility fast path
+
+At a verified terminal end, a module-swapped pair already has live root visible
+and native snapshot image hidden. Control Center (`0x0C5036C4`) and widgets
+(`0x0C50ABB4`) restore flags only when root is hidden AND image is visible; their
+buffer frees and remaining end bookkeeping are outside that predicate. The
+adapter therefore leaves an already-final, validated pair unchanged and forwards
+the entire native callback. It does not suppress release, write native buffer
+slots or change begin capture behavior.
+
+Notifications (`0x0C527BBC`) delete the image at either terminal endpoint. Its
+DELETE callback `0x0C526B88` reads source, drops the decoder cache, returns the
+pool buffer, clears native image/buffer slots and restores root independently of
+HIDDEN. At y=0, pre-DELETE work queues callbacks and resets/resumes a timer. The
+fast path additionally requires the synchronous timer-resume hook at `0x20103218`
+to be NULL. A scheduling-only native hook was statically recovered, but its exact
+identity is not allowlisted by the current framework pack; this change does not
+embed that address, broaden permissions or bypass ELF verification. Every non-NULL
+hook retains the original flags. At y=-480, synchronous systray callbacks can
+observe state, so that endpoint also keeps the conservative restoration path.
+
+Nonterminal end, reversal begin, inconsistent flags/pairs and detach also retain
+the original restoration. Busy/generation guards remain in place. Native buffer
+and pool ownership is unchanged; blur requests now follow entry-only semantics. Host tests
+cover both endpoints, static/blur modes, native release exactly once, notification
+DELETE, NULL/non-NULL resume hooks, pre-DELETE reentry, root DELETE and zero added
+root-hide/image-show operations in the proven fast paths. This is static and host
+validation only; device completion-frame latency remains NOT_PROBED.
 
 ### Exact-target static evidence gates
 
@@ -56,8 +181,12 @@ These static findings do not prove hardware coherency.
 The stock `miwear_snapshot` wrapper at `0x0CA5FB40` also calls PM stay
 `0x0C1A78F1` before snapshot and relax `0x0C1A79B5` afterward, with the native
 116-byte `miwear-snapshot` lock at `0x200EB538` (domain0/state0). Active COPY
-now keeps that balanced power contract through capture/fencing; every raw GPU
-fence also uses a balanced bracket. Lock fields are never modified directly.
+keeps that balanced power contract through capture/fencing. Module-owned nesting
+now calls native stay/relax only on its outermost entry/exit: a successful COPY
+still performs all three explicit fences, but those nested fences no longer
+re-enter native PM/governor callbacks. A standalone maintenance fence still
+acquires its own balanced protection. Native lock fields are never modified
+directly; diagnostic PM counters count actual native API calls.
 Both PM APIs may invoke governor/driver callbacks and are treated as blocking.
 The missing guard was statically confirmed, but its role in device symptoms is
 not established.
@@ -75,8 +204,15 @@ Device rendering, GPU/cache recovery, retirement, latency and frame time remain
 **NOT_PROBED**. Earlier image-background feedback is not blur acceptance.
 Device feedback for the earlier active package: black/system backgrounds and
 approximately25-second reload response. This is a failed device report, not
-functional blur acceptance. The bounded-retry/PM/diagnostic revision still needs
-device verification. Existing older installation outputs are archived under
+functional blur acceptance. Subsequent user feedback reports working backgrounds
+and blur on the CPU-upscale revision, with frame drops at gesture start and
+animation completion. Later user feedback reports a large performance improvement
+with GPU-scaled output and terminal-end optimization, but residual blur-only stalls
+on all four pages at gesture start and finger release; static backgrounds are
+reported substantially smoother. These are uninstrumented observations, not
+stage timings or exhaustive acceptance. Further request/PM changes still require
+device verification.
+Existing older installation outputs are archived under
 `dist/archive/`. Do not hot-unload callbacks; restore system while idle and reboot
 when replacing the module. The verified ELF is `build/resource-hook.elf`.
 
@@ -107,12 +243,14 @@ Key interpretation:
 - `native_error`:1 no root,2 unsafe phase,3 pinned input,4 pre-fence,
   5 input allocation,6 input descriptor,7 snapshot return,8 post-fence,
   9 post-capture phase,10 root changed,11 reshaped descriptor,12 downsample,
-  13 output slots pinned,14 output allocation,15 output descriptor,16 upscale,
+  13 output slots pinned,14 output allocation,15 output descriptor,16 output copy,
   17 invalid/reentrant arguments;0 means no latched native failure.
+- `width`/`height`/`stride` describe the last validated owned descriptor, which
+  can be full-screen input (336x480) or low-resolution output (84x120).
 - `nonzero` counts nonblack pixels in the last successfully downsampled input,
   before blur/darkening; it is not a raster acceptance test.
 - `publishes`/`source` distinguish missing output from a black captured image.
-  `draws` counts submitted module blur-background rectangles, not GPU pixels.
+  `draws` counts submitted module GPU-scaled blur-image tasks, not GPU pixels.
 - `pm_stays`/`pm_relaxes`, `capture_result`, `last_gpu`, PM returns and owned-input
   state identify native progress/failure. Native integer fields are32-bit words
   (values>=2147483648 can represent negative returns); module errors are signed.

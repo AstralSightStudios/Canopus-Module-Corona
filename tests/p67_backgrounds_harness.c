@@ -30,21 +30,31 @@ static unsigned char moving;
 static uint32_t surface_root, surface_image;
 static int hidden_root, hidden_image, capture_fail;
 static unsigned cleanup, selected, first_enter, cache_reuses, captures;
+static unsigned root_hides, root_shows, image_hides, image_shows;
+static unsigned buffer_releases, pool_releases, image_deletes, end_bookkeeping;
+static unsigned begin_bookkeeping, end_reentry;
+static int native_buffer, reenter_on_end, delete_on_end;
+static uint32_t timer_resume_hook;
+static unsigned timer_resets, timer_resumes, predelete_reentry;
+static int reenter_before_delete;
 static uint32_t populated;
 static int delete_on_flag, delete_on_remove, shared_mode;
 static uint32_t root_slot, image_slot, foreground_slot;
 static unsigned add_calls, fail_add, mutate_binding, forwards[64], preparations, draws;
 static int forbid_mutation;
-static unsigned tree_calls;
+static unsigned tree_calls,forbid_page_coords;
 static uint32_t layer_clip[4];
 static int32_t expected_clip[4];
 static uint32_t last_prepared, last_draw_source;
+static unsigned image_inits, image_draws;
+static uint32_t last_image_descriptor[28];
 static struct object *object(uint32_t id) {
     for (unsigned i = 0; i < 5; ++i) if (objects[i].id == id) return &objects[i];
     assert(!"unknown object"); return 0;
 }
 static unsigned char *byte_at(uint32_t a) { assert(a == 0x201102d9u); return &moving; }
 static uint32_t *word_at(uint32_t a) {
+    if(a>=PAGE+28u && a<=PAGE+40u) assert(!forbid_page_coords);
     if (a >= 77u + 24u && a <= 77u + 36u) return &layer_clip[(a - 77u - 24u) / 4u];
     for (unsigned i = 0; i < 5; ++i) {
         struct object *s = &objects[i];
@@ -64,6 +74,7 @@ static uint32_t load32(uint32_t a) {
     if(a==0x2010fe50u || a==0x20110ef4u || a==0x201100e0u) return surface_root;
     if(a==0x2010fe64u || a==0x20110ed4u || a==0x201100ccu) return surface_image;
     if(a==0x20110ee8u || a==0x201100dcu) return populated;
+    if(a==0x20103218u) return timer_resume_hook;
     if (a == 0x201102ecu) return root_slot;
     if (a == 0x201102dcu) return image_slot;
     if (a == 0x201102f4u) return foreground_slot;
@@ -119,6 +130,24 @@ static void rect_draw(uint32_t layer, const void *d, const int32_t *area) {
     last_draw_source=((const uint32_t *)d)[30];
     ++draws;
 }
+static void image_init(void *d) {
+    memset(d,0,112); ((uint32_t *)d)[5]=112;
+    ((uint32_t *)d)[12]=((uint32_t *)d)[13]=256;
+    ((unsigned char *)d)[76]=255; ((unsigned char *)d)[77]=0x10;
+    ++image_inits;
+}
+static void image_draw(uint32_t layer,const void *d,const int32_t *area) {
+    const uint32_t *descriptor=d;
+    assert(layer==77 && descriptor[5]==112 && descriptor[7]==p67_blur_source);
+    assert(descriptor[12]==1024 && descriptor[13]==1024);
+    assert(!descriptor[11] && !descriptor[16] && !descriptor[17]);
+    assert(((const unsigned char *)d)[76]==255 && ((const unsigned char *)d)[77]==0x10);
+    assert(!area[0] && !area[1] && area[2]==83 && area[3]==119);
+    for(unsigned i=0;i<4;++i) assert((int32_t)layer_clip[i]==expected_clip[i]);
+    last_draw_source=descriptor[7];
+    memcpy(last_image_descriptor,d,sizeof(last_image_descriptor));
+    ++image_draws; ++draws;
+}
 static int image_info(const char *p, void *out) { (void)out; assert(p[0] && !rh_background_is_blur(p)); return 1; }
 static void flag_add(uint32_t o,uint32_t f) { assert(f==1 && !forbid_mutation);
  if(delete_on_flag && o==NEW_LIST) {
@@ -126,22 +155,67 @@ static void flag_add(uint32_t o,uint32_t f) { assert(f==1 && !forbid_mutation);
   uint32_t e[5]={LIST,LIST,36,p67_surfaces[selected].generation,77};
   p67_surface_event(e);object(LIST)->live=0;surface_root=0;
  }
- if(o==LIST) hidden_root=1; else {assert(o==NEW_LIST);hidden_image=1;} }
+ if(o==LIST) {++root_hides;hidden_root=1;}
+ else {assert(o==NEW_LIST);++image_hides;hidden_image=1;} }
 static void flag_remove(uint32_t o,uint32_t f) { assert(f==1 && !forbid_mutation);
  if(delete_on_remove && o==NEW_LIST) {
   delete_on_remove=0;uint32_t e[5]={LIST,LIST,36,p67_surfaces[selected].generation,77};
   p67_surface_event(e);object(LIST)->live=0;surface_root=0;
  }
- if(o==LIST) hidden_root=0; else {assert(o==NEW_LIST);hidden_image=0;} }
+ if(o==LIST) {++root_shows;hidden_root=0;}
+ else {assert(o==NEW_LIST);++image_shows;hidden_image=0;} }
 static int flag_has(uint32_t o,uint32_t f) { assert(f==1);if(shared_mode && o==FOREGROUND)return 0;if(o==LIST)return hidden_root;assert(o==NEW_LIST);return hidden_image; }
 static void surface_original(void *e) {
  unsigned code=*(uint16_t *)((char *)e+8)&0x7fff; assert(code<64); ++forwards[code];
  if(code==9) {
+  ++begin_bookkeeping;
   if(selected==2 && !first_enter++) {
-   if(surface_image) {++cache_reuses;hidden_root=1;hidden_image=0;}
-  } else if(!capture_fail) {++captures;surface_image=NEW_LIST;hidden_root=1;hidden_image=0;}
+   if(surface_image) ++cache_reuses;
+  } else if(!capture_fail) {
+   if(selected!=1 && native_buffer) ++buffer_releases;
+   ++captures;surface_image=NEW_LIST;native_buffer=1;object(NEW_LIST)->live=1;
+  }
+  if(surface_image && native_buffer && !hidden_root && hidden_image) {
+   flag_remove(NEW_LIST,1);flag_add(LIST,1);
+  }
  }
- if(code==11 && p67_terminal(&p67_surfaces[selected],PAGE)) { if(surface_image) {assert(hidden_root && !hidden_image); ++cleanup;} hidden_root=0;hidden_image=1; }
+ if(code==11 && p67_terminal(&p67_surfaces[selected],PAGE)) {
+  ++end_bookkeeping;
+  if(selected==1) {
+   /* y=0 queues its two bookkeeping callbacks and reset/resume only invokes
+    * the global wake hook. All non-NULL hooks (including the audited native
+    * hook outside the target allowlist) and outer-end systray callbacks must
+    * still observe the original native flags before image DELETE. */
+   if(object(PAGE)->y==0) {
+    timer_resets+=1;timer_resumes+=1;
+    if(timer_resume_hook && surface_image)
+     assert(hidden_root && !hidden_image);
+    if(reenter_before_delete) {
+     reenter_before_delete=0;++predelete_reentry;
+     p67_surface_scroll_for(&p67_surfaces[selected],e);
+    }
+   } else if(surface_image) assert(hidden_root && !hidden_image);
+   /* C526B88 DELETE reads source independently of visibility, releases its
+    * native pool slot, clears ED4/ED8 and restores root unconditionally. */
+   if(surface_image) {
+    assert(object(NEW_LIST)->live);
+    ++image_deletes;++pool_releases;++cleanup;
+    object(NEW_LIST)->live=0;surface_image=0;native_buffer=0;
+    flag_remove(LIST,1);hidden_image=1;
+   }
+  } else {
+   /* C5036C4/C50ABB4: visibility predicate does NOT guard the buffer free. */
+   if(hidden_root && !hidden_image) {flag_remove(LIST,1);flag_add(NEW_LIST,1);}
+   if(native_buffer) {++buffer_releases;++cleanup;native_buffer=0;}
+  }
+  if(reenter_on_end) {
+   reenter_on_end=0;++end_reentry;p67_surface_scroll_for(&p67_surfaces[selected],e);
+  }
+  if(delete_on_end) {
+   uint32_t gone[5]={LIST,LIST,36,p67_surfaces[selected].generation,77};
+   delete_on_end=0;p67_surface_event(gone);object(LIST)->live=0;surface_root=0;
+  }
+ }
 }
 static unsigned native_cc_calls,native_notify_calls,native_widget_calls;
 static void original_cc(void *e) { ++native_cc_calls;surface_original(e); }
@@ -166,6 +240,8 @@ static uintptr_t native(uint32_t a) {
     case 0x0c5166f1u: return (uintptr_t)prepare;
     case 0x0c588269u: return (uintptr_t)rect_init;
     case 0x0c588351u: return (uintptr_t)rect_draw;
+    case 0x0c5882b9u: return (uintptr_t)image_init;
+    case 0x0c5882a1u: return (uintptr_t)image_draw;
     default: assert(!"unknown native call"); return 0;
     }
 }
@@ -180,6 +256,7 @@ static void dispatch(struct p67_surface *s, uint32_t obj, unsigned code) {
         uint32_t *d=o->d[n], e[5];
         if(d[2] && d[2]!=code) continue;
         event(e,obj,obj,code,d[1]);
+        e[4]=code==25?77u:0u;
         if(d[0]==p67_scroll_fn(s)) p67_surface_scroll_for(s,e);
         else { assert(d[0]==p67_event_fn(s)); p67_surface_event(e); }
     }
@@ -234,7 +311,12 @@ static void check_notification_scroll(struct p67_surface *s) {
     forbid_mutation=0;
 }
 static void reset(void) {
-    forbid_mutation=0; tree_calls=0;
+    forbid_mutation=forbid_page_coords=0; tree_calls=0;
+    root_hides=root_shows=image_hides=image_shows=0;
+    buffer_releases=pool_releases=image_deletes=end_bookkeeping=begin_bookkeeping=end_reentry=0;
+    native_buffer=1;reenter_on_end=delete_on_end=delete_on_flag=delete_on_remove=0;
+    timer_resume_hook=0;
+    timer_resets=timer_resumes=predelete_reentry=0;reenter_before_delete=0;
     memset(objects, 0, sizeof(objects));
     uint32_t ids[5] = {OWNER, PAGE, FOREGROUND, LIST, NEW_LIST};
     for (unsigned i = 0; i < 5; ++i) { objects[i].id = ids[i]; objects[i].live = 1; }
@@ -245,6 +327,9 @@ static void reset(void) {
     object(OWNER)->count = 1;
     root_slot = LIST; foreground_slot = FOREGROUND; image_slot = moving = 0;
     p67_owner = p67_page = p67_draw_owner = p67_generation = p67_busy = p67_wake_pending = 0;
+    p67_blur_session_clear(&p67_launcher_session,1u);
+    p67_blur_entry_scoped=p67_blur_allowed_entries=0;
+    p67_blur_pending=p67_blur_armed=p67_blur_request_wake=p67_blur_demand=0;
     redraw_requests = 0; redraw_result = 0;
     p67_path_index = 0; memset(p67_path, 0, sizeof(p67_path));
     strcpy(p67_path[0], "/data/static.bin");
@@ -252,7 +337,350 @@ static void reset(void) {
     object(PAGE)->bounds[0] = 0; object(PAGE)->bounds[2] = 335; object(PAGE)->bounds[3] = 479;
     for (unsigned i = 0; i < 4; ++i) layer_clip[i] = (uint32_t)(expected_clip[i] = (int32_t)object(PAGE)->bounds[i]);
 }
+static void check_terminal_ends(void) {
+ for(unsigned i=0;i<3;++i) for(unsigned outer=0;outer<2;++outer)
+ for(unsigned blur=0;blur<2;++blur) {
+  reset();selected=i;shared_mode=0;populated=0;first_enter=cache_reuses=captures=cleanup=0;
+  p67_path[0][0]=0;
+  struct p67_surface *s=&p67_surfaces[i];
+  memset(&s->owner,0,sizeof(*s)-offsetof(struct p67_surface,owner));
+  strcpy(s->path,blur?":blur":"/data/static.bin");p67_blur_source=0x20001000u;
+  surface_root=LIST;surface_image=NEW_LIST;hidden_root=0;hidden_image=1;capture_fail=0;
+  object(LIST)->clz=0x2cdba8b4u;object(NEW_LIST)->clz=RH_FW_IMAGE_CLASS;
+  object(LIST)->parent=object(NEW_LIST)->parent=PAGE;
+  object(OWNER)->d[0][0]=s->callback;p67_surface_poll(s);assert(s->owner==OWNER);
+  if(i==1) object(PAGE)->y=(uint32_t)-480;
+  else object(PAGE)->bounds[0]=i==0?(uint32_t)-336:336;
+  uint32_t requested=p67_blur_request_serial;
+  dispatch(s,OWNER,9);
+  assert(s->moving && s->swapped && begin_bookkeeping==1);
+  assert(p67_blur_request_serial==requested+blur);
+  /* End in transit still restores/reswaps; reversal begin still forwards. */
+  if(i==1) object(PAGE)->y=(uint32_t)-100;
+  else object(PAGE)->bounds[0]=i==0?(uint32_t)-100:100;
+  unsigned released=buffer_releases, pooled=pool_releases;
+  root_hides=root_shows=image_hides=image_shows=0;
+  dispatch(s,OWNER,11);
+  assert(s->moving && s->swapped && !hidden_root && hidden_image);
+  assert(!cleanup && !end_bookkeeping && buffer_releases==released && pool_releases==pooled);
+  assert(root_hides==1 && root_shows==1 && image_hides==1 && image_shows==1);
+  if(i==1) object(PAGE)->y=0;else object(PAGE)->bounds[0]=0;
+  dispatch(s,OWNER,9);
+  assert(begin_bookkeeping==2 && s->swapped);
+  assert(p67_blur_request_serial==requested+2*blur);
+  if(outer) {
+   if(i==1) object(PAGE)->y=(uint32_t)-480;
+   else object(PAGE)->bounds[0]=i==0?(uint32_t)-336:336;
+  }
+  released=buffer_releases;pooled=pool_releases;
+  root_hides=root_shows=image_hides=image_shows=0;reenter_on_end=1;
+  unsigned forwarded=forwards[11];
+  dispatch(s,OWNER,11);
+  assert(forwards[11]==forwarded+1 && end_reentry==1 && end_bookkeeping==1);
+  assert(cleanup==1 && !s->moving && !s->swapped && !s->busy && !hidden_root);
+  assert(p67_blur_request_serial==requested+2*blur);
+  if(i==1) {
+   assert(image_deletes==1 && pool_releases==pooled+1 && buffer_releases==released);
+   assert(!surface_image && !object(NEW_LIST)->live);
+   assert(root_hides==outer && root_shows==1 && image_shows==outer && !image_hides);
+   assert(timer_resets==!outer && timer_resumes==!outer);
+  } else {
+   assert(buffer_releases==released+1 && pool_releases==pooled && !image_deletes);
+   assert(surface_image==NEW_LIST && hidden_image);
+   assert(!root_hides && !root_shows && !image_hides && !image_shows);
+  }
+  /* Repeated end cannot release the same native buffer/pool twice or add
+   * another visibility round trip after native cleanup. */
+  unsigned freed=buffer_releases, returned=pool_releases, deleted=image_deletes;
+  unsigned hides=root_hides, shows=root_shows, ih=image_hides, is=image_shows;
+  dispatch(s,OWNER,11);assert(cleanup==1 && end_bookkeeping==2);
+  assert(buffer_releases==freed && pool_releases==returned && image_deletes==deleted);
+  assert(root_hides==hides && root_shows==shows && image_hides==ih && image_shows==is);
+  assert(!s->moving && !s->swapped && !hidden_root);
+  p67_surface_detach(s);s->path[0]=0;
+ }
+ /* Inconsistent final flags take the conservative restoration path. Native
+  * DELETE invalidates both optimized and fallback bindings before post-end work. */
+ for(unsigned i=0;i<3;++i) for(unsigned fallback=0;fallback<2;++fallback) {
+  reset();selected=i;shared_mode=0;populated=0;cleanup=0;
+  struct p67_surface *s=&p67_surfaces[i];
+  memset(&s->owner,0,sizeof(*s)-offsetof(struct p67_surface,owner));
+  strcpy(s->path,"/data/static.bin");
+  s->owner=OWNER;s->page=PAGE;s->root=LIST;s->generation=1000+i;
+  s->moving=s->swapped=1;
+  surface_root=LIST;surface_image=NEW_LIST;hidden_root=(int)fallback;hidden_image=1;
+  object(LIST)->clz=0x2cdba8b4u;object(NEW_LIST)->clz=RH_FW_IMAGE_CLASS;
+  object(LIST)->parent=object(NEW_LIST)->parent=PAGE;
+  uint32_t e[5];event(e,OWNER,OWNER,11,PAGE);delete_on_end=1;
+  p67_surface_scroll_for(s,e);
+  assert(cleanup==1 && !s->root && !s->moving && !s->busy && s->dirty);
+  assert(!root_hides);
+  assert(root_shows==(i==1 || fallback) && image_shows==fallback);
+  assert(s->generation!=1000+i && !object(LIST)->live);
+  p67_surface_detach(s);s->path[0]=0;
+ }
+ /* Notify center end admits only NULL wake hooks. Both audited native and
+  * unknown non-NULL hooks retain the original swap without expanding the
+  * target allowlist. Pool release/DELETE remains exactly once on reentry. */
+ const uint32_t hooks[]={0,0x0c4b8411u,0xdeadbeefu};
+ for(unsigned n=0;n<3;++n) {
+  reset();selected=1;shared_mode=0;populated=0;cleanup=0;
+  struct p67_surface *s=&p67_surfaces[1];
+  memset(&s->owner,0,sizeof(*s)-offsetof(struct p67_surface,owner));
+  strcpy(s->path,"/data/static.bin");
+  s->owner=OWNER;s->page=PAGE;s->root=LIST;s->generation=1100+n;s->moving=s->swapped=1;
+  surface_root=LIST;surface_image=NEW_LIST;hidden_root=0;hidden_image=1;
+  object(LIST)->clz=0x2cdba8b4u;object(NEW_LIST)->clz=RH_FW_IMAGE_CLASS;
+  object(LIST)->parent=object(NEW_LIST)->parent=PAGE;
+  timer_resume_hook=hooks[n];reenter_before_delete=1;
+  uint32_t e[5];event(e,OWNER,OWNER,11,PAGE);
+  p67_surface_scroll_for(s,e);
+  assert(predelete_reentry==1 && forwards[11]==1 && end_bookkeeping==1);
+  assert(timer_resets==1 && timer_resumes==1 && image_deletes==1 && pool_releases==1);
+  assert(!buffer_releases && cleanup==1 && !surface_image && !object(NEW_LIST)->live);
+  assert(root_hides==(n!=0) && image_shows==(n!=0) && root_shows==1 && !image_hides);
+  assert(!hidden_root && !s->swapped && !s->moving && !s->busy);
+  p67_surface_detach(s);s->path[0]=0;
+ }
+ p67_blur_source=0;
+}
+/* Gesture parameters are opaque booleans, including a deliberately invalid
+ * stack-animation stand-in. Never inherit draw event()'s layer value here. */
+static void scroll_event(struct p67_surface *s,unsigned code,uint32_t target,
+                         uint32_t page,uint32_t param) {
+ uint32_t e[5];event(e,OWNER,target,code,page);e[4]=param;p67_surface_scroll_for(s,e);
+}
+static void completed_capture(void) {
+ p67_blur_source=0x20001000u;p67_blur_pending=p67_blur_armed=0;
+}
+static void position(struct p67_surface *s,int32_t value) {
+ if(s==&p67_surfaces[1]) object(s->page)->y=(uint32_t)value;
+ else object(s->page)->bounds[0]=(uint32_t)value;
+}
+static struct p67_surface *bind_blur(unsigned i) {
+ reset();selected=i;shared_mode=0;populated=0;first_enter=cache_reuses=captures=cleanup=0;
+ p67_path[0][0]=0;p67_blur_source=0;
+ struct p67_surface *s=&p67_surfaces[i];
+ memset(&s->owner,0,sizeof(*s)-offsetof(struct p67_surface,owner));
+ strcpy(s->path,":blur");
+ surface_root=LIST;surface_image=NEW_LIST;hidden_root=0;hidden_image=1;capture_fail=0;
+ object(LIST)->clz=0x2cdba8b4u;object(NEW_LIST)->clz=RH_FW_IMAGE_CLASS;
+ object(LIST)->parent=object(NEW_LIST)->parent=PAGE;
+ object(OWNER)->d[0][0]=s->callback;p67_surface_poll(s);assert(s->owner==OWNER);
+ position(s,p67_surface_closed(s));
+ return s;
+}
+static void check_blur_sessions(void) {
+ const uint32_t params[]={0,0xdeadbeefu};
+ for(unsigned i=0;i<3;++i) for(unsigned n=0;n<2;++n) {
+  struct p67_surface *s=bind_blur(i);unsigned bit=2u<<i;
+  uint32_t requested=p67_blur_request_serial;
+  scroll_event(s,9,LIST,PAGE,params[n]);
+  assert(p67_blur_request_serial==requested+1 && p67_blur_pending);
+  assert(s->session.page==PAGE && s->session.generation==s->generation);
+  assert(p67_blur_allowed_entries==bit && s->moving);
+  assert(forwards[9]==1 && begin_bookkeeping==1);
+  requested=p67_blur_request_serial;
+  scroll_event(s,9,LIST,PAGE,params[!n]); /* repeat before first coordinate update */
+  assert(p67_blur_request_serial==requested && s->session.page==PAGE);
+  position(s,i==0?-100:i==1?-100:100);
+  completed_capture(); /* code12 never restores flags or walks the tree */
+  unsigned walks=tree_calls,hides=root_hides,shows=root_shows,ih=image_hides,is=image_shows;
+  for(unsigned frame=0;frame<128;++frame) scroll_event(s,12,LIST,PAGE,0);
+  assert(tree_calls==walks && root_hides==hides && root_shows==shows);
+  assert(image_hides==ih && image_shows==is && s->session.page==PAGE);
+  p67_blur_source=0;p67_blur_pending=p67_blur_armed=1; /* initial request still pending/failed */
+  position(s,0);scroll_event(s,9,LIST,PAGE,0xdeadbeefu); /* Bubbled content, not exit. */
+  assert(p67_blur_request_serial==requested && p67_blur_pending && p67_blur_armed);
+  assert(p67_blur_allowed_entries==bit && s->session.page==PAGE);
+  position(s,i==0?-100:i==1?-100:100);
+  for(unsigned success=0;success<2;++success) {
+   if(success) completed_capture();
+   for(unsigned p=0;p<2;++p) {
+    scroll_event(s,9,FOREGROUND,PAGE,params[p]); /* partial snap/reversal/newtouch */
+    assert(p67_blur_request_serial==requested && p67_blur_allowed_entries==bit);
+   }
+  }
+  scroll_event(s,11,LIST,PAGE,0xdeadbeefu);scroll_event(s,11,LIST,PAGE,0);
+  assert(s->session.page==PAGE && p67_blur_allowed_entries==bit && s->moving);
+  position(s,0);scroll_event(s,11,LIST,PAGE,0); /* open END does not revoke entry */
+  assert(s->session.page==PAGE && p67_blur_allowed_entries==bit);
+  unsigned forwarded=forwards[9];scroll_event(s,9,LIST,PAGE,0);
+  assert(forwards[9]==forwarded+1 && p67_blur_request_serial==requested);
+  assert(s->session.page==PAGE && p67_blur_allowed_entries==bit);
+  uintptr_t source=p67_blur_source;unsigned copies=p67_blur_copies;
+  scroll_event(s,9,OWNER,PAGE,params[n]);
+  assert(p67_blur_request_serial==requested+1 && !p67_blur_pending && !p67_blur_armed);
+  assert(!s->session.page && !p67_blur_allowed_entries);
+  assert(p67_blur_source==source && p67_blur_copies==copies);
+  requested=p67_blur_request_serial;scroll_event(s,9,LIST,PAGE,params[!n]);
+  position(s,i==0?-100:i==1?-100:100);scroll_event(s,9,LIST,PAGE,0);
+  assert(p67_blur_request_serial==requested && !p67_blur_pending);
+  assert(p67_blur_source==source && p67_blur_copies==copies);
+  /* Cancellation without END: closed 12 revokes and permits the next entry. */
+  position(s,p67_surface_closed(s));scroll_event(s,9,LIST,PAGE,params[n]);
+  assert(p67_blur_request_serial==requested+1 && s->session.page==PAGE);
+  requested=p67_blur_request_serial;scroll_event(s,12,LIST,PAGE,0);
+  assert(!s->session.page && !p67_blur_allowed_entries && !p67_blur_pending);
+  assert(p67_blur_request_serial==requested+1);
+  requested=p67_blur_request_serial;scroll_event(s,9,LIST,PAGE,params[!n]);
+  assert(p67_blur_request_serial==requested+1 && s->session.page==PAGE);
+  scroll_event(s,11,LIST,PAGE,0xdeadbeefu);
+  assert(!s->session.page && !p67_blur_pending);
+  assert(forwards[9]==begin_bookkeeping); /* Every native begin still forwarded. */
+  p67_surface_detach(s);s->path[0]=0;
+ }
+ for(unsigned i=0;i<3;++i) {
+  /* Generation change at partial is fail closed; only exact closed can start. */
+  struct p67_surface *s=bind_blur(i);
+  scroll_event(s,9,LIST,PAGE,0);position(s,i==2?100:-100);++s->generation;
+  scroll_event(s,9,LIST,PAGE,0xdeadbeefu);
+  assert(!s->session.page && !p67_blur_allowed_entries && !p67_blur_pending);
+  uint32_t requested=p67_blur_request_serial;
+  scroll_event(s,9,LIST,PAGE,0);assert(p67_blur_request_serial==requested);
+  position(s,p67_surface_closed(s));scroll_event(s,9,LIST,PAGE,0xdeadbeefu);
+  assert(p67_blur_request_serial==requested+1 && s->session.generation==s->generation);
+  p67_surface_detach(s);s->path[0]=0;
+  for(unsigned which=0;which<4;++which) {
+   s=bind_blur(i);scroll_event(s,9,LIST,PAGE,0);completed_capture();
+   uintptr_t source=p67_blur_source;
+   if(!which) p67_surface_detach(s);
+   else {
+    uint32_t obj=which==1?OWNER:which==2?LIST:FOREGROUND,e[5];
+    if(which==3) s->list=obj;
+    uint32_t generation=s->generation;
+    requested=p67_blur_request_serial;
+    event(e,obj,obj,36,generation);p67_surface_event(e);
+    if(which==3) {
+     assert(s->generation==generation && s->session.page==PAGE);
+     assert(p67_blur_allowed_entries==(2u<<i) && p67_blur_request_serial==requested);
+    }
+   }
+   if(which!=3) assert(!s->session.page && !p67_blur_allowed_entries);
+   assert(p67_blur_source==source);
+   p67_surface_detach(s);s->path[0]=0;
+  }
+ }
+ /* Root DELETE/slot replacement leave userdata behind until idle detach.
+  * These and a dead PAGE at begin must not be read by direction management. */
+ for(unsigned i=0;i<3;++i) for(unsigned which=0;which<3;++which) {
+  struct p67_surface *s=bind_blur(i);scroll_event(s,9,LIST,PAGE,0);
+  if(which==0) {
+   uint32_t e[5];event(e,LIST,LIST,36,s->generation);p67_surface_event(e);
+  }
+  if(which==1) surface_root=FOREGROUND;
+  if(which==2) object(PAGE)->live=0;
+  surface_image=0;capture_fail=1; /* native begin needs no mock image swap */
+  forbid_page_coords=1;scroll_event(s,9,LIST,PAGE,0);
+  if(which!=2) scroll_event(s,12,LIST,PAGE,0);
+  forbid_page_coords=0;
+  assert(!s->session.page && !p67_blur_allowed_entries);
+  p67_surface_detach(s);s->path[0]=0;
+ }
+ /* One native owner with different pages uses separate viewbits, never ownerbits. */
+ reset();p67_path[0][0]=0;shared_mode=1;populated=0;hidden_root=0;
+ surface_image=0;capture_fail=1;
+ object(LIST)->clz=object(FOREGROUND)->clz=0x2cdba8b4u;
+ object(LIST)->parent=PAGE;object(FOREGROUND)->parent=NEW_LIST;object(NEW_LIST)->parent=OWNER;
+ object(OWNER)->count=2;
+ object(OWNER)->d[0][0]=p67_surfaces[0].callback;object(OWNER)->d[0][1]=PAGE;
+ object(OWNER)->d[1][0]=p67_surfaces[1].callback;object(OWNER)->d[1][1]=NEW_LIST;
+ for(unsigned i=0;i<2;++i) {
+  struct p67_surface *s=&p67_surfaces[i];
+  memset(&s->owner,0,sizeof(*s)-offsetof(struct p67_surface,owner));strcpy(s->path,":blur");
+  p67_surface_poll(s);assert(s->owner==OWNER);
+  position(s,p67_surface_closed(s));selected=i;scroll_event(s,9,LIST,s->page,0);
+ }
+ assert(p67_blur_allowed_entries==6 && p67_blur_pending);
+ uint32_t requested=p67_blur_request_serial;
+ position(&p67_surfaces[0],0);selected=0;scroll_event(&p67_surfaces[0],9,OWNER,PAGE,0);
+ assert(p67_blur_allowed_entries==4 && p67_blur_pending && p67_blur_armed);
+ assert(p67_blur_request_serial==requested && p67_surfaces[1].session.page==NEW_LIST);
+ p67_surface_detach(&p67_surfaces[0]);assert(p67_blur_allowed_entries==4);
+ p67_surface_detach(&p67_surfaces[1]);assert(!p67_blur_allowed_entries && !p67_blur_pending);
+ for(unsigned i=0;i<3;++i) p67_surfaces[i].path[0]=0;
+ shared_mode=0;p67_blur_source=0;
+}
+/* A failed new capture may coexist with an immutable fallback. Open END makes
+ * the native surface idle, but must leave its accepted entry budget pending. */
+static struct p67_surface *idle_blur_pending(unsigned i) {
+ struct p67_surface *s=bind_blur(i);
+ populated=FOREGROUND;object(FOREGROUND)->clz=0x2cdba28cu;
+ object(FOREGROUND)->parent=LIST;p67_surface_refresh_list(s);
+ assert(s->list==FOREGROUND && object(FOREGROUND)->count==1);
+ p67_blur_source=0x20001000u;
+ scroll_event(s,9,LIST,PAGE,0);position(s,0);scroll_event(s,11,LIST,PAGE,0);
+ assert(!s->moving && !s->swapped && p67_surface_idle(s));
+ assert(s->session.page==PAGE && p67_blur_allowed_entries==(2u<<i));
+ assert(p67_blur_pending && p67_blur_armed && p67_blur_source);
+ return s;
+}
+static void check_idle_list_repair(void) {
+ for(unsigned i=1;i<3;++i) {
+  struct p67_surface *s=idle_blur_pending(i);
+  uint32_t generation=s->generation,session_generation=s->session.generation;
+  uint32_t request=p67_blur_request_serial,epoch=p67_blur_epoch;
+  uintptr_t source=p67_blur_source;
+  unsigned owner_count=object(OWNER)->count,root_count=object(LIST)->count;
+  unsigned snapshots=captures,released=cleanup;
+  uint32_t e[5];event(e,FOREGROUND,FOREGROUND,36,generation);p67_surface_event(e);
+  object(FOREGROUND)->live=0;object(FOREGROUND)->count=0;populated=0;
+  assert(!s->list && s->dirty);
+  uint32_t list_epoch=s->epoch;
+  /* Missing list, failed listener add, recreated list (same address), stable
+   * repeat poll: none may detach the unchanged native page binding. */
+  for(unsigned phase=0;phase<4;++phase) {
+   if(phase==1) {
+    object(FOREGROUND)->live=1;populated=FOREGROUND;fail_add=add_calls+1;
+   }
+   if(phase==2) fail_add=0;
+   unsigned adds=add_calls;p67_surface_poll(s);
+   assert(add_calls==adds+(phase==1 || phase==2));
+   assert(s->owner==OWNER && s->page==PAGE && s->root==LIST);
+   assert(s->generation==generation && s->epoch==list_epoch && !s->dirty);
+   assert(s->session.generation==session_generation && s->session.page==PAGE);
+   assert(p67_blur_allowed_entries==(2u<<i) && p67_blur_pending && p67_blur_armed);
+   assert(p67_blur_request_serial==request && p67_blur_epoch==epoch && p67_blur_source==source);
+   assert(object(OWNER)->count==owner_count && object(LIST)->count==root_count);
+   uint32_t *d=p67_descriptor(OWNER,p67_scroll_fn(s));assert(d && d[1]==PAGE && !d[2]);
+   assert(captures==snapshots && cleanup==released && !hidden_root && hidden_image);
+   if(phase<2) assert(!s->list && !object(FOREGROUND)->count);
+   else {
+    assert(s->list==FOREGROUND && object(FOREGROUND)->count==1);
+    d=p67_descriptor(FOREGROUND,p67_event_fn(s));assert(d && d[1]==generation && !d[2]);
+   }
+  }
+  /* Root DELETE still invalidates the whole entry, even with a repaired list. */
+  event(e,LIST,LIST,36,generation);p67_surface_event(e);
+  object(LIST)->live=0;surface_root=0;p67_surface_poll(s);
+  assert(!s->owner && !s->root && !s->list && !s->session.page);
+  assert(!p67_blur_allowed_entries && !p67_blur_pending && !p67_blur_armed);
+  assert(p67_blur_request_serial==request+1 && p67_blur_epoch==epoch+1);
+  assert(p67_blur_source==source && !object(FOREGROUND)->count);
+  s->path[0]=0;
+ }
+ /* Unknown class/parent/wrapper changes cannot masquerade as list repair. */
+ for(unsigned i=1;i<3;++i) for(unsigned which=0;which<5;++which) {
+  struct p67_surface *s=idle_blur_pending(i);
+  uint32_t request=p67_blur_request_serial,epoch=p67_blur_epoch;
+  uintptr_t source=p67_blur_source;
+  if(which==0) object(LIST)->clz=0;
+  if(which==1) object(LIST)->parent=FOREGROUND;
+  if(which==2) object(PAGE)->parent=FOREGROUND;
+  if(which==3) p67_descriptor(OWNER,p67_scroll_fn(s))[1]=FOREGROUND;
+  if(which==4) p67_descriptor(OWNER,p67_scroll_fn(s))[2]=1;
+  p67_surface_poll(s);
+  assert(!s->owner && !s->root && !s->session.page);
+  assert(!p67_blur_allowed_entries && !p67_blur_pending && !p67_blur_armed);
+  assert(p67_blur_request_serial==request+1 && p67_blur_epoch==epoch+1);
+  assert(p67_blur_source==source);s->path[0]=0;
+ }
+ p67_blur_source=0;populated=0;
+}
 int main(void) {
+ check_terminal_ends();
+ check_blur_sessions();
+ check_idle_list_repair();
  uint32_t e[5];
  for(unsigned i=0;i<3;++i) {
   reset();selected=i;first_enter=cache_reuses=captures=0;populated=0;delete_on_flag=0;p67_path[0][0]=0;
@@ -385,8 +813,37 @@ int main(void) {
   p67_blur_source=0;
   event(e,LIST,LIST,25,s->generation);p67_surface_event(e);assert(!draws);
   p67_blur_source=0x20001000u;
+  unsigned submitted=image_draws,initialized=image_inits;
+  uint32_t copies=p67_blur_copies;
   event(e,LIST,LIST,25,s->generation);p67_surface_event(e);
   assert(draws==1 && last_draw_source==p67_blur_source);
+  assert(image_draws==submitted+1 && image_inits==initialized+1);
+  /* Full and partial reveal use the same screen-origin 4x image transform. */
+  object(PAGE)->y=120;object(PAGE)->bounds[3]=599;
+  layer_clip[0]=(uint32_t)-20;layer_clip[1]=100;layer_clip[2]=360;layer_clip[3]=600;
+  expected_clip[0]=0;expected_clip[1]=120;expected_clip[2]=335;expected_clip[3]=479;
+  uint32_t saved_clip[4];memcpy(saved_clip,layer_clip,sizeof(saved_clip));
+  forbid_mutation=1;
+  p67_surface_event(e);
+  assert(draws==2 && image_draws==submitted+2 && !memcmp(saved_clip,layer_clip,sizeof(saved_clip)));
+  assert(last_image_descriptor[7]==p67_blur_source && p67_blur_copies==copies);
+  object(PAGE)->y=480;p67_surface_event(e);assert(draws==2);
+  assert(!memcmp(saved_clip,layer_clip,sizeof(saved_clip)));
+  object(PAGE)->y=120;
+  event(e,LIST,LIST,25,s->generation-1u);p67_surface_event(e);assert(draws==2);
+  event(e,LIST,FOREGROUND,25,s->generation);p67_surface_event(e);assert(draws==2);
+  event(e,LIST,LIST,24,s->generation);p67_surface_event(e);assert(draws==2);
+  event(e,LIST,LIST,25,s->generation);s->busy=1;p67_surface_event(e);assert(draws==2);s->busy=0;
+  if(i>0) {
+   s->list=FOREGROUND;object(FOREGROUND)->parent=LIST;
+   /* A scrolled content list must not move the background or widen its viewport. */
+   object(FOREGROUND)->y=(uint32_t)-400;object(FOREGROUND)->bounds[3]=1000;
+   event(e,FOREGROUND,FOREGROUND,25,s->generation);p67_surface_event(e);
+   assert(draws==3 && image_draws==submitted+3 && !memcmp(saved_clip,layer_clip,sizeof(saved_clip)));
+   assert(last_image_descriptor[12]==1024 && !last_image_descriptor[17]);
+   s->list=0;
+  }
+  forbid_mutation=0;
   /* Blur steady scroll must not mutate listeners, capture or visibility. */
   object(OWNER)->d[0][0]=p67_scroll_fn(s);
   s->moving=1;check_notification_scroll(s);s->moving=0;

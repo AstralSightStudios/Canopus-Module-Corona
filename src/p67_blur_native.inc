@@ -21,7 +21,7 @@
 struct p67_blur_native_output { uint32_t descriptor; unsigned retired; };
 static struct p67_blur_native_output p67_blur_native_outputs[2];
 static uint32_t p67_blur_native_input;
-static unsigned p67_blur_native_capturing;
+static unsigned p67_blur_native_capturing, p67_blur_native_power_depth;
 /* Memory-only diagnostics. They are serialized by the UI-owner watcher, never
  * written from snapshot, draw, or refresh callbacks. */
 static uint32_t p67_blur_native_error, p67_blur_native_idle_error;
@@ -100,13 +100,17 @@ static void p67_blur_native_barrier(void) {
 #endif
 }
 /* The stock miwear snapshot wrapper brackets capture with this native PM lock.
- * Borrow it through balanced APIs only; never change its fields directly. */
+ * Borrow it through balanced APIs only; never change its fields directly.
+ * COPY already protects nested fences. Only outer transitions enter native PM
+ * (and its governor callbacks); standalone maintenance still gets its own lock. */
 static void p67_blur_native_power_begin(void) {
+    if (p67_blur_native_power_depth++) return;
     p67_blur_native_last_pm_stay = ((int (*)(uint32_t))(uintptr_t)
         P67_NATIVE(0x0c1a78f1u))(0x200eb538u);
     ++p67_blur_native_pm_stays;
 }
 static void p67_blur_native_power_end(void) {
+    if (!p67_blur_native_power_depth || --p67_blur_native_power_depth) return;
     p67_blur_native_last_pm_relax = ((int (*)(uint32_t))(uintptr_t)
         P67_NATIVE(0x0c1a79b5u))(0x200eb538u);
     ++p67_blur_native_pm_relaxes;
@@ -161,8 +165,9 @@ static uint32_t p67_blur_native_watchface(void) {
     p67_blur_native_root_seen = root;
     return p67_live(root) ? root : 0;
 }
-static int p67_blur_native_descriptor(uint32_t descriptor, unsigned format,
-                                      struct p67_blur_pixel_view *view) {
+static int p67_blur_native_descriptor_for(uint32_t descriptor, unsigned format,
+                                          unsigned width, unsigned height,
+                                          struct p67_blur_pixel_view *view) {
     uint32_t header, size, pixels, allocation, packed, stride;
     if (!p67_blur_native_ram(descriptor, 28u)) return 0;
     header = P67_U32(descriptor);
@@ -175,19 +180,32 @@ static int p67_blur_native_descriptor(uint32_t descriptor, unsigned format,
     p67_blur_native_height = packed >> 16;
     p67_blur_native_stride = stride;
     if ((header & 0xffu) != 25u || ((header >> 8) & 0xffu) != format ||
-        packed != (480u << 16 | 336u) || (pixels & 63u) || pixels < allocation ||
+        packed != (height << 16 | width) || (pixels & 63u) || pixels < allocation ||
         pixels - allocation > 63u || size > 1024u * 1024u ||
-        stride < 336u * (format == 15u ? 3u : 2u) || stride > 2048u ||
-        size < stride * 480u || !p67_blur_native_ram(allocation, size + pixels - allocation) ||
+        stride < width * (format == 15u ? 3u : 2u) || stride > 2048u ||
+        size < stride * height || !p67_blur_native_ram(allocation, size + pixels - allocation) ||
         P67_U32(descriptor + 24u) != 0x20103244u) return 0;
 #ifdef P67_BLUR_TEST_PIXELS
     view->pixels = P67_BLUR_TEST_PIXELS(pixels);
 #else
     view->pixels = (const unsigned char *)(uintptr_t)pixels;
 #endif
-    view->width = 336u; view->height = 480u; view->format = format;
+    view->width = width; view->height = height; view->format = format;
     view->stride = stride; view->size = size;
     return 1;
+}
+/* Input stays full-screen BGR888. Output validation has a separate fixed shape;
+ * accepting a small GPU source must never loosen the snapshot input contract. */
+static int p67_blur_native_descriptor(uint32_t descriptor, unsigned format,
+                                      struct p67_blur_pixel_view *view) {
+    return p67_blur_native_descriptor_for(descriptor, format, 336u, 480u, view);
+}
+static int p67_blur_native_output_descriptor(uint32_t descriptor,
+                                             struct p67_blur_pixel_view *view) {
+    if (!p67_blur_native_descriptor_for(descriptor, 18u,
+            P67_BLUR_WIDTH, P67_BLUR_HEIGHT, view)) return 0;
+    /* The audited linear RGB565 VG-Lite path requires a four-byte stride. */
+    return !(view->stride & 3u);
 }
 static int p67_blur_native_copy(uint16_t *plane, uint32_t *identity) {
     struct p67_blur_pixel_view view;
@@ -283,14 +301,14 @@ static uintptr_t p67_blur_native_publish(const uint16_t *plane, uint32_t epoch) 
     }
     if (!out) { p67_blur_native_error=13; return 0; }
     descriptor = ((uint32_t (*)(uint32_t, uint32_t, uint32_t, uint32_t))(uintptr_t)
-        P67_NATIVE(0x0c587f39u))(336u, 480u, 18u, 0u);
+        P67_NATIVE(0x0c587f39u))(P67_BLUR_WIDTH, P67_BLUR_HEIGHT, 18u, 0u);
     if (!descriptor) { p67_blur_native_error=14; return 0; }
     ++p67_blur_native_output_allocs;
     out->descriptor = descriptor; out->retired = 0;
-    if (!p67_blur_native_descriptor(descriptor, 18u, &view)) {
+    if (!p67_blur_native_output_descriptor(descriptor, &view)) {
         p67_blur_native_error=15; out->retired=1; return 0;
     }
-    if (!p67_blur_upscale_rgb565(plane, (void *)(uintptr_t)view.pixels, view.stride, view.size)) {
+    if (!p67_blur_store_rgb565(plane, (void *)(uintptr_t)view.pixels, view.stride, view.size)) {
         p67_blur_native_error=16; out->retired=1; return 0;
     }
     p67_blur_native_clean();
