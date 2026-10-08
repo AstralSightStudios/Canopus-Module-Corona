@@ -536,9 +536,6 @@ export async function regenerateActiveMappings(
           !Array.isArray(theme.manifest.mappings) || !Array.isArray(theme.files))
         throw new Error(`资源快照缺少资源包 ${themeId}，无法生成映射`);
     }
-    if (runtimeTarget && !CALENDAR_RUNTIME_TARGETS.includes(runtimeTarget) &&
-        activeThemeIds.some(id => snapshot.themes.get(id)!.manifest.calendar !== undefined))
-      throw new Error(`当前模块目标 ${runtimeTarget} 不支持 calendar（仅支持精确 .177 目标）`);
     if (snapshot.activeMappings?.key === cacheKey) return snapshot.activeMappings.plan;
   }
   const themesHighToLow: ThemeRules[] = [];
@@ -569,8 +566,6 @@ export async function regenerateActiveMappings(
       themesHighToLow.push({ themeId, manifest: { ...manifest, mappings }, files: null, active: false });
   }
 
-  if (runtimeTarget && !CALENDAR_RUNTIME_TARGETS.includes(runtimeTarget) && resolveCalendar(themesHighToLow))
-    throw new Error(`当前模块目标 ${runtimeTarget} 不支持 calendar（仅支持精确 .177 目标）`);
 
   // Inventories resolve overlapping groups for exact rules or the overlay fallback.
   const inventoryThemeIds = themesNeedingInventory(

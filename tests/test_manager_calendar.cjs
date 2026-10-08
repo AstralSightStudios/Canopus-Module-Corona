@@ -154,16 +154,12 @@ async function main() {
   assert.equal(serialize([reset, low]), 'version=1\n');
   assert.equal(serialize([{ ...low, active: false }]), 'version=1\n');
 
-  // Known exact targets fail before any publication, including cache hits. Metadata is not detection.
-  for (const target of ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155', 'xiaomi-band-10-pro-3.101.043']) {
-    const unsupported = makeFile();
-    await assert.rejects(activation.regenerateActiveMappings(['reset', '@system'], 'unsupported',
-      unsupported, {}, snapshot(reset), target), /不支持 calendar/);
-    assert.equal(unsupported.calls.length, 0);
-    unsupported.text.set(`${themeRoot}reset/corona.json`, JSON.stringify(reset.manifest));
-    await assert.rejects(activation.regenerateActiveMappings(['reset', '@system'], 'unsupported',
-      unsupported, {}, undefined, target), /不支持 calendar/);
-    assert(!unsupported.calls.some(([method]) => method === 'write'));
+  // Uniform publication: all targets emit identical calendar.cfg; runtime module handles adaptation.
+  for (const target of ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155', 'xiaomi-band-10-pro-3.101.043', 'xiaomi-band-11-4.100.177']) {
+    const targetFile = makeFile();
+    await activation.regenerateActiveMappings(['reset', '@system'], 'target-test',
+      targetFile, {}, snapshot(reset), target);
+    assert.equal(targetFile.text.get(cfgUri), 'version=1\n');
   }
   const exact = makeFile();
   await activation.regenerateActiveMappings(['reset', '@system'], 'exact', exact, {}, snapshot(reset),
@@ -172,11 +168,9 @@ async function main() {
   const exactSnapshot = snapshot(reset);
   await activation.regenerateActiveMappings(['reset', '@system'], 'cacheexact', exact, {}, exactSnapshot,
     'xiaomi-band-11-4.100.177');
-  await assert.rejects(activation.regenerateActiveMappings(['reset', '@system'], 'cachedother', exact, {}, exactSnapshot,
-    'xiaomi-band-11-4.100.139'), /不支持 calendar/);
   const below = makeFile();
   await activation.regenerateActiveMappings(['@system', 'low'], 'below', below, {}, snapshot(low),
-    'xiaomi-band-11-4.100.139');
+    'xiaomi-band-10-pro-3.101.043');
   assert.equal(below.text.get(cfgUri), 'version=1\n', 'inactive declarations do not assert runtime support');
 
   // Publish with TSV, retain old/native-resident dependencies until acknowledged cleanup.
