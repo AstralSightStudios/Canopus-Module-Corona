@@ -125,7 +125,7 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
     if (retire_cache(header, 0u, mapping, 0)) return -1;
     return retire_cache(data, 4u, mapping, 0);
 }
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if RH_Q66_BACKGROUND
 /* Screen-fixed native backgrounds for launcher, control center, and
  * notifications. ARM ownership maps replace scrolling property-40 images
  * with per-object DRAW_MAIN_END callbacks, before native child traversal. */

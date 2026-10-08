@@ -44,7 +44,7 @@ int rh_platform_refresh_calendar(void);
 struct rh_calendar_config;
 int rh_platform_calendar_retire(const struct rh_calendar_config *);
 void rh_platform_calendar_publish(void);
-/* Experimental .177 only. UI-owner-only, outside the IRQ lock. The watcher
+/* Exact Band 11 background adapter. UI-owner-only, outside the IRQ lock. The watcher
  * stages/commits configuration and maintains one display subscription; native
  * refresh events own visibility, pixel generation and background attachment. */
 struct rh_backgrounds;

@@ -5,7 +5,9 @@ acceptance on 2026-10-06. The user reported successful hardware validation of th
 current background implementation; no detailed procedure, captured trace or frame
 measurements were supplied. Independent GPU/cache fault probes remain NOT_PROBED,
 and the restricted ABI records retain approval PENDING.
-Only Xiaomi Band 11 4.100.177 is enabled. The AP SHA256 remains
+Exact Band 11 .139/.155/.177 builds are enabled. The backport evidence and
+static/model limitations are in each target's `background-calendar.md`; this
+page retains the original .177 recovery details. The .177 AP SHA256 remains
 `ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`.
 No firmware patch, class-table write, inline hook or extra widget is installed.
 One native display event subscription owns background attachment and refresh.
@@ -162,7 +164,8 @@ cross-feature rollback or GPU asynchronous lifetime safety.
 Error receipts/status use -2142 (configuration/read failure), -2143 (native image
 header rejection), -2145 (cache retirement failure). Stage rejection retains the
 previous configuration. Background commit failure can leave the native background
-restored. Non-.177 modules do not consume this experimental configuration yet.
+restored. Band 11 .139/.155 modules consume the same configuration through exact-target
+backports; Band 10 Pro remains governed by its separate opt-in adapter.
 
 ## Device test checklist
 

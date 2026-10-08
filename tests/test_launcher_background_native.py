@@ -468,7 +468,7 @@ class LauncherBackgroundNative(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         source = (ROOT / 'src/platform.c').read_text()
-        marker = '#if defined(RH_TARGET_177) && RH_TARGET_177\n'
+        marker = '#if RH_Q66_BACKGROUND\n'
         start = source.index(marker) + len(marker)
         end = source.index('\n#elif defined(RH_TARGET_1043)', start)
         adapter = source[start:end]
@@ -479,7 +479,10 @@ class LauncherBackgroundNative(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         path = Path(cls.tmp.name)
         harness = path / 'test.c'
-        harness.write_text(FIXTURE + adapter + CHECKS)
+        target = os.environ.get('RH_BACKGROUND_TARGET', '177')
+        fixture = FIXTURE.replace('#include "resource_hook_target_177.h"',
+            '#define RH_TARGET_' + target + ' 1\n#include "resource_hook_target.h"')
+        harness.write_text(fixture + adapter + CHECKS)
         cls.binary = path / 'test'
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c11',
                         '-Wall', '-Wextra', '-Werror',

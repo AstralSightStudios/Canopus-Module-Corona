@@ -1,8 +1,10 @@
 #include "resource_hook_calendar_native.h"
 #include "resource_hook_platform.h"
+#include "resource_hook_target.h"
 
-#if defined(RH_TARGET_177) && RH_TARGET_177 && (defined(__arm__) || defined(__thumb__))
-/* Read-only recovery: q66-ap.i64, AP SHA256
+#if RH_Q66_CALENDAR && (defined(__arm__) || defined(__thumb__))
+/* Exact backport identities are in target evidence and selected headers.
+ * Original .177 read-only recovery: q66-ap.i64, AP SHA256
  * ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b.
  * No .139/.155 address delta is used. sub_C547870 creates root v2/image v3,
  * 112x112 each, centers v3, and snapshots v3 (NOT the opaque black v2).
@@ -27,32 +29,32 @@
  */
 #define N(a,b,c,d,e) (((uint32_t (*)(uintptr_t,uintptr_t,uintptr_t,uintptr_t)) \
     (uintptr_t)((a)|1u))((uintptr_t)(b),(uintptr_t)(c),(uintptr_t)(d),(uintptr_t)(e)))
-#define CLOCK 0x0c34d45cu
-#define LOCALTIME 0x0c34fcecu
-#define ROOT_CREATE 0x0c382ff0u
-#define SIZE 0x0c3836d2u
-#define ROOT_STYLE 0x0c502de0u
-#define IMAGE_CREATE 0x0c3ae134u
-#define IMAGE_SOURCE 0x0c3b2b8cu
-#define IMAGE_INFO 0x0c38e44cu
-#define LABEL_CREATE 0x0c3ab228u
-#define LABEL_TEXT 0x0c3b38acu
-#define COLOR 0x0c3839aeu
-#define TEXT_ALIGN 0x0c383a10u
-#define FONT_STYLE 0x0c3839e4u
-#define ALIGN 0x0c38361cu
-#define FONT_RESOLVE 0x0c50934cu
-#define FONT_CREATE 0x0c495008u
-#define FONT_DESTROY 0x0c4924fcu
-#define WEEKDAY 0x0c542cdcu
-#define SNAPSHOT 0x0c6a29c8u
-#define SNAPSHOT_FREE 0x0c6a2a24u
-#define OBJECT_DELETE 0x0c384488u
-#define GPU_FINISH 0x0c91e58cu
-#define CACHE_SYNC 0x0c92e5f4u
-#define CACHE_INVALIDATE 0x0c721248u
-#define PREMULTIPLY 0x0c907918u
-#define INVALIDATE_BUF 0x0c8b7720u
+#define CLOCK RH_CN_CLOCK
+#define LOCALTIME RH_CN_LOCALTIME
+#define ROOT_CREATE RH_CN_ROOT_CREATE
+#define SIZE RH_CN_SIZE
+#define ROOT_STYLE RH_CN_ROOT_STYLE
+#define IMAGE_CREATE RH_CN_IMAGE_CREATE
+#define IMAGE_SOURCE RH_CN_IMAGE_SOURCE
+#define IMAGE_INFO RH_CN_IMAGE_INFO
+#define LABEL_CREATE RH_CN_LABEL_CREATE
+#define LABEL_TEXT RH_CN_LABEL_TEXT
+#define COLOR RH_CN_COLOR
+#define TEXT_ALIGN RH_CN_TEXT_ALIGN
+#define FONT_STYLE RH_CN_FONT_STYLE
+#define ALIGN RH_CN_ALIGN
+#define FONT_RESOLVE RH_CN_FONT_RESOLVE
+#define FONT_CREATE RH_CN_FONT_CREATE
+#define FONT_DESTROY RH_CN_FONT_DESTROY
+#define WEEKDAY RH_CN_WEEKDAY
+#define SNAPSHOT RH_CN_SNAPSHOT
+#define SNAPSHOT_FREE RH_CN_SNAPSHOT_FREE
+#define OBJECT_DELETE RH_CN_OBJECT_DELETE
+#define GPU_FINISH RH_CN_GPU_FINISH
+#define CACHE_SYNC RH_CN_CACHE_SYNC
+#define CACHE_INVALIDATE RH_CN_CACHE_INVALIDATE
+#define PREMULTIPLY RH_CN_PREMULTIPLY
+#define INVALIDATE_BUF RH_CN_INVALIDATE_BUF
 
 static uint32_t rd(uint32_t a) { return *(volatile const uint32_t *)(uintptr_t)a; }
 static uint32_t half(uint32_t a) { return *(volatile const uint16_t *)(uintptr_t)a; }
@@ -66,10 +68,11 @@ static void zero(void *p, unsigned n) {
  * clock/graphics call; full AP SHA is checked by the offline firmware tests. */
 int rh_calendar_native_supported(void) { return 1; }
 static int audited(void) {
-    return rd(0x0c547870u) == 0x47f0e92du && rd(0x0c547874u) == 0x4b66b0ccu &&
-           rd(CLOCK) == 0xb084b5b0u && rd(LOCALTIME) == 0x460db5b0u &&
-           rd(SNAPSHOT) == 0x4604b5f8u && rd(FONT_CREATE) == 0x4ff0e92du &&
-           rd(FONT_DESTROY) == 0x41f0e92du && rd(GPU_FINISH) == 0x4c17b510u;
+    return rd(RH_CN_GENERATE) == RH_CN_RECEIPT_GENERATE &&
+           rd(RH_CN_GENERATE + 4u) == RH_CN_RECEIPT_GENERATE_NEXT &&
+           rd(CLOCK) == RH_CN_RECEIPT_CLOCK && rd(LOCALTIME) == RH_CN_RECEIPT_LOCALTIME &&
+           rd(SNAPSHOT) == RH_CN_RECEIPT_SNAPSHOT && rd(FONT_CREATE) == RH_CN_RECEIPT_FONT_CREATE &&
+           rd(FONT_DESTROY) == RH_CN_RECEIPT_FONT_DESTROY && rd(GPU_FINISH) == RH_CN_RECEIPT_GPU_FINISH;
 }
 static int date_valid(const struct rh_calendar_date *d) {
     int days;
@@ -194,12 +197,12 @@ static int item(uint32_t image, const struct rh_calendar_config *c,
         N(COLOR, obj, p->color_native ? (i == 2 ? 0x3482ffu : 0u) : p->color, 0, 0);
         N(TEXT_ALIGN, obj, 2, 0, 0);
         if (!p->size) {
-            font = N(FONT_RESOLVE, i == 1 ? 0x200c45dcu : 0x200c5af0u, 0, 0, 0);
+            font = N(FONT_RESOLVE, i == 1 ? RH_CN_FONT_DAY : RH_CN_FONT_WEEK, 0, 0, 0);
         } else {
             /* C898B1C's exact family, with a fresh module-owned size wrapper.
-             * C495008 returns native fallback 2ca12930 on failure: reject it. */
-            font = N(FONT_CREATE, i == 1 ? 0x2cbc6578u : 0x2cbc6568u, p->size, 0, 0);
-            if (font && font != 0x2ca12930u) owned.fonts[i] = font;
+             * Managed creation may return the selected native fallback on failure: reject it. */
+            font = N(FONT_CREATE, i == 1 ? RH_CN_FONT_NAME_DAY : RH_CN_FONT_NAME_WEEK, p->size, 0, 0);
+            if (font && font != RH_CN_FONT_FALLBACK) owned.fonts[i] = font;
             else return -1;
         }
         if (!font) return -1;
@@ -229,7 +232,7 @@ static int save(uint32_t buf, const char *output) {
         size > 128u * 1024u || !pixels || (pixels & 3u) ||
         (half(buf + 2) & ~0x31u) || !(half(buf + 2) & 0x10u) ||
         (!(half(buf + 2) & 1u) && !(half(buf + 2) & 0x20u)) || half(buf + 10)) return -1;
-    /* The existing .177 blur fence/cache contract: sync unrelated dirty lines
+    /* The existing Band11 blur fence/cache contract: sync unrelated dirty lines
      * before invalidating GPU-written pixels. Never read them before finish. */
     barrier(); N(CACHE_SYNC, 1, 0, 0, 0); barrier();
     N(CACHE_INVALIDATE, 1, pixels, size, 0); barrier();
@@ -289,7 +292,7 @@ done:
 #include "p67_calendar_native.inc"
 #else
 int rh_calendar_native_supported(void) {
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_CALENDAR || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     return 1;
 #else
     return 0;

@@ -67,7 +67,7 @@ for target in 139 155 177 1043; do
         "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
-    if [ "$target" = 177 ]; then
+    if [ "$target" = 177 ] || [ "$target" = 139 ] || [ "$target" = 155 ]; then
         "$ROOT/build/test_module_${target}" --launcher-background
     fi
     "$ROOT/build/test_module_${target}" --font-reload
@@ -108,3 +108,8 @@ python3 "$ROOT/tests/test_config_cli.py"
 python3 "$ROOT/tests/test_target_receipts.py"
 python3 "$ROOT/tests/test_quickapp_allowlist.py"
 python3 "$ROOT/tests/firmware_support_test.py"
+
+# Exact APs and emulator dependencies are intentionally optional for host users.
+if [ "${RH_TEST_BAND11_FEATURES:-0}" = 1 ]; then
+    sh "$ROOT/scripts/test-band11-features.sh"
+fi

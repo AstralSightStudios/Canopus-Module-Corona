@@ -1,4 +1,5 @@
 #include "resource_hook_platform.h"
+#include "resource_hook_target.h"
 #include "resource_hook_quickapp.h"
 #include "resource_hook_font_reload.h"
 #include "resource_hook_background.h"
@@ -102,7 +103,7 @@ const char *rh_calendar_redirect(const char *path) {
     return calendar_hook_mode && path && !strcmp(path, &RH_CALENDAR_OUTPUT_PATH[1])
         ? &RH_CALENDAR_BANK0[1] : NULL;
 }
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
 #define BACKGROUNDS_CONFIG_PATH RH_APP_FILES_ROOT "backgrounds.cfg"
 static const char *background_config; /* Missing in all legacy scenarios. */
 static unsigned background_position, background_opens, background_reads, background_closes;
@@ -283,7 +284,7 @@ int rh_platform_open(const char *path, int mode) {
         result_position=0; return 14;
     }
     assert(mode == 1);
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     if (!strcmp(path, BACKGROUNDS_CONFIG_PATH)) {
         background_opens++;
         background_position = 0;
@@ -337,7 +338,7 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     }
     if (fd == 11) { data = input; cursor = &position; }
     else if (fd == 12) { data = control_signal; cursor = &signal_position; }
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     else if (fd == 16) {
         assert(background_config);
         background_reads++;
@@ -414,7 +415,7 @@ void rh_platform_close(int fd) {
     defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
     if (fd == 17) { assert(in_ui_timer); return; }
 #endif
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     if (fd == 16) { background_closes++; return; }
 #endif
     assert(fd == registration_fd || fd == 11 || fd == 12 || fd == 13); closes++;
@@ -730,7 +731,7 @@ static void assert_reload_status(int result, unsigned pending, unsigned changed,
              result, pending, changed, error ? "config_error" : "running", error, count);
     assert_result(control_signal, row);
 }
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
 static void assert_background_map_unchanged(const struct temp_allocation *original) {
     assert(original && original->live && persistent_allocs == 1u);
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
@@ -1182,7 +1183,7 @@ static int test_calendar_coordinator_guards(void) {
     control_config = config;
     control_signal = "resource-hook-reload-v1\tcalendar-recover\n";
     fire_timers(1000u);
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     background_commit_rc = -2145;
     control_config = "/resource/a.bin\tthemes/current/a.bin\n/resource/b.bin\tthemes/current/b.bin\n";
     control_signal = "resource-hook-reload-v1\tcalendar-failed-background-commit\n";
@@ -2071,7 +2072,7 @@ int main(int argc, char **argv) {
         return test_blur_diagnostic_writer();
 #endif
     test_relative_config();
-#if (defined(RH_TARGET_177) && RH_TARGET_177) || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
     if (argc == 2 && !strcmp(argv[1], "--launcher-background"))
         return test_launcher_background();
 #endif
