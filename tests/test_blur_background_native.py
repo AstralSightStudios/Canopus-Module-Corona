@@ -24,6 +24,7 @@ FIXTURE = r'''
 #include <sys/mman.h>
 #include "resource_hook.h"
 #include "resource_hook_background.h"
+#include "resource_hook_blur.h"
 #include "resource_hook_target_177.h"
 /* Execute the verbatim ARM block, but never call firmware addresses. */
 #define __arm__ 1

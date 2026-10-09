@@ -14,9 +14,11 @@ Manager 始终生成 `version=1` 的 `launcher`、`control_center`、`notificati
 `widgets` 四个独立配置项，支持图片、`blur` 和 `system`；缺省项恢复系统背景。
 Band11 的 `widgets` 仅解析、不执行，不触发该区域的图片检查、加载、模糊或原生挂钩。
 
-p67 3.101.043 默认不启用原生背景替换。精确目标可通过
-`RH_P67_LIVE_BACKGROUNDS=1` 构建四区域静态背景 LIVE 前景实验；
-`RH_P67_LIVE_LAUNCHER=1` 保留原有仅启动器实验。
+p67 3.101.043 默认包含四区域静态背景、LIVE 前景和原生模糊；
+每个精确 target 只有一个完整功能产品，不再提供无背景或 launcher-only 构建。
+`RH_P67_LIVE_LAUNCHER`、`RH_P67_LIVE_BACKGROUNDS`、`RH_P67_BLUR_NATIVE`
+已废弃，设置为 `0` 或 `1` 都会明确报错；需要移除这些环境变量。
+仅详细诊断保留独立开关：`RH_P67_BLUR_DIAGNOSTICS=1`（只对 `.043` 生效）。
 背景固定在屏幕坐标并按移动页面裁剪；其余三区保留原生快照生命周期，
 隐藏快照图像并显示实时前景。`blur` 在 REFR_START 按需主动采集到模块自有 BGR888 缓冲，
 生成模块自有 RGB565 静态模糊背景；失败在 REFR_READY 重试、不访问原生源池、不做 inline patch，

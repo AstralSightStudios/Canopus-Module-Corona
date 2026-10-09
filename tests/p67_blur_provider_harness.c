@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#define RH_P67_BLUR_DIAGNOSTICS 1
 #include "resource_hook_p67_blur.h"
 #include "resource_hook_background.h"
 #define RH_FW_DISPLAY_SLOT 0x2010318cu

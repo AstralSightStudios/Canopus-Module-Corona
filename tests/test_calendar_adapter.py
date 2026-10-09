@@ -12,7 +12,7 @@ import tempfile
 import unittest
 
 from elftools.elf.elffile import ELFFile
-from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE
+from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE, UC_HOOK_MEM_READ
 from unicorn.arm_const import (UC_CPU_ARM_CORTEX_M33, UC_ARM_REG_R0,
                                UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
                                UC_ARM_REG_PC, UC_ARM_REG_SP, UC_ARM_REG_LR)
@@ -52,6 +52,8 @@ class CalendarAdapter(unittest.TestCase):
         fixture.write_text('''#include "resource_hook_calendar.h"
 volatile int test_refresh_result;
 volatile unsigned test_refresh_calls;
+volatile unsigned test_p67_publish_calls;
+void rh_p67_calendar_publish(void) { ++test_p67_publish_calls; }
 int rh_calendar_refresh(void) {
     ++test_refresh_calls;
     return test_refresh_result;
@@ -278,6 +280,66 @@ unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
                     self.assertEqual(self.calls, [])
                     self.assertEqual(self.word(self.symbols['test_refresh_calls']), 0)
 
+    def repeated_images(self, paths):
+        config = self.mem(self.call('test_config_size'))
+        source = 'version=1\n'
+        for name, count in (('month', 12), ('day', 31), ('weekday', 7)):
+            source += f'{name}\timage\ttop_mid\t0\t0\t0\tnative\t{count}\n'
+            source += ''.join(paths[index % len(paths)] + '\n' for index in range(count))
+        self.assertEqual(self.call('rh_calendar_parse', self.text(source), len(source), config), 0)
+        return config
+
+    def test_repeated_images_scan_once_per_unique_path_by_content(self):
+        for version in TARGETS:
+            for paths in (['themes/shared/a.bin'],
+                          ['themes/shared/a.bin', 'themes/shared/b.bin']):
+                with self.subTest(version=version, unique=len(paths)):
+                    self.machine(version)
+                    config = self.repeated_images(paths)
+                    # No matches: count scan-start reads without unlink-check noise.
+                    self.seed_keys(['/unrelated/icon.bin'])
+                    heads = []
+                    def read_head(u, access, address, size, value, cookie):
+                        if address in (self.header + 52, self.data + 52):
+                            heads.append(address)
+                    handle = self.u.hook_add(UC_HOOK_MEM_READ, read_head)
+                    self.assertEqual(self.call('rh_platform_calendar_retire', config), 0)
+                    self.u.hook_del(handle)
+                    # One validation + four fixed keys + each unique configured image.
+                    self.assertEqual(heads.count(self.header + 52), 5 + len(paths))
+                    self.assertEqual(heads.count(self.data + 52), 5 + len(paths))
+                    self.assertEqual(self.drops, [])
+                    # Distinct pool offsets with equal strings must still retire
+                    # every matching native entry, including duplicate cache keys.
+                    self.machine(version)
+                    config = self.repeated_images(paths)
+                    expected, unrelated = self.seed_keys(self.keys + [self.root + p for p in paths])
+                    self.assertEqual(self.call('rh_platform_calendar_retire', config), 0)
+                    self.assertCountEqual(self.drops, expected)
+                    self.assertEqual(self.survivors(), set(unrelated))
+
+    def test_invalid_image_metadata_refuses_without_unrelated_cache_changes(self):
+        for version in TARGETS:
+            for fault in ('count', 'pool', 'offset', 'unterminated', 'prefix'):
+                with self.subTest(version=version, fault=fault):
+                    self.machine(version)
+                    config = self.repeated_images(['themes/shared/a.bin'])
+                    expected, unrelated = self.seed_keys(['/unrelated/icon.bin'])
+                    # Layout: three 96-byte items, pool_used at +288, pool at +292.
+                    if fault == 'count':
+                        self.word(config + 28, 32)
+                    elif fault == 'pool':
+                        self.word(config + 288, 12797)
+                    elif fault == 'offset':
+                        self.u.mem_write(config + 32, struct.pack('<H', 0xffff))
+                    elif fault == 'unterminated':
+                        self.u.mem_write(config + 292, b'x' * self.word(config + 288))
+                    else:
+                        self.u.mem_write(config + 292, b'other/')
+                    self.assertEqual(self.call('rh_platform_calendar_retire', config), 0xffffffff)
+                    self.assertEqual(self.drops, [])
+                    self.assertEqual(self.survivors(), set(expected + unrelated))
+
     def test_display_and_cache_guards_precede_any_retirement(self):
         faults = ('display-null', 'screen-null', 'busy', 'invalidation-off',
                   'invalidation-negative', 'data-null', 'header-null',
@@ -326,7 +388,7 @@ unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
                 self.assertEqual(self.survivors(), set(expected + unrelated))
                 self.assertEqual(self.calls, [])
 
-    def test_publish_only_when_launcher_initialized_and_043_is_noop(self):
+    def test_publish_uses_exact_native_adapter_and_band11_launcher_guard(self):
         for version in TARGETS:
             for initialized in (False, True):
                 with self.subTest(version=version, initialized=initialized):
@@ -336,6 +398,8 @@ unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
                         self.word(LAUNCHERS[version][0], self.mem() if initialized else 0)
                     self.call('rh_platform_calendar_publish')
                     self.assertEqual(self.calls, ['publish'] if initialized and version != '1043' else [])
+                    if version == '1043':
+                        self.assertEqual(self.word(self.symbols['test_p67_publish_calls']), 1)
                     self.assertEqual(self.drops, [])
                     self.assertEqual(self.survivors(), set(expected + unrelated))
                     self.assertEqual(self.word(self.symbols['test_refresh_calls']), 0)

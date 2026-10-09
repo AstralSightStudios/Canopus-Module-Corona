@@ -24,6 +24,11 @@ for target in 139 1043; do
         $DEFINE -I"$ROOT/include" "$ROOT/src/launcher_background.c" \
         "$ROOT/tests/test_launcher_background.c" -o "$ROOT/build/test_launcher_background_$target"
     "$ROOT/build/test_launcher_background_$target"
+    "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        $DEFINE -I"$ROOT/include" "$ROOT/tests/test_feature_helpers.c" \
+        "$ROOT/src/calendar_config.c" \
+        -o "$ROOT/build/test_feature_helpers_$target"
+    "$ROOT/build/test_feature_helpers_$target"
 done
 "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
     -I"$ROOT/include" "$ROOT/src/calendar_config.c" "$ROOT/src/calendar_icon.c" \
@@ -33,15 +38,17 @@ CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
 CC="$CC" python3 "$ROOT/tests/test_blur_background_native.py"
 python3 "$ROOT/tests/test_p67_launcher_native.py"
 CC="$CC" python3 "$ROOT/tests/test_p67_blur_provider.py"
-# Four-surface opt-in must reach the actual shared transaction, not only native mocks.
+# Production native blur must link without a diagnostic getter; the opt-in
+# variant separately exercises the existing bounded diagnostic writer.
 "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-    -DRH_TARGET_1043=1 -DRH_P67_LIVE_BACKGROUNDS=1 -I"$ROOT/include" -I"$SDK/sdk/c" \
+    -DRH_TARGET_1043=1 \
+    -DRH_P67_BLUR_DIAGNOSTICS=1 -I"$ROOT/include" -I"$SDK/sdk/c" \
     "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
     "$ROOT/src/launcher_background.c" "$SDK/runtime/control/canopus_control.c" \
-    "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_four"
-"$ROOT/build/test_module_1043_four" --launcher-background
+    "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_diagnostics"
+"$ROOT/build/test_module_1043_diagnostics" --blur-diagnostics
 # Compile the actual shared transaction for each exact address selection.
-# Fonts are part of the ordinary runtime; no opt-in or legacy stub matrix.
+# Fonts and backgrounds are ordinary runtime features on all four targets.
 for target in 139 155 177 1043; do
     if [ "$target" = 177 ]; then
         TARGET_DEFINE=-DRH_TARGET_177=1
@@ -67,9 +74,7 @@ for target in 139 155 177 1043; do
         "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
-    if [ "$target" = 177 ] || [ "$target" = 139 ] || [ "$target" = 155 ]; then
-        "$ROOT/build/test_module_${target}" --launcher-background
-    fi
+    "$ROOT/build/test_module_${target}" --launcher-background
     "$ROOT/build/test_module_${target}" --font-reload
     "$ROOT/build/test_module_${target}"
     "$ROOT/build/test_module_${target}" --empty-startup

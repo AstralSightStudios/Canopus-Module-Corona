@@ -1,4 +1,5 @@
 #include "resource_hook_calendar_native.h"
+#include "resource_hook_calendar_internal.h"
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 
@@ -66,7 +67,6 @@ static void zero(void *p, unsigned n) {
 }
 /* Small immutable instruction receipts detect a wrong selected AP before any
  * clock/graphics call; full AP SHA is checked by the offline firmware tests. */
-int rh_calendar_native_supported(void) { return 1; }
 static int audited(void) {
     return rd(RH_CN_GENERATE) == RH_CN_RECEIPT_GENERATE &&
            rd(RH_CN_GENERATE + 4u) == RH_CN_RECEIPT_GENERATE_NEXT &&
@@ -74,15 +74,7 @@ static int audited(void) {
            rd(SNAPSHOT) == RH_CN_RECEIPT_SNAPSHOT && rd(FONT_CREATE) == RH_CN_RECEIPT_FONT_CREATE &&
            rd(FONT_DESTROY) == RH_CN_RECEIPT_FONT_DESTROY && rd(GPU_FINISH) == RH_CN_RECEIPT_GPU_FINISH;
 }
-static int date_valid(const struct rh_calendar_date *d) {
-    int days;
-    if (!d || d->year < 1900 || d->year > 9999 || d->month < 1 || d->month > 12 ||
-        d->day < 1 || d->weekday < 0 || d->weekday > 6) return 0;
-    days = d->month == 2 ? 28 + (!(d->year % 4) &&
-           ((d->year % 100) || !(d->year % 400))) :
-           (d->month == 4 || d->month == 6 || d->month == 9 || d->month == 11 ? 30 : 31);
-    return d->day <= days;
-}
+
 int rh_calendar_native_date(struct rh_calendar_date *out) {
     uint32_t ts[5], tm[11];
     struct rh_calendar_date d;
@@ -101,7 +93,7 @@ int rh_calendar_native_date(struct rh_calendar_date *out) {
     d.year = (int32_t)tm[5] + 1900;
     d.month = (int32_t)tm[4] + 1; d.day = (int32_t)tm[3];
     d.weekday = tm[6] ? (int32_t)tm[6] - 1 : 6;
-    if (!date_valid(&d)) return -1;
+    if (!rh_calendar_date_valid(&d)) return -1;
     N(WEEKDAY, tm[6], localized, 0, 0);
     d.locale = 2166136261u;
     for (i = 0; i < sizeof(localized) && localized[i]; ++i)
@@ -126,59 +118,20 @@ static void cleanup(void) {
     }
     owned.root = owned.snapshot = 0;
 }
-static void decimal(char *out, unsigned value) {
-    if (value >= 10) *out++ = (char)('0' + value / 10);
-    *out++ = (char)('0' + value % 10); *out = 0;
-}
-static int bounded(const char *s, unsigned limit) {
-    unsigned i;
-    if (!s) return 0;
-    for (i = 0; i < limit; ++i) if (!s[i]) return 1;
-    return 0;
-}
-static int image_path(char *out, const char *relative) {
-    const char *root = RH_APP_FILES_ROOT;
-    unsigned n = 0, i = 0;
-    const char *prefix = "themes/";
-    if (!relative) return -1;
-    while (prefix[i]) { if (relative[i] != prefix[i]) return -1; ++i; }
-    i = 0;
-    while (root[n]) { out[n] = root[n]; ++n; }
-    while (relative[i]) {
-        if (n + 1 >= RH_PATH) return -1;
-        out[n++] = relative[i++];
-    }
-    out[n] = 0; return 0;
-}
+
 static int item(uint32_t image, const struct rh_calendar_config *c,
                 const struct rh_calendar_date *d, unsigned i) {
     const struct rh_calendar_item *p = &c->items[i];
     uint32_t obj, font;
-    unsigned index = i == 0 ? (unsigned)d->month - 1u :
-                     i == 1 ? (unsigned)d->day - 1u : (unsigned)d->weekday;
-    unsigned count = i == 0 ? 12u : i == 1 ? 31u : 7u;
-    const char *context = 0;
+    const char *context;
     char text[16];
+    if (rh_calendar_item_context(c, d, i, &context)) return -1;
     if (p->type == RH_CALENDAR_NONE) return 0;
     zero(text, sizeof(text));
-    if (p->type > RH_CALENDAR_IMAGE ||
-        (p->align != 1 && p->align != 2 && p->align != 3 && p->align != 9) ||
-        p->x < -112 || p->x > 112 || p->y < -112 || p->y > 112 ||
-        p->size > 72 || (p->size && p->size < 8) || p->color_native > 1 || p->color > 0xffffffu ||
-        (p->count && p->count != count)) return -1;
-    if (p->count) {
-        unsigned available;
-        context = rh_calendar_context(c, i, index);
-        if (!context || p->context[index] >= c->pool_used) return -1;
-        available = c->pool_used - p->context[index];
-        if (available > (p->type == RH_CALENDAR_TEXT ? 64u : RH_PATH))
-            available = p->type == RH_CALENDAR_TEXT ? 64u : RH_PATH;
-        if (!bounded(context, available)) return -1;
-    }
     if (p->type == RH_CALENDAR_IMAGE) {
         uint16_t info[6];
         zero(info, sizeof(info));
-        if (!context || image_path(owned.paths[i], context) ||
+        if (!context || rh_calendar_image_path(owned.paths[i], context) ||
             N(IMAGE_INFO, owned.paths[i], info, 0, 0) != 1 || !info[2] || !info[3]) return -1;
         obj = N(IMAGE_CREATE, image, 0, 0, 0);
         if (!obj) return -1;
@@ -190,7 +143,7 @@ static int item(uint32_t image, const struct rh_calendar_config *c,
         if (!obj) return -1;
         if (!context) {
             if (i == 2) N(WEEKDAY, (d->weekday + 1) % 7, text, 0, 0);
-            else decimal(text, i == 0 ? (unsigned)d->month : (unsigned)d->day);
+            else rh_calendar_decimal(text, i == 0 ? (unsigned)d->month : (unsigned)d->day);
             context = text;
         }
         N(LABEL_TEXT, obj, context, 0, 0);
@@ -211,15 +164,7 @@ static int item(uint32_t image, const struct rh_calendar_config *c,
     N(ALIGN, obj, p->align, p->x, p->y);
     return 0;
 }
-static int full_write(int fd, const void *data, uint32_t size) {
-    const uint8_t *p = data;
-    while (size) {
-        int n = rh_platform_write(fd, p, size);
-        if (n <= 0 || (uint32_t)n > size) return -1;
-        p += (unsigned)n; size -= (unsigned)n;
-    }
-    return 0;
-}
+
 static int save(uint32_t buf, const char *output) {
     uint8_t header[12];
     unsigned i;
@@ -248,8 +193,8 @@ static int save(uint32_t buf, const char *output) {
      * native errors; the complete-write loop never claims a partial bank. */
     fd = rh_platform_open(output, 0x426);
     if (fd < 0) return -1;
-    rc = full_write(fd, header, sizeof(header));
-    if (!rc) rc = full_write(fd, (const void *)(uintptr_t)pixels, size);
+    rc = rh_calendar_full_write(fd, header, sizeof(header));
+    if (!rc) rc = rh_calendar_full_write(fd, (const void *)(uintptr_t)pixels, size);
     rh_platform_close(fd);
     return rc;
 }
@@ -258,7 +203,7 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
     uint32_t image;
     unsigned i;
     int rc = -1;
-    if (!c || !date_valid(d) || !bounded(output, RH_PATH) || output[0] != '/' ||
+    if (!c || !rh_calendar_date_valid(d) || !rh_calendar_bounded(output, RH_PATH) || output[0] != '/' ||
         c->pool_used > RH_CALENDAR_POOL_BYTES || owned.busy || !audited()) return -1;
     owned.busy = 1;
     if ((int32_t)N(GPU_FINISH, 0, 0, 0, 0)) goto done;
@@ -291,13 +236,6 @@ done:
 #elif defined(RH_TARGET_1043) && RH_TARGET_1043 && (defined(__arm__) || defined(__thumb__))
 #include "p67_calendar_native.inc"
 #else
-int rh_calendar_native_supported(void) {
-#if RH_Q66_CALENDAR || (defined(RH_TARGET_1043) && RH_TARGET_1043)
-    return 1;
-#else
-    return 0;
-#endif
-}
 int rh_calendar_native_date(struct rh_calendar_date *out) { (void)out; return -1; }
 int rh_calendar_native_render(const struct rh_calendar_config *c,
                               const struct rh_calendar_date *d, const char *output) {
@@ -306,7 +244,6 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 void rh_p67_calendar_publish(void) {}
 void rh_p67_calendar_reset(void) {}
-uint32_t rh_p67_calendar_get_draw_buf(void) { return 0; }
 #endif
 #endif
 

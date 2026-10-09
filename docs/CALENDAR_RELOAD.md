@@ -9,11 +9,20 @@ AP SHA256 `ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`.
 It has host/Unicorn coverage and **USER_REPORTED_PASS** for the visible calendar
 workflow: on 2026-10-07 the user reported successful device validation. This is
 not instrumented GPU/fault acceptance or a byte-exact pixel comparison.
-Other targets retain firmware-driven calendars, but the module no longer invokes
-the old native GENERATE or NOTIFY chains on reload. Explicit non-default calendar
-CFGs on unsupported targets report `-2157`; they are not silently applied.
-In particular, Band 10 Pro uses a RAM source, not the Band 11 filesystem path;
-Scheme B cannot be ported there merely by relocating addresses.
+All four supported exact targets provide native date/render adapters; there is
+no runtime supported/unsupported probe. Instruction-receipt mismatches fail the
+date/render operation (`-2155`/`-2156`) and preserve the previous publication.
+Band 11 reload does not invoke the old native GENERATE or NOTIFY chains.
+Band 10 Pro 3.101.043 uses its separate RAM-source adapter for custom calendar
+configuration and retains the stock calendar for defaults. Its clock, snapshot,
+font and application-publication ABI is not a relocated Band 11 adapter; the
+existing file-bank writes remain in place pending separate consumer validation.
+
+Both renderers share item validation/context selection, but retain native font
+and object creation. Configured image cache keys are deduplicated by path
+contents, including repeated images across month/day/weekday. Retirement still
+runs before rendering and again at publication to evict reentrantly cached old
+output; this optimization does not merge those two lifecycle boundaries.
 
 The user has explicitly approved the **15 newly recorded exact private native
 entries** in the adjacent Canopus `.177` pack (revision 2). Each has a recovered
@@ -162,7 +171,9 @@ against nested activation; rendering never runs while the read hook owns data.
 | -2154 | UI/display/cache busy or unsafe to render |
 | -2155 | native date/firmware receipt invalid |
 | -2156 | image/font/snapshot/GPU/header/write failure |
-| -2157 | calendar override unsupported on this target |
+
+Legacy artifacts may report `-2157` for unsupported calendar overrides; current
+four-target builds do not emit that capability error.
 
 ## User-reported device validation
 

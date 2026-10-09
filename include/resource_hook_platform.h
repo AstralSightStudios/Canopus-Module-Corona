@@ -52,15 +52,12 @@ int rh_platform_backgrounds_stage(const struct rh_backgrounds *);
 int rh_platform_backgrounds_commit(const struct rh_backgrounds *);
 void rh_platform_backgrounds_poll(void);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
 /* UI-owner pure observation: bounded P67BLUR1\nkey=value\n text, no I/O or
  * capture/poll side effects. Returns bytes excluding NUL, always < capacity
  * for a complete snapshot. The module logs this separately from RHST1/RHRS2. */
 uint32_t rh_platform_p67_blur_diagnostics(char *out, uint32_t capacity);
 #endif
-int rh_platform_launcher_background_stage(const char *);
-int rh_platform_launcher_background_commit(const char *);
-void rh_platform_launcher_background_poll(void);
 int rh_platform_redraw_ready(void);
 /* 0 only when a full-display dirty area was retained; otherwise retry later. */
 int rh_platform_request_full_redraw(void);

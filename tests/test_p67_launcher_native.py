@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static boundaries for exact-target experimental live launcher adapter.
+"""Lifecycle and default-product boundaries for the exact .043 adapter.
 These do NOT establish device rendering, frame time, or callback ABI acceptance.
 """
 from pathlib import Path
@@ -39,11 +39,50 @@ class P67LiveLauncher(unittest.TestCase):
                             str(ROOT / 'tests/p67_backgrounds_harness.c'),
                             '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
-    def test_gate_and_default(self):
+    def test_default_arm_target_includes_all_surfaces_and_native_provider(self):
+        sdk = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus'))
+        if not sdk.exists():
+            sdk = ROOT.parent / 'Canopus-Private'
+        source = subprocess.check_output([
+            os.environ.get('CLANG', 'clang'), '--target=arm-none-eabi',
+            '-mcpu=cortex-m33', '-mthumb', '-E', '-P', '-DRH_TARGET_1043=1',
+            '-I' + str(ROOT / 'include'), '-I' + str(sdk / 'sdk/c'),
+            '-I' + str(sdk / 'manager/target/band11'),
+            '-I' + str(sdk / 'targets/xiaomi-band-10-pro-3.101.043/generated'),
+            str(ROOT / 'src/platform.c')], text=True)
+        self.assertIn('p67_surfaces[3]', source)
+        self.assertIn('p67_blur_native_copy', source)
+        self.assertIn('p67_blur_native_publish', source)
+        self.assertNotIn('p67_launcher_stage', source)
+        self.assertNotIn('rh_platform_p67_blur_diagnostics', source)
         platform = (ROOT / 'src/platform.c').read_text()
-        self.assertIn('#elif defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_LAUNCHER) && RH_P67_LIVE_LAUNCHER', platform)
-        self.assertIn('#include "p67_launcher.inc"', platform)
-        self.assertIn('return (bg && (bg->launcher[0]', platform)
+        self.assertIn('#include "p67_backgrounds.inc"', platform)
+        self.assertNotIn('#include "p67_launcher.inc"', platform)
+        self.assertNotIn('return (bg && (bg->launcher[0]', platform)
+
+    def clean_environment(self):
+        retired = ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE')
+        return {key: value for key, value in os.environ.items() if key not in retired}
+
+    def test_retired_product_flags_are_rejected_even_when_zero(self):
+        for name in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE'):
+            for value in ('0', '1'):
+                with self.subTest(flag=name, value=value):
+                    env = self.clean_environment()
+                    env[name] = value
+                    result = subprocess.run(['sh', str(ROOT / 'scripts/build.sh'),
+                        'xiaomi-band-10-pro-3.101.043'], env=env, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('Retired build flag ' + name, result.stderr)
+
+    def test_diagnostics_requires_exact_target(self):
+        env = self.clean_environment()
+        env['RH_P67_BLUR_DIAGNOSTICS'] = '1'
+        result = subprocess.run(['sh', str(ROOT / 'scripts/build.sh'),
+            'xiaomi-band-11-4.100.139'], env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Blur diagnostics requires exact .043', result.stderr)
+
     def test_no_pool_or_snapshot_mutations(self):
         source = (ROOT / 'src/p67_launcher.inc').read_text().lower()
         for address in ['0x0c4b6aa', '0x0c4b6b3', '0x0ca5fb4', '0x1c03163', '0x1c0319c']:

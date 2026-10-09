@@ -133,6 +133,65 @@ class InstallerContract(unittest.TestCase):
         self.assertEqual(name([TARGET_IDS[2]]), prefix + 'band10pro-3.101.043')
         self.assertEqual(name(TARGET_IDS), prefix + 'multi-device')
 
+    def test_default_background_metadata_is_per_device_not_an_experiment(self):
+        metadata = INSTALLER['background_metadata']
+        band11 = metadata(list(TARGET_IDS[:2]))
+        p67 = metadata([TARGET_IDS[2]])
+        self.assertEqual(band11['background_targets'], ['launcher', 'control_center', 'notifications'])
+        self.assertEqual(p67['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
+        self.assertFalse(p67['p67_blur_diagnostics'])
+        self.assertTrue(metadata([TARGET_IDS[2]], True)['p67_blur_diagnostics'])
+        self.assertNotIn('p67_blur_diagnostics', metadata(list(TARGET_IDS[:2]), True))
+        for item in (band11, p67):
+            self.assertEqual(item['background_device_status'], 'NOT_PROBED')
+            self.assertNotIn('p67_live_launcher', item)
+            self.assertNotIn('p67_live_backgrounds', item)
+
+    def test_mixed_bundle_routes_only_diagnostics_to_p67(self):
+        options = INSTALLER['build_options']
+        route = INSTALLER['target_build_environment']
+        self.assertFalse(options(TARGET_IDS, {}))
+        env = {'RH_P67_BLUR_DIAGNOSTICS': '1', 'CANOPUS_ROOT': '/reviewed/sdk'}
+        self.assertTrue(options(TARGET_IDS, env))
+        self.assertEqual(route(TARGET_IDS[2], env), env)
+        for target in TARGET_IDS[:2]:
+            self.assertNotIn('RH_P67_BLUR_DIAGNOSTICS', route(target, env))
+            self.assertEqual(route(target, env)['CANOPUS_ROOT'], '/reviewed/sdk')
+        self.assertEqual(env['RH_P67_BLUR_DIAGNOSTICS'], '1', 'routing must not mutate caller env')
+        with self.assertRaisesRegex(ValueError, 'requires exact .043'):
+            options(TARGET_IDS[:2], env)
+
+    def test_retired_flags_rejected_by_packaging_before_side_effects(self):
+        for name in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE'):
+            for value in ('0', '1'):
+                with self.subTest(flag=name, value=value):
+                    with self.assertRaisesRegex(ValueError, 'Retired build flag ' + name):
+                        INSTALLER['build_options'](TARGET_IDS, {name: value})
+                    env = {key: val for key, val in os.environ.items()
+                           if key not in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE')}
+                    env[name] = value
+                    for script, arguments in (
+                        ('build-watchface.py', ['--target', TARGET_IDS[2]]),
+                        ('build-delivery.py', ['/missing-parent/not-created-delivery', '--target', TARGET_IDS[2]])):
+                        result = subprocess.run([sys.executable, str(ROOT / 'scripts' / script), *arguments],
+                                                env=env, capture_output=True, text=True)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn('Retired build flag ' + name, result.stderr)
+                        self.assertNotIn('certificate ZIP not found', result.stderr)
+
+    def test_mixed_watchface_bundle_reaches_normal_certificate_preflight(self):
+        env = {key: val for key, val in os.environ.items()
+               if key not in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE')}
+        env['RH_P67_BLUR_DIAGNOSTICS'] = '1'
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/build-watchface.py'),
+            '--target', TARGET_IDS[0], '--target', TARGET_IDS[2],
+            '--certificate-zip', '/missing-module-installer-certificate.zip'],
+            env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('certificate ZIP not found', result.stderr)
+        self.assertNotIn('requires only', result.stderr)
+        self.assertNotIn('requires exact .043', result.stderr)
+
     def test_device_routing(self):
         groups = INSTALLER['device_groups'](TARGET_IDS)
         self.assertEqual(groups, {'xiaomi-band-11': list(TARGET_IDS[:2]),

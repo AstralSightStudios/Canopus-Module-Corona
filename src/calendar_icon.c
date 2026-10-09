@@ -18,27 +18,6 @@ int rh_calendar_stage(struct rh_calendar_config **out) {
     int fd, n, rc = 0;
     if (!out) return -2151;
     *out = 0;
-    if (!rh_calendar_native_supported()) {
-        static const char defaults[] = "version=1\n";
-        char header[sizeof(defaults)];
-        uint32_t i;
-        /* A default-only CFG is harmless on older targets; an explicit
-         * override must not be silently acknowledged by an unsupported build. */
-        fd = rh_platform_open(RH_CALENDAR_CONFIG_PATH, 1);
-        if (fd < 0) return rh_platform_errno() == RH_ENOENT ? 0 : -2152;
-        while (used < sizeof(header)) {
-            n = rh_platform_read(fd, header + used, sizeof(header) - used);
-            if (n < 0 || (uint32_t)n > sizeof(header) - used) { rc = -2152; break; }
-            if (!n) break;
-            used += (uint32_t)n;
-        }
-        rh_platform_close(fd);
-        if (rc) return rc;
-        if (used == sizeof(header)) return -2157;
-        if (used != sizeof(defaults) - 1u) return -2153;
-        for (i = 0; i < used; ++i) if (header[i] != defaults[i]) return -2153;
-        return 0;
-    }
     c = rh_platform_alloc(sizeof(*c));
     if (!c) return -2151;
     rh_calendar_defaults(c);
@@ -65,7 +44,6 @@ int rh_calendar_stage(struct rh_calendar_config **out) {
 int rh_calendar_commit(struct rh_calendar_config *c) {
     struct rh_calendar_config *old;
     uint32_t irq;
-    if (!rh_calendar_native_supported()) { rh_calendar_discard(c); return 0; }
     if (!c) return -2153;
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
@@ -100,7 +78,6 @@ static int generate(unsigned force) {
     unsigned next;
     int rc;
     uint32_t irq;
-    if (!rh_calendar_native_supported()) return 0;
     if (!initialized || !active || !rh_platform_redraw_ready()) return -2154;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     /* On P67 (Band 10 Pro), default calendar icon is already transparent natively.
@@ -146,16 +123,16 @@ int rh_calendar_refresh(void) { return generate(1); }
 int rh_calendar_poll(void) { return generate(0); }
 int rh_calendar_pending(void) {
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
-    return rh_calendar_native_supported() && active && active->custom && (dirty || !ready);
+    return active && active->custom && (dirty || !ready);
 #else
-    return rh_calendar_native_supported() && (dirty || !ready);
+    return dirty || !ready;
 #endif
 }
 const char *rh_calendar_redirect(const char *path) {
     static const char logical[] = RH_CALENDAR_OUTPUT_PATH;
     uint32_t i, irq;
     const char *out = 0;
-    if (!path || !rh_calendar_native_supported()) return 0;
+    if (!path) return 0;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     if (!active || !active->custom) return 0;
 #endif

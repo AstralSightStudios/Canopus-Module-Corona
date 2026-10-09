@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#define RH_P67_BLUR_DIAGNOSTICS 1
 #include "resource_hook_p67_blur.h"
 static uint32_t wf_root=100,record[3],display_record[3],host_display=200;
 static unsigned display_count,wakes,wake_fail,wake_reenter,wake_reset,wake_delete;

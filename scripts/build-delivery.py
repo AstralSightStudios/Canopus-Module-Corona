@@ -16,6 +16,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'xiaomi-band-11-4.100.139'
 TARGETS = runpy.run_path(str(ROOT / 'scripts/verify-payload.py'))['TARGETS']
+WATCHFACE = runpy.run_path(str(ROOT / 'scripts/build-watchface.py'))
 
 
 def firmware_test_commands(target, python):
@@ -45,6 +46,10 @@ def main():
                         help='target to include; repeat for a multi-device bundle (default: .139)')
     args = parser.parse_args()
     targets = args.target or [TARGET]
+    try:
+        diagnostics = WATCHFACE['build_options'](targets, os.environ)
+    except ValueError as error:
+        parser.error(str(error))
     module_manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
     project_id = module_manifest['module']['id']
     module_version = module_manifest['module']['version']
@@ -82,6 +87,8 @@ def main():
 
         for target in targets:
             payload = stage / 'payload' / target
+            env = WATCHFACE['target_build_environment'](target,
+                dict(os.environ, CANOPUS_ROOT=str(canopus)))
             env['RESOURCE_HOOK_TARGET'] = target
             env['RESOURCE_HOOK_PAYLOAD'] = str(payload)
             run(f'{target}: Host sanitizers, ARM verifier and signed payload',
@@ -111,6 +118,8 @@ def main():
             '--assets-dir', str(ROOT / 'examples'), '--output-dir', str(stage / 'watchface')])
         for manifest_path in (stage / 'watchface').glob('*/build/manifest.json'):
             manifest = json.loads(manifest_path.read_text())
+            device_targets = [item['id'] for item in manifest['targets'].values()]
+            manifest.update(WATCHFACE['background_metadata'](device_targets, diagnostics))
             manifest.update({
                 'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
                 'font_reload_device_status': 'USER_REPORTED_PASS',
@@ -148,6 +157,7 @@ def main():
                 if item.is_file() and item.suffix in ('.json', '.md'):
                     shutil.copyfile(item, destination / item.name)
         (stage / 'validation.json').write_text(json.dumps({
+            **WATCHFACE['background_metadata'](targets, diagnostics),
             'module': 'corona', 'version': module_version,
             'project_id': project_id,
             **({'target': targets[0]} if len(targets) == 1 else {}),

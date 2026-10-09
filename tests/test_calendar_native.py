@@ -372,18 +372,19 @@ class NativeCalendar(unittest.TestCase):
         self.assertNotEqual(self.call('rh_calendar_native_date', self.date), 0)
         self.assertEqual(bytes(self.u.mem_read(self.date, 20)), previous)
 
-    def test_wrong_receipt_is_failure_not_silent_unsupported(self):
+    def test_wrong_receipt_refuses_before_native_calls(self):
         self.u.mem_write(A(0xc547870), b'\0\0\0\0')
-        self.assertEqual(self.call('rh_calendar_native_supported'), 1)
         self.assertNotEqual(self.call('rh_calendar_native_date', self.date), 0)
         self.assertNotEqual(self.render(), 0)
         self.assertEqual(self.trace, [])
 
-    def test_all_targets_report_calendar_support_without_native_calls(self):
+    def test_all_targets_export_date_and_render_without_capability_probe(self):
         for target in ('139', '155', '177', '1043'):
             with self.subTest(target=target):
                 self.machine(target)
-                self.assertEqual(self.call('rh_calendar_native_supported'), 1)
+                self.assertIn('rh_calendar_native_date', self.symbols)
+                self.assertIn('rh_calendar_native_render', self.symbols)
+                self.assertNotIn('rh_calendar_native_supported', self.symbols)
                 self.assertEqual(self.trace, [])
 
 

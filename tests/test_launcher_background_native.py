@@ -140,15 +140,15 @@ static int native_info(const char *path, void *out) {
 CHECKS = r'''
 static const char *path_for_source(uint32_t source) {
     for (unsigned i = 0; i < 2; ++i)
-        if (source == pointer32(launcher_paths[i])) return launcher_paths[i];
+        if (source == pointer32(bg_paths[0][i])) return bg_paths[0][i];
     return 0;
 }
 static uint32_t current_source(void) {
-    return pointer32(launcher_paths[launcher_path_index]);
+    return pointer32(bg_paths[0][bg_path_index]);
 }
 static void setup(void) {
-    assert(pointer32(launcher_paths[0]) != pointer32(launcher_paths[1]));
-    assert(pointer32(launcher_paths[0]) && pointer32(launcher_paths[1]));
+    assert(pointer32(bg_paths[0][0]) != pointer32(bg_paths[0][1]));
+    assert(pointer32(bg_paths[0][0]) && pointer32(bg_paths[0][1]));
     assert(!path_for_source(FOREIGN));
     for (unsigned i = 0; i < 5; ++i) {
         roots[i].id = 0x2000u + i * 0x100u;
@@ -178,7 +178,9 @@ static int stage(const char *path) {
     unsigned old_sets = sets, old_gets = style_gets, old_children = child_calls;
     memcpy(before, roots, sizeof(roots));
     snprintf(expected_info, sizeof(expected_info), "%s", path);
-    int result = rh_platform_launcher_background_stage(path);
+    struct rh_backgrounds bg = {0};
+    snprintf(bg.launcher, sizeof(bg.launcher), "%s", path);
+    int result = rh_platform_backgrounds_stage(&bg);
     assert(sets == old_sets && style_gets == old_gets && child_calls == old_children);
     tree_unchanged(before);
     return result;
@@ -187,7 +189,9 @@ static int commit(const char *path) {
     struct root before[5];
     unsigned old_infos = infos;
     memcpy(before, roots, sizeof(roots));
-    int result = rh_platform_launcher_background_commit(path);
+    struct rh_backgrounds bg = {0};
+    snprintf(bg.launcher, sizeof(bg.launcher), "%s", path);
+    int result = rh_platform_backgrounds_commit(&bg);
     assert(infos == old_infos);
     tree_unchanged(before);
     return result;
@@ -197,7 +201,7 @@ static void poll(void) {
     unsigned old_infos = infos, old_cache_reads = cache_reads;
     unsigned old_validations = validations, old_retirements = retirements;
     memcpy(before, roots, sizeof(roots));
-    rh_platform_launcher_background_poll();
+    rh_platform_backgrounds_poll();
     assert(infos == old_infos && cache_reads == old_cache_reads);
     assert(validations == old_validations && retirements == old_retirements);
     tree_unchanged(before);
@@ -398,7 +402,7 @@ static void test_invalid_preflight(void) {
 }
 static void test_invalid_cache_system_commit(uint32_t invalid_cache) {
     activate(A);
-    unsigned old_index = launcher_path_index, old_sets = sets;
+    unsigned old_index = bg_path_index, old_sets = sets;
     unsigned old_infos = infos, old_validations = validations;
     unsigned old_retirements = retirements;
     uint32_t old_source = current_source();
@@ -408,8 +412,8 @@ static void test_invalid_cache_system_commit(uint32_t invalid_cache) {
      * as the selected pathname: auxiliary commits cannot partially detach. */
     assert(commit("") == -2145);
     assert(infos == old_infos && sets == old_sets);
-    assert(launcher_background_active == 1);
-    assert(launcher_path_index == old_index && current_source() == old_source);
+    assert(bg_active[0] == 1);
+    assert(bg_path_index == old_index && current_source() == old_source);
     assert(!strcmp(path_for_source(old_source), A));
     for (unsigned i = 0; i < 4; ++i)
         assert(object(roots[i].children[0])->source == old_source);
@@ -433,7 +437,7 @@ static void test_invalid_cache_system_commit(uint32_t invalid_cache) {
     assert(retirements == old_retirements + 2);
     exact(old_retirements, HEADER, 0, A);
     exact(old_retirements + 1, IMAGE, 4, A);
-    assert(launcher_paths[launcher_path_index][0] == 0);
+    assert(bg_paths[0][bg_path_index][0] == 0);
     assert(infos == old_infos && sets == old_sets + 4);
 }
 static void test_missing_caches(void) {
@@ -473,7 +477,7 @@ class LauncherBackgroundNative(unittest.TestCase):
         end = source.index('\n#elif defined(RH_TARGET_1043)', start)
         adapter = source[start:end]
         # Guard the extraction against silently selecting another target block.
-        if 'int rh_platform_launcher_background_stage(' not in adapter:
+        if 'int rh_platform_backgrounds_stage(' not in adapter:
             raise AssertionError('launcher background block not found')
         cls.tmp = tempfile.TemporaryDirectory(prefix='rh-launcher-native-')
         cls.addClassCleanup(cls.tmp.cleanup)

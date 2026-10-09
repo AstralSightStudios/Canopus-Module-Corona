@@ -1,9 +1,7 @@
-/* Four-surface opt-in. Keep the accepted launcher adapter unchanged. */
-#define rh_platform_backgrounds_stage p67_launcher_stage
+/* Default exact .043 four-surface adapter, with shared launcher ownership. */
 #define rh_platform_backgrounds_commit p67_launcher_commit
 #define rh_platform_backgrounds_poll p67_launcher_poll
 #include "p67_launcher.inc"
-#undef rh_platform_backgrounds_stage
 #undef rh_platform_backgrounds_commit
 #undef rh_platform_backgrounds_poll
 
@@ -363,14 +361,29 @@ void rh_platform_backgrounds_poll(void) {
     p67_blur_watch(demand); p67_launcher_poll();
     for(i=0;i<3;++i) p67_surface_poll(&p67_surfaces[i]);
 }
+static int p67_stage_path(const char *path) {
+    uint32_t header[3] = {0, 0, 0}, cache;
+    int fd;
+    if (!path[0] || rh_background_is_blur(path)) return 0;
+    fd = rh_platform_open(path, 0);
+    if (fd < 0) return -2143;
+    rh_platform_close(fd);
+    cache = load32(RH_FW_HEADER_CACHE_SLOT);
+    if (cache && (!cache_valid(cache, RH_FW_HEADER_CACHE_CLASS) ||
+        retire_cache(cache, 0, 0, path))) return -2145;
+    cache = load32(RH_FW_IMAGE_CACHE_SLOT);
+    if (cache && (!cache_valid(cache, RH_FW_IMAGE_CACHE_CLASS) ||
+        retire_cache(cache, 4, 0, path))) return -2145;
+    return ((int (*)(const char *, void *))(uintptr_t)P67_NATIVE(RH_FW_IMAGE_GET_INFO))
+        (path, header) == 1 ? 0 : -2143;
+}
+
 int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
-    struct rh_backgrounds one; const char *paths[4]; unsigned i,j; int rc;
+    const char *paths[4]; unsigned i; int rc;
     if(!bg) return -2142;
     paths[0]=bg->launcher;paths[1]=bg->control_center;paths[2]=bg->notifications;paths[3]=bg->widgets;
     for(i=0;i<4;++i) {
-        one.control_center[0]=one.notifications[0]=one.widgets[0]=0;
-        for(j=0;j<RH_PATH;++j) { one.launcher[j]=paths[i][j]; if(!paths[i][j]) break; }
-        rc=p67_launcher_stage(&one); if(rc) return rc;
+        rc=p67_stage_path(paths[i]); if(rc) return rc;
     }
     return 0;
 }

@@ -7,7 +7,7 @@
 #include <string.h>
 
 static unsigned allocs, frees, locked, renders, publishes, retires, date_calls;
-static int supported = 1, display_ready = 1, render_fail, read_fail, open_error = RH_ENOENT;
+static int display_ready = 1, date_fail, render_fail, read_fail, open_error = RH_ENOENT;
 static const char *file;
 static unsigned cursor;
 static struct rh_calendar_date now = {2026, 10, 6, 1, 0};
@@ -32,8 +32,11 @@ void rh_platform_close(int fd) { assert(fd == 0 && !locked); }
 uint32_t rh_platform_lock(void) { assert(!locked); locked = 1; return 0; }
 void rh_platform_unlock(uint32_t irq) { assert(!irq && locked); locked = 0; }
 int rh_platform_redraw_ready(void) { return display_ready; }
-int rh_calendar_native_supported(void) { return supported; }
-int rh_calendar_native_date(struct rh_calendar_date *d) { ++date_calls; *d = now; return 0; }
+int rh_calendar_native_date(struct rh_calendar_date *d) {
+    ++date_calls;
+    if (date_fail) return -1;
+    *d = now; return 0;
+}
 int rh_platform_calendar_retire(const struct rh_calendar_config *c) {
     assert(c && !locked);
     if (++retires == fail_retire_at) return -1;
@@ -136,13 +139,14 @@ int main(void) {
     assert(!rh_calendar_commit(candidate) && rh_calendar_pending());
     assert(!rh_calendar_poll() && !rh_calendar_pending() && publishes == 4);
     assert(!rh_calendar_refresh() && publishes == 5);
-    before = renders; supported = 0;
-    assert(!rh_calendar_pending() && !rh_calendar_poll() && !rh_calendar_refresh());
-    assert(!rh_calendar_redirect(&RH_CALENDAR_OUTPUT_PATH[1]) && renders == before);
-    candidate = NULL;
-    assert(rh_calendar_stage(&candidate) == -2157 && !candidate);
-    file = "version=1\n";
-    assert(!rh_calendar_stage(&candidate) && !candidate);
+    before = renders; date_fail = 1;
+    const char *previous = rh_calendar_redirect(&RH_CALENDAR_OUTPUT_PATH[1]);
+    assert(previous && !rh_calendar_pending());
+    assert(rh_calendar_poll() == -2155 && rh_calendar_refresh() == -2155);
+    assert(renders == before && publishes == 5);
+    assert(rh_calendar_redirect(&RH_CALENDAR_OUTPUT_PATH[1]) == previous);
+    date_fail = 0;
+    assert(!rh_calendar_poll() && renders == before);
     assert(retires == 2 * renders - 1 && allocs == frees + 1); /* Only active config is retained. */
     puts("calendar defaults/parser, banks, UI retries, language/date rollover and failure fallback passed");
     return 0;

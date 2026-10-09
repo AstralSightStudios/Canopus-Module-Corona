@@ -2,6 +2,7 @@
 #define RESOURCE_HOOK_P67_BLUR_H
 #include <stdint.h>
 #include <stddef.h>
+#include "resource_hook_blur.h"
 
 #define P67_BLUR_WIDTH 84u
 #define P67_BLUR_HEIGHT 120u
@@ -33,38 +34,6 @@ static inline int p67_blur_downsample_bgr888(const struct p67_blur_pixel_view *v
             b+=p[0]; g+=p[1]; r+=p[2];
         }
         out[y*P67_BLUR_WIDTH+x]=(uint16_t)(((r/16>>3)<<11)|((g/16>>2)<<5)|(b/16>>3));
-    }
-    return 1;
-}
-/* Parameterized Band11 box-pass arithmetic: edge windows shrink rather than
- * replicate pixels, and each axis truncates channels separately. The accepted
- * Band11 implementation remains untouched. Bounded arguments prevent overflow.
- * Optional inherited darkening is applied once before filtering. */
-static inline int p67_blur_filter_rgb565(uint16_t *src, uint16_t *tmp,
-                                        unsigned width, unsigned height,
-                                        unsigned radius, unsigned passes,
-                                        unsigned darken_percent) {
-    unsigned x,y,axis,pass,i;
-    if(!src || !tmp || src==tmp || !width || !height || width>P67_BLUR_WIDTH ||
-       height>P67_BLUR_HEIGHT || radius>8 || passes>8 || darken_percent>100) return 0;
-    if(darken_percent!=100) for(i=0;i<width*height;++i) {
-        unsigned v=src[i],r=(v>>11)*darken_percent/100;
-        unsigned g=((v>>5)&63)*darken_percent/100,b=(v&31)*darken_percent/100;
-        src[i]=(uint16_t)((r<<11)|(g<<5)|b);
-    }
-    for(pass=0;pass<passes;++pass) for(axis=0;axis<2;++axis) {
-        uint16_t *in=axis?tmp:src,*out=axis?src:tmp;
-        for(y=0;y<height;++y) for(x=0;x<width;++x) {
-            unsigned r=0,g=0,b=0,count=0; int d;
-            for(d=-(int)radius;d<=(int)radius;++d) {
-                int xx=(int)x+(axis?0:d),yy=(int)y+(axis?d:0);
-                if(xx>=0 && xx<(int)width && yy>=0 && yy<(int)height) {
-                    unsigned v=in[(unsigned)yy*width+(unsigned)xx];
-                    r+=v>>11; g+=(v>>5)&63; b+=v&31; ++count;
-                }
-            }
-            out[y*width+x]=(uint16_t)(((r/count)<<11)|((g/count)<<5)|(b/count));
-        }
     }
     return 1;
 }

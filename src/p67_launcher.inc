@@ -1,4 +1,4 @@
-/* Exact .043 experimental LIVE foreground adapter, included by platform.c.
+/* Exact .043 launcher ownership implementation, included by p67_backgrounds.inc.
  * No snapshot/pool source is changed. Animation/frame time is NOT_PROBED. */
 #if !(defined(RH_TARGET_1043) && RH_TARGET_1043)
 #error "p67 launcher adapter requires exact .043"
@@ -52,7 +52,9 @@ static uint32_t *p67_descriptor(uint32_t object, uint32_t callback) {
     }
     return match;
 }
-#if defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+/* ARM .043 always uses the native provider. Host ownership models inject
+ * their provider seams and test the native provider separately. */
+#if defined(__arm__) || defined(__thumb__)
 #include "p67_blur_native.inc"
 #ifndef P67_BLUR_OWNER_SAFE
 #define P67_BLUR_OWNER_SAFE() p67_blur_native_idle()
@@ -180,24 +182,6 @@ static void p67_scroll(void *event) {
     }
     ((void (*)(void *))(uintptr_t)P67_NATIVE(P67_SCROLL_CB))(event);
 }
-int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
-    uint32_t header[3] = {0, 0, 0}, cache;
-    int fd;
-    if (!bg) return -2142;
-    if (bg->control_center[0] || bg->notifications[0]) return -2144;
-    if (!bg->launcher[0] || rh_background_is_blur(bg->launcher)) return 0;
-    fd = rh_platform_open(bg->launcher, 0);
-    if (fd < 0) return -2143;
-    rh_platform_close(fd);
-    cache = load32(RH_FW_HEADER_CACHE_SLOT);
-    if (cache && (!cache_valid(cache, RH_FW_HEADER_CACHE_CLASS) ||
-        retire_cache(cache, 0, 0, bg->launcher))) return -2145;
-    cache = load32(RH_FW_IMAGE_CACHE_SLOT);
-    if (cache && (!cache_valid(cache, RH_FW_IMAGE_CACHE_CLASS) ||
-        retire_cache(cache, 4, 0, bg->launcher))) return -2145;
-    return ((int (*)(const char *, void *))(uintptr_t)P67_NATIVE(RH_FW_IMAGE_GET_INFO))
-        (bg->launcher, header) == 1 ? 0 : -2143;
-}
 void rh_platform_backgrounds_poll(void) {
     uint32_t owner, page, foreground, list, generation, *d, *owner_event, *draw_event;
     if (p67_busy) return;
@@ -246,7 +230,7 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     unsigned i, next = p67_path_index ^ 1u;
     if (!bg || bg->control_center[0] || bg->notifications[0]) return -2144;
     /* Cancellation/reload is deferred to an idle native owner; do not restore
-     * snapshot-taking behavior midway through an experimental live swipe. */
+     * snapshot-taking behavior midway through a live swipe. */
     if (p67_busy || load32(P67_IMAGE_SLOT) || P67_U8(0x201102d9u)) return -2145;
     p67_detach();
     p67_blur_reset();
@@ -259,18 +243,3 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     rh_platform_backgrounds_poll();
     return 0;
 }
-int rh_platform_launcher_background_stage(const char *path) {
-    struct rh_backgrounds bg;
-    unsigned i;
-    bg.control_center[0] = bg.notifications[0] = bg.widgets[0] = 0;
-    for (i = 0; i < RH_PATH; ++i) { bg.launcher[i] = path[i]; if (!path[i]) break; }
-    return rh_platform_backgrounds_stage(&bg);
-}
-int rh_platform_launcher_background_commit(const char *path) {
-    struct rh_backgrounds bg;
-    unsigned i;
-    bg.control_center[0] = bg.notifications[0] = bg.widgets[0] = 0;
-    for (i = 0; i < RH_PATH; ++i) { bg.launcher[i] = path[i]; if (!path[i]) break; }
-    return rh_platform_backgrounds_commit(&bg);
-}
-void rh_platform_launcher_background_poll(void) { rh_platform_backgrounds_poll(); }

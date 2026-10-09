@@ -1,7 +1,9 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 #include "resource_hook_background.h"
+#include "resource_hook_blur.h"
 #include "resource_hook_calendar_runtime.h"
+#include "resource_hook_calendar_internal.h"
 #include "canopus_veneer.h"
 
 static int *errno_location(void) {
@@ -132,9 +134,6 @@ int rh_platform_retire_mapped_images(const struct rh_mapping_view *mapping) {
 static char bg_paths[3][2][RH_PATH];
 static unsigned bg_path_index;
 static unsigned bg_active[3];
-#define launcher_paths bg_paths[0]
-#define launcher_path_index bg_path_index
-#define launcher_background_active bg_active[0]
 
 static const uint32_t launcher_slots[4] = {
     RH_LB_MAIN_ROOT_SLOT, RH_LB_MAIN_CACHE_SLOT,
@@ -271,47 +270,6 @@ static void downsample_4x_and_darken(const uint16_t *src, uint32_t src_stride_px
     }
 }
 
-static void fast_box_blur_53x130(uint16_t *src, uint16_t *tmp) {
-    uint32_t y, x;
-    int d;
-    for (y = 0; y < 130u; ++y) {
-        for (x = 0; x < 53u; ++x) {
-            uint32_t r_sum = 0, g_sum = 0, b_sum = 0, count = 0;
-            for (d = -2; d <= 2; ++d) {
-                int nx = (int)x + d;
-                if (nx >= 0 && nx < 53) {
-                    uint16_t p = src[y * 53u + (uint32_t)nx];
-                    r_sum += (p >> 11) & 0x1Fu;
-                    g_sum += (p >> 5)  & 0x3Fu;
-                    b_sum += p         & 0x1Fu;
-                    ++count;
-                }
-            }
-            tmp[y * 53u + x] = (uint16_t)(((r_sum / count) << 11) |
-                                         ((g_sum / count) << 5)  |
-                                          (b_sum / count));
-        }
-    }
-    for (x = 0; x < 53u; ++x) {
-        for (y = 0; y < 130u; ++y) {
-            uint32_t r_sum = 0, g_sum = 0, b_sum = 0, count = 0;
-            for (d = -2; d <= 2; ++d) {
-                int ny = (int)y + d;
-                if (ny >= 0 && ny < 130) {
-                    uint16_t p = tmp[(uint32_t)ny * 53u + x];
-                    r_sum += (p >> 11) & 0x1Fu;
-                    g_sum += (p >> 5)  & 0x3Fu;
-                    b_sum += p         & 0x1Fu;
-                    ++count;
-                }
-            }
-            src[y * 53u + x] = (uint16_t)(((r_sum / count) << 11) |
-                                         ((g_sum / count) << 5)  |
-                                          (b_sum / count));
-        }
-    }
-}
-
 static void bilinear_upscale_4x(const uint16_t *src, uint16_t *dst, uint32_t dst_stride_px) {
     uint32_t sy, sx, dy, dx;
     for (sy = 0; sy < 130u; ++sy) {
@@ -434,8 +392,7 @@ static int rh_platform_update_blur(void) {
     ((void (*)(uint32_t))(uintptr_t)RH_LB_SNAPSHOT_FREE)(snap);
     snap = 0;
 
-    fast_box_blur_53x130(g_blur_small_a, g_blur_small_b);
-    fast_box_blur_53x130(g_blur_small_a, g_blur_small_b);
+    (void)rh_blur_filter_rgb565(g_blur_small_a, g_blur_small_b, 53u, 130u, 2u, 2u, 100u);
     if (!background_frame_valid(frame_display, frame_epoch)) goto done;
     bilinear_upscale_4x(g_blur_small_a, dst_data, dst_stride_px);
     blur_cache_sync();
@@ -864,40 +821,8 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     return 0;
 }
 
-int rh_platform_launcher_background_stage(const char *path) {
-    struct rh_backgrounds bg;
-    uint32_t i;
-    for (i = 0; i < RH_PATH; ++i) { bg.launcher[i] = path[i]; if (!path[i]) break; }
-    bg.control_center[0] = 0;
-    bg.notifications[0] = 0;
-    return rh_platform_backgrounds_stage(&bg);
-}
-int rh_platform_launcher_background_commit(const char *path) {
-    struct rh_backgrounds bg;
-    uint32_t i;
-    for (i = 0; i < RH_PATH; ++i) { bg.launcher[i] = path[i]; if (!path[i]) break; }
-    bg.control_center[0] = 0;
-    bg.notifications[0] = 0;
-    return rh_platform_backgrounds_commit(&bg);
-}
-void rh_platform_launcher_background_poll(void) {
-    rh_platform_backgrounds_poll();
-}
-#elif defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043
 #include "p67_backgrounds.inc"
-#elif defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_LAUNCHER) && RH_P67_LIVE_LAUNCHER
-#include "p67_launcher.inc"
-#else
-int rh_platform_backgrounds_stage(const struct rh_backgrounds *bg) {
-    return (bg && (bg->launcher[0] || bg->control_center[0] || bg->notifications[0])) ? -2144 : 0;
-}
-int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
-    return (bg && (bg->launcher[0] || bg->control_center[0] || bg->notifications[0])) ? -2144 : 0;
-}
-void rh_platform_backgrounds_poll(void) {}
-int rh_platform_launcher_background_stage(const char *path) { return path[0] ? -2144 : 0; }
-int rh_platform_launcher_background_commit(const char *path) { return path[0] ? -2144 : 0; }
-void rh_platform_launcher_background_poll(void) {}
 #endif
 
 int rh_platform_retire_images(const struct rh_state *state) {
@@ -922,7 +847,10 @@ int rh_platform_refresh_calendar(void) { return rh_calendar_refresh(); }
 int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
     static const char *const keys[] = {RH_CALENDAR_BACKGROUND, RH_CALENDAR_OUTPUT,
                                       RH_CALENDAR_BANK0, RH_CALENDAR_BANK1};
-    uint32_t data, header, i, j;
+    uint32_t data, header, i, j, seen_count = 0;
+    /* At most 12 month + 31 day + 7 weekday images; retain pool references,
+     * not 50 absolute path buffers. Compare contents, not pool offsets. */
+    const char *seen[50];
     char path[RH_PATH];
     if (!rh_platform_redraw_ready()) return -1;
     data = load32(RH_FW_IMAGE_CACHE_SLOT);
@@ -933,14 +861,19 @@ int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
         if (retire_cache(header, 0u, 0, keys[i]) || retire_cache(data, 4u, 0, keys[i])) return -1;
     if (config) for (i = 0; i < 3; ++i) {
         if (config->items[i].type != RH_CALENDAR_IMAGE) continue;
+        if (config->pool_used > RH_CALENDAR_POOL_BYTES ||
+            config->items[i].count != rh_calendar_context_count(i)) return -1;
         for (j = 0; j < config->items[i].count; ++j) {
             const char *relative = rh_calendar_context(config, i, j);
-            uint32_t k = 0, n = 0;
-            if (!relative) return -1;
-            while (RH_APP_FILES_ROOT[k]) { path[k] = RH_APP_FILES_ROOT[k]; ++k; }
-            while (relative[n] && k + n < RH_PATH - 1u) { path[k+n] = relative[n]; ++n; }
-            if (relative[n]) return -1;
-            path[k+n] = 0;
+            uint32_t k;
+            if (!relative || !rh_calendar_bounded(relative,
+                    config->pool_used - config->items[i].context[j])) return -1;
+            for (k = 0; k < seen_count; ++k)
+                if (same_path((uint32_t)(uintptr_t)seen[k], relative)) break;
+            if (k < seen_count) continue;
+            if (seen_count >= sizeof(seen) / sizeof(seen[0]) ||
+                rh_calendar_image_path(path, relative)) return -1;
+            seen[seen_count++] = relative;
             if (retire_cache(header, 0u, 0, path) || retire_cache(data, 4u, 0, path)) return -1;
         }
     }

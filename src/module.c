@@ -37,18 +37,8 @@ static int configured;
  * Autonomous QuickApp resolution has an independently recoverable error. */
 static int32_t config_error, quickapp_error, calendar_config_error, calendar_error;
 static unsigned calendar_started;
-#if RH_Q66_BACKGROUND || \
-    (defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-     ((defined(RH_P67_LIVE_LAUNCHER) && RH_P67_LIVE_LAUNCHER) || \
-      (defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)))
-#define RH_BACKGROUND_ADAPTER 1
-#else
-#define RH_BACKGROUND_ADAPTER 0
-#endif
-#if RH_BACKGROUND_ADAPTER
 static int32_t background_error;
 static unsigned background_initialized;
-#endif
 static uint32_t images_dropped;
 static uint32_t redraws;
 /* Reserved RHQ1 v5 field: no forced page rebuilds in the reload path. */
@@ -142,7 +132,7 @@ static void startup_record(const char *stage, int32_t rc, int error, uintptr_t d
 }
 
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
 #define RH_P67_BLUR_LOG_PATH "/data/offlinelog/resource-hook-p67-blur.log"
 #define RH_P67_BLUR_LOG_BYTES 1024u
 #define RH_P67_BLUR_LOG_LIMIT 8u
@@ -245,16 +235,10 @@ static void poll_blur_diagnostics(void) {
         !blur_append_module_field(&size,"font_result",font_result) ||
         !blur_append_module_field(&size,"calendar_error",calendar_error) ||
         !blur_append_module_field(&size,"config_error",config_error)) return;
-#if RH_BACKGROUND_ADAPTER
     /* Mapping config_error does not describe backgrounds.cfg parse/stage or
      * commit failures. Keep that coordinator's own state alongside the gates. */
     if (!blur_append_module_field(&size,"background_error",background_error) ||
         !blur_append_module_field(&size,"background_initialized",(int32_t)background_initialized)) return;
-#else
-    /* Native-only host/build selections have no compiled background adapter. */
-    if (!blur_append_module_field(&size,"background_error",0) ||
-        !blur_append_module_field(&size,"background_initialized",0)) return;
-#endif
     /* A truncated log cannot be mistaken for a complete diagnostic snapshot. */
     if (!blur_append_module_field(&size,"snapshot_complete",1)) return;
     for (at = 9u; at < size; at = end + 1u) {
@@ -494,7 +478,6 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
     if (!rc) *used = total;
     return rc;
 }
-#if RH_BACKGROUND_ADAPTER
 static int background_stage(struct rh_backgrounds *candidate) {
     char data[RH_PATH * 4 + 128u];
     uint32_t used = 0;
@@ -516,7 +499,6 @@ static void background_start(void) {
         background_error = rh_platform_backgrounds_commit(&candidate);
     background_initialized = 1;
 }
-#endif
 static int valid_reload_signal(const char *signal, uint32_t size) {
     static const char package[] = "ng.lst.corona\t";
     uint32_t i, start = (uint32_t)(sizeof(RH_RELOAD_PREFIX) - 1u);
@@ -634,9 +616,7 @@ static struct control_status_snapshot control_status_snapshot(void) {
     uint32_t irq = rh_platform_lock();
     status.error = config_error ? config_error : (quickapp_error ? quickapp_error :
                    (calendar_config_error ? calendar_config_error : calendar_error));
-#if RH_BACKGROUND_ADAPTER
     if (!status.error) status.error = background_error;
-#endif
     status.count = S.count;
     status.pending = refresh_pending;
     rh_platform_unlock(irq);
@@ -712,9 +692,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     struct rh_calendar_config *calendar_candidate = 0;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
     unsigned commit_reserved = 0;
-#if RH_BACKGROUND_ADAPTER
     struct rh_backgrounds background_candidate;
-#endif
 
     /* Active maps may be empty; NULL is the transparent zero-rule snapshot. */
     irq = rh_platform_lock();
@@ -775,7 +753,6 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         goto done;
     }
 
-    #if RH_BACKGROUND_ADAPTER
     if (revision) {
         rc = background_stage(&background_candidate);
         if (rc) {
@@ -784,7 +761,6 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
             goto done;
         }
     }
-#endif
     if (revision) {
         rc = rh_calendar_stage(&calendar_candidate);
         if (rc) {
@@ -818,7 +794,6 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     refreshing = 1;
     commit_reserved = 1;
     rh_platform_unlock(irq);
-#if RH_BACKGROUND_ADAPTER
     if (revision) {
         background_error = rh_platform_backgrounds_commit(&background_candidate);
         background_initialized = 1;
@@ -827,7 +802,6 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
             goto done;
         }
     }
-#endif
     if (revision && calendar_candidate) {
         calendar_config_error = rh_calendar_commit(calendar_candidate);
         if (calendar_config_error) {
@@ -926,10 +900,8 @@ static void watch_step(void *timer) {
         calendar_config_error = rh_calendar_start();
         if (!calendar_config_error) calendar_started = 1;
     }
-#if RH_BACKGROUND_ADAPTER
     background_start();
     rh_platform_backgrounds_poll();
-#endif
     rc = read_bounded_file(RH_CONTROL_REQUEST_PATH, signal, sizeof(signal), &signal_size);
     if (!rc) {
         if (valid_status_signal(signal, signal_size)) kind = RH_REQUEST_STATUS;
@@ -969,7 +941,7 @@ static void watch_step(void *timer) {
     }
     rh_platform_unlock(irq);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     /* Observe accepted control-file commits/config epochs, not the state from
      * before reload. Keep the reservation through best-effort diagnostic I/O. */
     poll_blur_diagnostics();

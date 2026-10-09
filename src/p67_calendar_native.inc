@@ -7,6 +7,7 @@
 #define P67_CALENDAR_NATIVE_INC
 
 #include "resource_hook_calendar_native.h"
+#include "resource_hook_calendar_internal.h"
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 #include "resource_hook_calendar.h"
@@ -66,20 +67,6 @@ static int audited_1043(void) {
            rd_1043(P67_CAL_DRAW_BUF_CREATE) == 0xf000f85fu;
 }
 
-int rh_calendar_native_supported(void) {
-    return 1;
-}
-
-static int date_valid_1043(const struct rh_calendar_date *d) {
-    int days;
-    if (!d || d->year < 1900 || d->year > 9999 || d->month < 1 || d->month > 12 ||
-        d->day < 1 || d->weekday < 0 || d->weekday > 6) return 0;
-    days = d->month == 2 ? 28 + (!(d->year % 4) &&
-           ((d->year % 100) || !(d->year % 400))) :
-           (d->month == 4 || d->month == 6 || d->month == 9 || d->month == 11 ? 30 : 31);
-    return d->day <= days;
-}
-
 int rh_calendar_native_date(struct rh_calendar_date *out) {
     uint32_t ts[5], tm[11];
     struct rh_calendar_date d;
@@ -93,7 +80,7 @@ int rh_calendar_native_date(struct rh_calendar_date *out) {
     d.month = (int32_t)tm[4] + 1;
     d.day = (int32_t)tm[3];
     d.weekday = tm[6] ? (int32_t)tm[6] - 1 : 6;
-    if (!date_valid_1043(&d)) return -1;
+    if (!rh_calendar_date_valid(&d)) return -1;
     {
         static const char *const week_keys[7] = {
             "Sun.common", "Mon.common", "Tue.common", "Wed.common",
@@ -111,60 +98,17 @@ int rh_calendar_native_date(struct rh_calendar_date *out) {
     return 0;
 }
 
-static void decimal_1043(char *out, unsigned value) {
-    if (value >= 10) *out++ = (char)('0' + value / 10);
-    *out++ = (char)('0' + value % 10); *out = 0;
-}
-
-static int bounded_1043(const char *s, unsigned limit) {
-    unsigned i;
-    if (!s) return 0;
-    for (i = 0; i < limit; ++i) if (!s[i]) return 1;
-    return 0;
-}
-
-static int image_path_1043(char *out, const char *relative) {
-    const char *root = RH_APP_FILES_ROOT;
-    unsigned n = 0, i = 0;
-    const char *prefix = "themes/";
-    if (!relative) return -1;
-    while (prefix[i]) { if (relative[i] != prefix[i]) return -1; ++i; }
-    i = 0;
-    while (root[n]) { out[n] = root[n]; ++n; }
-    while (relative[i]) {
-        if (n + 1 >= RH_PATH) return -1;
-        out[n++] = relative[i++];
-    }
-    out[n] = 0; return 0;
-}
-
 static int item_1043(uint32_t image, const struct rh_calendar_config *c,
                      const struct rh_calendar_date *d, unsigned i) {
     const struct rh_calendar_item *p = &c->items[i];
     uint32_t obj, font;
-    unsigned index = i == 0 ? (unsigned)d->month - 1u :
-                     i == 1 ? (unsigned)d->day - 1u : (unsigned)d->weekday;
-    unsigned count = i == 0 ? 12u : i == 1 ? 31u : 7u;
-    const char *context = 0;
+    const char *context;
     char text[16], path[RH_PATH];
+    if (rh_calendar_item_context(c, d, i, &context)) return -1;
     if (p->type == RH_CALENDAR_NONE) return 0;
     zero_1043(text, sizeof(text));
-    if (p->type > RH_CALENDAR_IMAGE ||
-        (p->align != 1 && p->align != 2 && p->align != 3 && p->align != 9) ||
-        p->x < -112 || p->x > 112 || p->y < -112 || p->y > 112 ||
-        p->size > 72 || (p->size && p->size < 8) || p->color_native > 1 || p->color > 0xffffffu ||
-        (p->count && p->count != count)) return -1;
-    if (p->count) {
-        unsigned available;
-        context = rh_calendar_context(c, i, index);
-        if (!context || p->context[index] >= c->pool_used) return -1;
-        available = c->pool_used - p->context[index];
-        if (available > (p->type == RH_CALENDAR_TEXT ? 64u : RH_PATH))
-            available = p->type == RH_CALENDAR_TEXT ? 64u : RH_PATH;
-        if (!bounded_1043(context, available)) return -1;
-    }
     if (p->type == RH_CALENDAR_IMAGE) {
-        if (!context || image_path_1043(path, context)) return -1;
+        if (!context || rh_calendar_image_path(path, context)) return -1;
         obj = P67_CAL_N(P67_CAL_IMAGE_CREATE, image, 0, 0, 0);
         if (!obj) return -1;
         P67_CAL_N(P67_CAL_IMAGE_SOURCE, obj, (uintptr_t)path, 0, 0);
@@ -180,7 +124,7 @@ static int item_1043(uint32_t image, const struct rh_calendar_config *c,
                 context = (const char *)(uintptr_t)P67_CAL_N(P67_CAL_LOCALIZED_TEXT,
                     (uintptr_t)week_keys[d->weekday <= 6 ? d->weekday : 0], 0, 0, 0);
             } else {
-                decimal_1043(text, i == 0 ? (unsigned)d->month : (unsigned)d->day);
+                rh_calendar_decimal(text, i == 0 ? (unsigned)d->month : (unsigned)d->day);
                 context = text;
             }
         }
@@ -196,16 +140,6 @@ static int item_1043(uint32_t image, const struct rh_calendar_config *c,
         }
     }
     P67_CAL_N(P67_CAL_ALIGN, obj, p->align, p->x, p->y);
-    return 0;
-}
-
-static int full_write_1043(int fd, const void *data, uint32_t size) {
-    const uint8_t *p = data;
-    while (size) {
-        int n = rh_platform_write(fd, p, size);
-        if (n <= 0 || (uint32_t)n > size) return -1;
-        p += (unsigned)n; size -= (unsigned)n;
-    }
     return 0;
 }
 
@@ -232,8 +166,8 @@ static int save_1043(uint32_t buf, const char *output) {
 
     fd = rh_platform_open(output, 0x426);
     if (fd < 0) return -1;
-    rc = full_write_1043(fd, header, sizeof(header));
-    if (!rc) rc = full_write_1043(fd, (const void *)(uintptr_t)pixels, size);
+    rc = rh_calendar_full_write(fd, header, sizeof(header));
+    if (!rc) rc = rh_calendar_full_write(fd, (const void *)(uintptr_t)pixels, size);
     rh_platform_close(fd);
     return rc;
 }
@@ -244,7 +178,7 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
     unsigned i, next_slot;
     int rc = -1;
     if (!c || !c->custom) return 0;
-    if (!date_valid_1043(d) || !bounded_1043(output, RH_PATH) || output[0] != '/' ||
+    if (!rh_calendar_date_valid(d) || !rh_calendar_bounded(output, RH_PATH) || output[0] != '/' ||
         c->pool_used > RH_CALENDAR_POOL_BYTES || p67_cal_busy || !audited_1043()) return -1;
     p67_cal_busy = 1;
     if ((int32_t)P67_CAL_N(P67_CAL_GPU_FINISH, 0, 0, 0, 0)) goto done;
@@ -290,10 +224,6 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
 done:
     p67_cal_busy = 0;
     return rc;
-}
-
-uint32_t rh_p67_calendar_get_draw_buf(void) {
-    return p67_cal_active_buf;
 }
 
 static void p67_calendar_signal_hook(uint32_t app, uint32_t signal) {

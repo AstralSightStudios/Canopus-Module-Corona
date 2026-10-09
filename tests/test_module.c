@@ -31,7 +31,7 @@ static char startup_record[2049];
 static unsigned startup_position, startup_writes, startup_opens;
 static int fail_startup_open, fail_startup_write, clobber_startup_errno;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
 static char blur_record[1024];
 static unsigned blur_position, blur_opens, blur_writes, blur_gets;
 static int blur_write_fault, blur_open_fault, blur_bad_snapshot;
@@ -53,7 +53,7 @@ struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
 static struct mock_timer mock_timers[64];
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
 uint32_t rh_platform_p67_blur_diagnostics(char *out, uint32_t capacity) {
     int size;
     assert(in_ui_timer && !locked);
@@ -103,7 +103,7 @@ const char *rh_calendar_redirect(const char *path) {
     return calendar_hook_mode && path && !strcmp(path, &RH_CALENDAR_OUTPUT_PATH[1])
         ? &RH_CALENDAR_BANK0[1] : NULL;
 }
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
 #define BACKGROUNDS_CONFIG_PATH RH_APP_FILES_ROOT "backgrounds.cfg"
 static const char *background_config; /* Missing in all legacy scenarios. */
 static unsigned background_position, background_opens, background_reads, background_closes;
@@ -126,7 +126,7 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
     if (background_commit_rc) return background_commit_rc;
     committed_backgrounds = *bg;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     blur_epoch++;
 #endif
     strcpy(committed_background, bg->launcher);
@@ -137,19 +137,6 @@ void rh_platform_backgrounds_poll(void) {
     background_polls++;
 }
 
-int rh_platform_launcher_background_stage(const char *path) {
-    struct rh_backgrounds bg = {0};
-    strcpy(bg.launcher, path);
-    return rh_platform_backgrounds_stage(&bg);
-}
-int rh_platform_launcher_background_commit(const char *path) {
-    struct rh_backgrounds bg = {0};
-    strcpy(bg.launcher, path);
-    return rh_platform_backgrounds_commit(&bg);
-}
-void rh_platform_launcher_background_poll(void) {
-    rh_platform_backgrounds_poll();
-}
 #endif
 static int quickapp_mode, quickapp_result, reenter_lookup;
 static unsigned quickapp_lookups, quickapp_owner_calls, quickapp_restores;
@@ -246,7 +233,7 @@ static rh_open_fn slot = backend;
 int rh_platform_open(const char *path, int mode) {
     assert(!locked);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (!strcmp(path, "/data/offlinelog/resource-hook-p67-blur.log")) {
         assert(in_ui_timer && mode == 0x26 && mode == RH_STARTUP_LOG_FLAGS);
         blur_opens++;
@@ -284,7 +271,7 @@ int rh_platform_open(const char *path, int mode) {
         result_position=0; return 14;
     }
     assert(mode == 1);
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     if (!strcmp(path, BACKGROUNDS_CONFIG_PATH)) {
         background_opens++;
         background_position = 0;
@@ -338,7 +325,7 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     }
     if (fd == 11) { data = input; cursor = &position; }
     else if (fd == 12) { data = control_signal; cursor = &signal_position; }
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     else if (fd == 16) {
         assert(background_config);
         background_reads++;
@@ -356,7 +343,7 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
 int rh_platform_write(int fd, const void *data, uint32_t size) {
     const struct canopus_module_registration_v1 *r = data;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (fd == 17) {
         assert(in_ui_timer && !locked);
         blur_writes++;
@@ -412,10 +399,10 @@ void rh_platform_close(int fd) {
     assert(!locked);
     if(fd==14 || fd==15) return;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (fd == 17) { assert(in_ui_timer); return; }
 #endif
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     if (fd == 16) { background_closes++; return; }
 #endif
     assert(fd == registration_fd || fd == 11 || fd == 12 || fd == 13); closes++;
@@ -731,7 +718,7 @@ static void assert_reload_status(int result, unsigned pending, unsigned changed,
              result, pending, changed, error ? "config_error" : "running", error, count);
     assert_result(control_signal, row);
 }
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
 static void assert_background_map_unchanged(const struct temp_allocation *original) {
     assert(original && original->live && persistent_allocs == 1u);
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
@@ -1183,7 +1170,7 @@ static int test_calendar_coordinator_guards(void) {
     control_config = config;
     control_signal = "resource-hook-reload-v1\tcalendar-recover\n";
     fire_timers(1000u);
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     background_commit_rc = -2145;
     control_config = "/resource/a.bin\tthemes/current/a.bin\n/resource/b.bin\tthemes/current/b.bin\n";
     control_signal = "resource-hook-reload-v1\tcalendar-failed-background-commit\n";
@@ -1839,8 +1826,7 @@ static int test_quickapp_integration(void) {
     return 0;
 }
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE && \
-    defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
 static int test_blur_diagnostic_writer(void) {
     unsigned opens, gets, i;
     char saved_startup[sizeof(startup_record)];
@@ -2066,13 +2052,12 @@ static int test_blur_diagnostic_writer(void) {
 #endif
 int main(int argc, char **argv) {
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
-    defined(RH_P67_BLUR_NATIVE) && RH_P67_BLUR_NATIVE && \
-    defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS
+    defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (argc == 2 && !strcmp(argv[1], "--blur-diagnostics"))
         return test_blur_diagnostic_writer();
 #endif
     test_relative_config();
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043 && defined(RH_P67_LIVE_BACKGROUNDS) && RH_P67_LIVE_BACKGROUNDS)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     if (argc == 2 && !strcmp(argv[1], "--launcher-background"))
         return test_launcher_background();
 #endif

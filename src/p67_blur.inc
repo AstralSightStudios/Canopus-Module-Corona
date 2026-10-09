@@ -363,7 +363,7 @@ static void p67_blur_display_event(void *event) {
  if(!p67_blur_display_valid()) { p67_blur_core_gate=4; goto done; }
  if(!p67_blur_root_registered) { p67_blur_core_gate=5; goto done; }
  if(identity!=p67_blur_root || identity!=P67_BLUR_WATCHFACE()) { p67_blur_core_gate=6; goto done; }
- (void)p67_blur_filter_rgb565(p67_blur_plane,p67_blur_work,P67_BLUR_WIDTH,P67_BLUR_HEIGHT,2,2,P67_BLUR_DARKEN_PERCENT);
+ (void)rh_blur_filter_rgb565(p67_blur_plane,p67_blur_work,P67_BLUR_WIDTH,P67_BLUR_HEIGHT,2,2,P67_BLUR_DARKEN_PERCENT);
  next=P67_BLUR_PUBLISH(p67_blur_plane,epoch);
  if(!next) {
   p67_blur_core_gate=(epoch!=p67_blur_epoch || generation!=p67_blur_root_generation ||
@@ -456,6 +456,7 @@ done:
  p67_blur_polling=0;
 }
 
+#if defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
 /* Provider contract: pure integer reads only, e.g.
  * #define P67_BLUR_NATIVE_DIAGNOSTICS(X) X("native_error", native_error);
  * No native calls, pipeline mutation, formatting, or I/O in the provider macro.
@@ -516,3 +517,4 @@ uint32_t rh_platform_p67_blur_diagnostics(char *out,uint32_t capacity) {
  out[writer.used]=0;
  return writer.used;
 }
+#endif

@@ -182,15 +182,3 @@ int rh_backgrounds_parse(const char *data, uint32_t size,
     copy_staged(out, &staged);
     return 0;
 }
-
-int rh_launcher_background_parse(const char *data, uint32_t size,
-                                 struct rh_launcher_background *out) {
-    struct rh_backgrounds bg;
-    uint32_t i;
-    if (!out || rh_backgrounds_parse(data, size, &bg)) return -1;
-    for (i = 0; i < RH_PATH; i++) {
-        out->image[i] = bg.launcher[i];
-        if (!bg.launcher[i]) break;
-    }
-    return 0;
-}

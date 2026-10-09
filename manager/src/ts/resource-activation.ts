@@ -195,12 +195,10 @@ export function resolveBackgroundTarget(
 ): { themeId: string; image?: string; mode: "image" | "blur" | "system" } | null {
   const winner = themesHighToLow.find(theme => {
     if (theme.active === false) return false;
-    const bg = theme.manifest.backgrounds?.[target] ||
-      (target === "launcher" ? theme.manifest.launcherBackground : undefined);
+    const bg = theme.manifest.backgrounds?.[target];
     return bg !== undefined;
   });
-  const bg = winner?.manifest.backgrounds?.[target] ||
-    (target === "launcher" ? winner?.manifest.launcherBackground : undefined);
+  const bg = winner?.manifest.backgrounds?.[target];
   if (winner && bg) {
     if (bg.mode === "image") return { themeId: winner.themeId, image: bg.image, mode: "image" };
     if (bg.mode === "blur") return { themeId: winner.themeId, mode: "blur" };

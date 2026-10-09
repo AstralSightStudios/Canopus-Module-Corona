@@ -25,8 +25,6 @@ struct rh_backgrounds {
     char widgets[RH_PATH];
 };
 
-struct rh_launcher_background { char image[RH_PATH]; };
-
 /* Strict newline-terminated format:
  *   version=1\nlauncher=themes/<id>/<path>\ncontrol_center=system\nnotifications=...\nwidgets=...\n
  * Also accepts legacy format:
@@ -36,6 +34,4 @@ struct rh_launcher_background { char image[RH_PATH]; };
 int rh_backgrounds_parse(const char *data, uint32_t size,
                          struct rh_backgrounds *out);
 
-int rh_launcher_background_parse(const char *data, uint32_t size,
-                                 struct rh_launcher_background *out);
 #endif

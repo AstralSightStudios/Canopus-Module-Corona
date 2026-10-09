@@ -6,10 +6,10 @@
 static const char image_prefix[] = "version=1\nmode=image\nimage=";
 
 static void rejected_bytes(const char *data, uint32_t size) {
-    struct rh_launcher_background out, saved;
+    struct rh_backgrounds out, saved;
     memset(&out, 0xa5, sizeof(out));
     saved = out;
-    assert(rh_launcher_background_parse(data, size, &out) < 0);
+    assert(rh_backgrounds_parse(data, size, &out) < 0);
     assert(!memcmp(&out, &saved, sizeof(out)));
 }
 
@@ -19,7 +19,7 @@ static void rejected(const char *data) {
 
 static void image_case(const char *image, int valid) {
     char text[RH_PATH * 2];
-    struct rh_launcher_background out;
+    struct rh_backgrounds out;
     int n = snprintf(text, sizeof(text), "%s%s\n", image_prefix, image);
     assert(n > 0 && (size_t)n < sizeof(text));
     if (!valid) {
@@ -27,9 +27,9 @@ static void image_case(const char *image, int valid) {
         return;
     }
     memset(&out, 0xa5, sizeof(out));
-    assert(!rh_launcher_background_parse(text, (uint32_t)n, &out));
-    assert(!strncmp(out.image, RH_APP_FILES_ROOT, strlen(RH_APP_FILES_ROOT)));
-    assert(!strcmp(out.image + strlen(RH_APP_FILES_ROOT), image));
+    assert(!rh_backgrounds_parse(text, (uint32_t)n, &out));
+    assert(!strncmp(out.launcher, RH_APP_FILES_ROOT, strlen(RH_APP_FILES_ROOT)));
+    assert(!strcmp(out.launcher + strlen(RH_APP_FILES_ROOT), image));
 }
 
 static void test_format(void) {
@@ -54,20 +54,20 @@ static void test_format(void) {
         "version=1\nmode=image\nimage=themes/base/a.bin\nextra=1\n",
         "version=1\nmode=image\nimage=themes/base/a.bin\nimage=themes/base/b.bin\n"
     };
-    struct rh_launcher_background out;
+    struct rh_backgrounds out;
     char exact[sizeof(image_config) - 1u], changed[sizeof(image_config)];
     uint32_t i;
 
     memset(&out, 0xa5, sizeof(out));
-    assert(!rh_launcher_background_parse(system_config,
+    assert(!rh_backgrounds_parse(system_config,
                                          sizeof(system_config) - 1u, &out));
-    assert(out.image[0] == 0);
-    for (i = 1; i < sizeof(out.image); i++)
-        assert((unsigned char)out.image[i] == 0xa5);
+    assert(out.launcher[0] == 0);
+    for (i = 1; i < sizeof(out.launcher); i++)
+        assert((unsigned char)out.launcher[i] == 0xa5);
     for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) rejected(bad[i]);
     rejected_bytes(NULL, 0);
     rejected_bytes(NULL, 1);
-    assert(rh_launcher_background_parse(system_config,
+    assert(rh_backgrounds_parse(system_config,
                                         sizeof(system_config) - 1u, NULL) < 0);
     /* Reject a hostile size without accessing that many caller bytes. */
     rejected_bytes("x", UINT32_MAX);
@@ -88,11 +88,11 @@ static void test_format(void) {
     }
     /* No terminator is needed or examined outside the declared byte range. */
     memcpy(exact, image_config, sizeof(exact));
-    assert(!rh_launcher_background_parse(exact, sizeof(exact), &out));
-    assert(!strcmp(out.image, RH_THEME_ROOT "base/background.bin"));
+    assert(!rh_backgrounds_parse(exact, sizeof(exact), &out));
+    assert(!strcmp(out.launcher, RH_THEME_ROOT "base/background.bin"));
     memcpy(changed, image_config, sizeof(image_config));
     changed[sizeof(image_config) - 1u] = '!';
-    assert(!rh_launcher_background_parse(changed, sizeof(image_config) - 1u, &out));
+    assert(!rh_backgrounds_parse(changed, sizeof(image_config) - 1u, &out));
 }
 
 static void test_paths(void) {

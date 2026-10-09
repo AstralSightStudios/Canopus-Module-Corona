@@ -47,7 +47,6 @@ export interface ResourcePackMapping {
 }
 
 export type BackgroundSetting = { mode: "system" } | { mode: "blur" } | { mode: "image"; image: string };
-export type LauncherBackground = BackgroundSetting;
 
 export interface BackgroundsDeclaration {
   launcher?: BackgroundSetting;
@@ -85,7 +84,6 @@ export interface ResourcePackManifest {
   mappings: ResourcePackMapping[];
   backgrounds?: BackgroundsDeclaration;
   calendar?: CalendarDeclaration;
-  launcherBackground?: LauncherBackground;
 }
 
 function isRecord(value: unknown): value is { [key: string]: unknown } {
@@ -331,12 +329,12 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     if (value.backgrounds.widgets !== undefined)
       backgrounds.widgets = parseBackgroundSetting(value.backgrounds.widgets, value.themeId, "backgrounds.widgets");
   }
+  // Legacy input is normalized here; internal consumers only use backgrounds.
   if (value.launcherBackground !== undefined) {
     const lb = parseBackgroundSetting(value.launcherBackground, value.themeId, "launcherBackground");
     if (!backgrounds) backgrounds = {};
     if (!backgrounds.launcher) backgrounds.launcher = lb;
   }
-  const launcherBackground = backgrounds?.launcher;
   const calendar = value.calendar === undefined ? undefined : parseCalendar(value.calendar, value.themeId);
 
   // Consume quickappIcons into canonical mappings only. Re-parsing serialized
@@ -354,8 +352,7 @@ export function parseResourcePackManifest(text: string, expectedThemeId?: string
     ...(targets === undefined ? {} : { targets }),
     mappings,
     ...(calendar === undefined ? {} : { calendar }),
-    ...(backgrounds === undefined ? {} : { backgrounds }),
-    ...(launcherBackground === undefined ? {} : { launcherBackground })
+    ...(backgrounds === undefined ? {} : { backgrounds })
   };
 }
 
@@ -373,9 +370,6 @@ export function validateResourcePackFiles(
       if (bg.mode === "image" && !relativePaths.includes(bg.image))
         throw new Error(`backgrounds.${key}.image 不存在于资源包文件中`);
     }
-  } else if (manifest.launcherBackground?.mode === "image" &&
-      !relativePaths.includes(manifest.launcherBackground.image)) {
-    throw new Error("launcherBackground.image 不存在于资源包文件中");
   }
   for (const mapping of manifest.mappings) {
     const exists = mapping.destination.endsWith("/")

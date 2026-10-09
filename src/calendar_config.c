@@ -66,7 +66,6 @@ static int text_ok(const char *s, uint32_t n) {
     return 1;
 }
 int rh_calendar_parse(const char *data, uint32_t size, struct rh_calendar_config *c) {
-    static const unsigned counts[3] = {12, 31, 7};
     uint32_t pos = 10, seen = 0;
     if (!data || !c || size < 10 || size > RH_CALENDAR_CONFIG_BYTES ||
         !equal(data, 10, "version=1\n") || data[size - 1] != '\n') return -1;
@@ -115,9 +114,9 @@ int rh_calendar_parse(const char *data, uint32_t size, struct rh_calendar_config
             }
             p->color_native = 0; p->color = color;
         }
-        if (number(field[7], length[7], &value, 0, (int32_t)counts[id])) return -1;
+        if (number(field[7], length[7], &value, 0, (int32_t)rh_calendar_context_count(id))) return -1;
         p->count = (uint32_t)value;
-        if ((p->count && p->count != counts[id]) ||
+        if ((p->count && p->count != rh_calendar_context_count(id)) ||
             (p->type == RH_CALENDAR_IMAGE && (!p->count || p->size || !p->color_native)) ||
             (p->type == RH_CALENDAR_NONE && p->count)) return -1;
         for (j = 0; j < p->count; ++j) {

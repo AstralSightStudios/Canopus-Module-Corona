@@ -57,12 +57,10 @@ static uint32_t load32(uint32_t a) {
     if (a == RH_FW_HEADER_CACHE_SLOT || a == RH_FW_IMAGE_CACHE_SLOT) return 0;
     return object(a)->clz;
 }
-static int cache_valid(uint32_t a, uint32_t b) { (void)a; (void)b; return 1; }
-static int retire_cache(uint32_t a, uint32_t b, const struct rh_mapping_view *v, const char *p) {
-    (void)a; (void)b; (void)v; (void)p; return 0;
-}
-static int rh_platform_open(const char *p, int flags) { (void)p; assert(flags == 0); return 1; }
-static void rh_platform_close(int fd) { assert(fd == 1); }
+
+
+
+
 static unsigned redraw_requests;
 static int redraw_result;
 static int rh_platform_request_full_redraw(void) { ++redraw_requests; return redraw_result; }

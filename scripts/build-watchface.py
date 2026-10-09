@@ -19,7 +19,8 @@ if not DEFAULT_CANOPUS.is_dir():
     DEFAULT_CANOPUS = ROOT.parent / 'Canopus-Private'
 CANOPUS = Path(os.environ.get('CANOPUS_ROOT', DEFAULT_CANOPUS)).resolve()
 DEFAULT_TARGETS = ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155']
-TARGETS = DEFAULT_TARGETS + ['xiaomi-band-10-pro-3.101.043', 'xiaomi-band-11-4.100.177']
+P67_TARGET = 'xiaomi-band-10-pro-3.101.043'
+TARGETS = DEFAULT_TARGETS + [P67_TARGET, 'xiaomi-band-11-4.100.177']
 DEFAULT_CERTS = [
     Path.home() / 'develop/Astrobox-certs/module-installer-ed25519.pem.zip',
     Path.home() / 'develop/AstroBox-Certs/module-installer-ed25519.pem.zip',
@@ -87,6 +88,39 @@ def device_groups(targets):
     return groups
 
 
+def build_options(targets, environ):
+    """One complete product per target; only P67 diagnostics is optional."""
+    for legacy in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE'):
+        if legacy in environ:
+            raise ValueError(f'Retired build flag {legacy}; remove it. P67 backgrounds and native blur are now default.')
+    diagnostics = environ.get('RH_P67_BLUR_DIAGNOSTICS', '0') == '1'
+    if diagnostics and P67_TARGET not in targets:
+        raise ValueError('Blur diagnostics requires exact .043 target in the bundle')
+    return diagnostics
+
+
+def target_build_environment(target, environ):
+    """Do not leak P67-only diagnostics into another target in a mixed bundle."""
+    env = dict(environ)
+    if target != P67_TARGET:
+        env.pop('RH_P67_BLUR_DIAGNOSTICS', None)
+    return env
+
+
+def background_metadata(targets, diagnostics=False):
+    surfaces = ['launcher', 'control_center', 'notifications']
+    p67 = P67_TARGET in targets
+    if p67:
+        surfaces.append('widgets')
+    return {
+        'background_targets': surfaces,
+        'background_blur_mode': 'active_module_owned_snapshot_static_rgb565',
+        'background_blur_device_status': 'NOT_PROBED',
+        'background_device_status': 'NOT_PROBED',
+        **({'p67_blur_diagnostics': diagnostics} if p67 else {}),
+    }
+
+
 def default_output_name(targets):
     prefix = 'module-installer-resource-hook-0.3.0-'
     if set(targets) == set(DEFAULT_TARGETS):
@@ -134,27 +168,18 @@ def main():
     targets = args.target or list(DEFAULT_TARGETS)
     if len(set(targets)) != len(targets):
         parser.error('duplicate target')
-    live_launcher = os.environ.get('RH_P67_LIVE_LAUNCHER', '0') == '1'
-    live_backgrounds = os.environ.get('RH_P67_LIVE_BACKGROUNDS', '0') == '1'
-    live_experiment = live_launcher or live_backgrounds
-    if live_experiment and targets != ['xiaomi-band-10-pro-3.101.043']:
-        parser.error('Live background experiment requires only the exact p67 .043 target')
-    module_description = ('experimental four-page live-foreground / ACTIVE module-owned snapshot static-blur module' if live_backgrounds
-                          else 'experimental launcher-only live-foreground module' if live_launcher
-                          else 'normal module with transactional font reload')
-    experiment_note = ('\n\nEXPERIMENTAL: static screen-fixed wallpapers for launcher, '
-                       'notifications, Control Center and widgets. Native foreground remains '
-                       'live; unused transition snapshots remain firmware-owned. '
-                       'Blur captures when needed into module-owned BGR888 input and produces owned RGB565 output; '
-                       'no native pool access, alpha snapshots or inline patch. Static blur rendering, '
-                       'GPU/cache behavior and frame time are NOT_PROBED. '
-                       'Restore system while idle; do not unload while callbacks are attached.\n'
-                       if live_backgrounds else
-                       '\n\nEXPERIMENTAL: static launcher wallpaper only; native launcher '
-                       'snapshot optimization is bypassed. No alpha snapshots, blur, or other '
-                       'page backgrounds. Device rendering and frame time are NOT_PROBED. '
-                       'Restore system while idle; do not unload while callbacks are attached.\n'
-                       if live_launcher else '')
+    try:
+        diagnostics = build_options(targets, os.environ)
+    except ValueError as error:
+        parser.error(str(error))
+    module_description = 'normal module with transactional font reload and background adapters'
+    p67_note = ('\n\nP67: screen-fixed backgrounds for launcher, notifications, Control Center '
+                'and widgets are included by default. Native foreground remains live; '
+                'transition snapshots remain firmware-owned. Blur uses module-owned '
+                'BGR888 input and RGB565 output, with no native pool access or inline patch. '
+                'This new artifact and GPU/cache/frame-time behavior are NOT_PROBED. '
+                'Restore system while idle; do not unload while callbacks are attached.\n')
+    background_note = p67_note if P67_TARGET in targets else ''
     groups = device_groups(targets)
 
     if args.output is None:
@@ -192,7 +217,7 @@ def main():
         modules = {}
         receipts = {}
         for target in targets:
-            env = dict(os.environ)
+            env = target_build_environment(target, os.environ)
             env['CANOPUS_ROOT'] = str(CANOPUS)
             env['RESOURCE_HOOK_TARGET'] = target
             # Always rebuild: target/build ID alone cannot distinguish an old
@@ -244,7 +269,8 @@ def main():
                 'Use Manager 1.2.2 or newer for transaction acknowledgements; install it separately. '
                 f'Font reload: {font_status}. This new artifact: '
                 'NOT_PROBED on hardware. GPU recovery and framework restart safety remain '
-                'unsupported. Never force-release native font caches.\n' + experiment_note)
+                'unsupported. Never force-release native font caches.\n' +
+                (p67_note if P67_TARGET in device_targets else ''))
             manifest_path = device / 'build/manifest.json'
             manifest = json.loads(manifest_path.read_text())
             manifest['font_reload'] = True
@@ -254,15 +280,7 @@ def main():
             manifest['module_build_id'] = 'resource-hook-0.3.0'
             manifest['signer_public_key_sha256'] = public_fingerprint
             manifest['hardware_status'] = 'NOT_PROBED'
-            if live_experiment:
-                manifest['p67_live_launcher'] = True
-                manifest['launcher_background_device_status'] = 'NOT_PROBED'
-            if live_backgrounds:
-                manifest['p67_live_backgrounds'] = True
-                manifest['background_blur_mode'] = 'active_module_owned_snapshot_static_rgb565'
-                manifest['background_blur_device_status'] = 'NOT_PROBED'
-                manifest['background_targets'] = ['launcher', 'control_center', 'notifications', 'widgets']
-                manifest['background_device_status'] = 'NOT_PROBED'
+            manifest.update(background_metadata(device_targets, diagnostics))
             manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
             # Recreate and verify each independently packable device archive.
             archive_path = device / 'build/resource-hook-prod.zip'
@@ -290,7 +308,7 @@ def main():
             'Manager 1.2.2 or newer is recommended for revision-matched transaction '
             'results. Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new package is NOT_PROBED on hardware. GPU recovery and framework '
-            'restart safety remain unsupported.\n' + experiment_note)
+            'restart safety remain unsupported.\n' + background_note)
         shutil.copyfile(ROOT / 'docs/FONT_RELOAD.md', package / 'docs/FONT_RELOAD.md')
         for target in targets:
             evidence = package / 'evidence' / target
@@ -311,7 +329,7 @@ def main():
             '- `SHA256SUMS`: package file checksums.\n\n'
             'Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new artifact is NOT_PROBED. GPU recovery and framework restart safety '
-            'remain unsupported. Do not use on other firmware targets.\n' + experiment_note)
+            'remain unsupported. Do not use on other firmware targets.\n' + background_note)
         target_details = {}
         for target in targets:
             target_details[target] = {
@@ -332,16 +350,9 @@ def main():
                 'NOT_PROBED' if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
         }
-        if live_experiment:
-            build_meta['p67_live_launcher'] = True
-            build_meta['launcher_background_device_status'] = 'NOT_PROBED'
+        build_meta.update(background_metadata(targets, diagnostics))
+        if P67_TARGET in targets:
             shutil.copyfile(ROOT / 'docs/P67_BACKGROUNDS.md', package / 'docs/P67_BACKGROUNDS.md')
-        if live_backgrounds:
-            build_meta['p67_live_backgrounds'] = True
-            build_meta['background_blur_mode'] = 'active_module_owned_snapshot_static_rgb565'
-            build_meta['background_blur_device_status'] = 'NOT_PROBED'
-            build_meta['background_targets'] = ['launcher', 'control_center', 'notifications', 'widgets']
-            build_meta['background_device_status'] = 'NOT_PROBED'
         if len(targets) == 1:
             build_meta['target'] = targets[0]
             build_meta['firmware_sha256'] = firmwares[targets[0]]

@@ -93,7 +93,9 @@ async function main() {
       mappings: [], ...(background === undefined ? {} : { launcherBackground: background })
     }));
     const image = make({ mode: 'image', image: 'assets/background.bin' });
-    assert.deepEqual(make().launcherBackground, undefined);
+    assert.deepEqual(make().backgrounds, undefined);
+    assert.equal(Object.hasOwn(image, 'launcherBackground'), false);
+    assert.deepEqual(image.backgrounds.launcher, { mode: 'image', image: 'assets/background.bin' });
     for (const background of [null, { mode: 'unknown' }, { mode: 'system', image: 'x' },
       { mode: 'image', image: '../x' }, { mode: 'image', image: '/x' },
       { mode: 'image', image: 'x\ny' }, { mode: 'image', image: 'dir/' }])
@@ -168,9 +170,16 @@ async function main() {
       controlCenter: { mode: 'system' }, notifications: { mode: 'blur' }
     });
     assert.deepEqual(parse(shorthand), shorthand);
+    const conflicting = parse({ ...base, launcherBackground: 'assets/legacy.bin',
+      backgrounds: { launcher: 'system' } });
+    assert.deepEqual(conflicting.backgrounds.launcher, { mode: 'system' });
+    assert.equal(Object.hasOwn(conflicting, 'launcherBackground'), false);
     for (const launcherBackground of ['blur', { mode: 'blur' }, 'system', 'assets/bg.bin']) {
       const legacy = parse({ ...base, launcherBackground });
-      assert.deepEqual(legacy.backgrounds.launcher, legacy.launcherBackground);
+      const expectedLauncher = typeof launcherBackground === 'object' ? launcherBackground :
+        launcherBackground === 'assets/bg.bin' ? { mode: 'image', image: launcherBackground } : { mode: launcherBackground };
+      assert.deepEqual(legacy.backgrounds.launcher, expectedLauncher);
+      assert.equal(Object.hasOwn(legacy, 'launcherBackground'), false);
       assert.deepEqual(parse(legacy), legacy);
     }
   }
@@ -178,11 +187,13 @@ async function main() {
   {
     const file = makeFileApi();
     const bg = 'internal://files/backgrounds.cfg';
-    const imageManifest = { format: 'canopus-resource-pack', formatVersion: 1,
+    const imageManifest = pack.parseResourcePackManifest(JSON.stringify({
+      format: 'canopus-resource-pack', formatVersion: 1,
       themeId: 'image', name: 'image', mappings: [],
-      launcherBackground: { mode: 'image', image: 'bg.bin' } };
+      launcherBackground: { mode: 'image', image: 'bg.bin' }
+    }));
     const systemManifest = { ...imageManifest, themeId: 'plain', name: 'plain',
-      launcherBackground: { mode: 'system' } };
+      backgrounds: { launcher: { mode: 'system' } } };
     const snapshot = { installedThemeIds: ['image', 'plain'], themes: new Map([
       ['image', { themeId: 'image', manifest: imageManifest, files: [{ relativePath: 'bg.bin', sizeBytes: 1 }] }],
       ['plain', { themeId: 'plain', manifest: systemManifest, files: [] }]
