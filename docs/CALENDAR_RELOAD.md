@@ -13,16 +13,21 @@ All four supported exact targets provide native date/render adapters; there is
 no runtime supported/unsupported probe. Instruction-receipt mismatches fail the
 date/render operation (`-2155`/`-2156`) and preserve the previous publication.
 Band 11 reload does not invoke the old native GENERATE or NOTIFY chains.
-Band 10 Pro 3.101.043 uses its separate RAM-source adapter for custom calendar
+Band 10 Pro 3.101.043 uses its separate **RAM-only** adapter for custom calendar
 configuration and retains the stock calendar for defaults. Its clock, snapshot,
-font and application-publication ABI is not a relocated Band 11 adapter; the
-existing file-bank writes remain in place pending separate consumer validation.
+font and application-publication ABI is not a relocated Band 11 adapter. It no
+longer writes derived image files, selects file banks or redirects final-icon
+POSIX reads. Config and source assets still use ordinary file I/O/mappings.
+This RAM-only revision has source-compiled model/build verification, not device
+acceptance; historical user reports do not validate the changed publication path.
 
 Both renderers share item validation/context selection, but retain native font
 and object creation. Configured image cache keys are deduplicated by path
 contents, including repeated images across month/day/weekday. Retirement still
-runs before rendering and again at publication to evict reentrantly cached old
-output; this optimization does not merge those two lifecycle boundaries.
+runs before rendering and again at publication to evict reentrantly cached
+inputs and, on Band 11, old file output. P67 retires only compositing-background
+and configured-image keys, never the stock output or legacy bank keys. These two
+lifecycle boundaries remain separate.
 
 The user has explicitly approved the **15 newly recorded exact private native
 entries** in the adjacent Canopus `.177` pack (revision 2). Each has a recovered
@@ -33,6 +38,8 @@ verifier exception is added. Approval removes the previous exact-symbol blocker,
 not the separate signing/install or physical-device acceptance requirements.
 
 ## Rendering and redirection
+
+### Band 11: independent file banks
 
 ```text
 Existing mappings -> /resource/app/perpetual_calendar/launcher_icon.bin
@@ -70,10 +77,55 @@ native display; no forced page rebuild is used.
 
 Only relevant background, final-output, physical-bank and configured-image cache
 keys are retired, before rendering and again at the publication boundary to
-remove any old-bank decoder repopulated by reentrant callbacks. Referenced native cache entries keep native ownership. There
-is no global drop-all. Failed snapshot/GPU completion retains one bounded native
-tree/fonts/buffer until a later successful fence; restart/unload during pending
-GPU work and fault recovery remain unsupported.
+remove any old-bank decoder repopulated by reentrant callbacks. Referenced native
+cache entries keep native ownership. There is no global drop-all. Failed
+snapshot/GPU completion retains one bounded native tree/fonts/buffer until a
+later successful fence; restart/unload during pending GPU work and fault
+recovery remain unsupported.
+
+### P67: RAM-only publication
+
+```text
+Mapped calendar_background_icon.bin + month/day/weekday
+                       |
+             inactive 112 x 112 ARGB8888 RAM buffer
+                       |
+          snapshot -> GPU fence -> metadata/cache synchronization
+                       |
+        second input-cache retirement -> commit prepared buffer
+                       |
+       perpetual_calendar app+12 RAM source, signal-6 hook
+                       |
+                  EventBus 43
+```
+
+The recovered stock signal writes a RAM descriptor to `app+12`; the module
+publisher binds the same kind of source. The generated file banks were consumed
+only by the module's generic file redirect, not this P67 native publication path.
+`app+56` retains the original signal callback: signal 6 supplies the committed
+RAM buffer; other signals forward to stock. Rendering only prepares a candidate.
+A failed render or publication-boundary retirement never changes the committed
+RAM source, including during a reentrant signal-6 dispatch. The UI owner cancels
+a prepared candidate if the second retirement fails.
+
+Two module-owned draw buffers are allocated lazily and reused after GPU fences;
+removing file output does **not** remove double buffering or reduce their pixel
+RAM. At a 448-byte stride, each successful generation avoids the former 12-byte
+header plus 50,176-byte pixel write. This is an I/O-count reduction, not a measured
+frame-time improvement. The buffers remain allocated when restoring defaults;
+native trees and image-source paths stay alive through failed completion fences
+and are cleaned only after a later successful fence. GPU recovery and
+restart/unload safety are still unsupported.
+
+Missing app lookup retains the completed RAM generation. Subsequent unchanged-date
+polls retry attachment without a new snapshot; an already attached source is not
+repeatedly notified. Restoring defaults waits for a successful GPU fence, restores
+the original callback and requests the stock notifier. Initial defaults install no
+hook and generate nothing. Existing `calendar-alpha-*.bin` files are neither read
+nor rewritten nor automatically deleted; fresh builds do not create them.
+Ordinary explicit file mappings still work, but P67 has no derived final-icon
+file redirect. The Band 11 final-file override contract above is not a P67 RAM
+source override.
 
 ## Defaults: native attributes, not an unverified pixel guarantee
 
@@ -140,8 +192,8 @@ See `examples/calendar/corona.json` for a valid text-only manifest.
   and resets to native defaults. Background priority stays ordinary mappings.
 - Manager retains all referenced image-pack directories across publication
   failures and acknowledged-generation cleanup. Optional known runtime identity
-  rejects unsupported declarations before publication; C independently rejects
-  non-default unsupported CFGs.
+  rejects unsupported declarations before publication; C independently validates
+  the CFG on each of the four supported exact targets.
 
 ## Transport and failure handling
 
@@ -160,7 +212,7 @@ prepends the target-specific app root. Missing declarations produce exactly
 `version=1\n`; removing configuration therefore restores defaults, not stale
 custom settings. Bounded native parsing validates UTF-8, counts, coordinates,
 colors and paths independently. Malformed/read/allocation failures preserve the
-active config and ready bank. Config and mapping publication are reserved
+active config and ready RAM/file publication. Config and mapping publication are reserved
 against nested activation; rendering never runs while the read hook owns data.
 
 | Error | Meaning |
@@ -170,7 +222,7 @@ against nested activation; rendering never runs while the read hook owns data.
 | -2153 | invalid/oversized configuration |
 | -2154 | UI/display/cache busy or unsafe to render |
 | -2155 | native date/firmware receipt invalid |
-| -2156 | image/font/snapshot/GPU/header/write failure |
+| -2156 | image/font/snapshot/GPU/metadata failure; Band 11 also header/write failure |
 
 Legacy artifacts may report `-2157` for unsupported calendar overrides; current
 four-target builds do not emit that capability error.
@@ -194,6 +246,7 @@ CC=/usr/bin/clang sh scripts/test-host.sh
 node tests/test_manager_calendar.cjs
 python3 tests/test_calendar_native.py
 python3 tests/test_calendar_adapter.py
+python3 tests/test_p67_calendar_native.py
 python3 tests/test_calendar_allowlist.py
 CC=/usr/bin/clang sh scripts/build.sh xiaomi-band-11-4.100.177
 ```
@@ -201,8 +254,13 @@ CC=/usr/bin/clang sh scripts/build.sh xiaomi-band-11-4.100.177
 Native Python tests require `unicorn`, `capstone`, `pyelftools`, and the exact
 fingerprinted AP; set `RH_CALENDAR_FIRMWARE=/path/to/vela_ap.bin`. Native leaves
 model clock, LVGL objects, font allocation, files and GPU completion, not pixels.
+`tests/test_p67_calendar_native.py` needs only `unicorn` and `pyelftools`; it
+compiles the actual P67 renderer and calendar owner, but models native leaves.
+Without `RH_AP_1043=/path/to/vela_ap.bin`, receipt words are explicitly synthetic
+fixtures, not exact-AP verification. A supplied AP is SHA-256 checked first.
 `tests/firmware_calendar.py` remains historical evidence for the old system
-GENERATOR/NOTIFY ABIs, not evidence that the module invokes them today.
+GENERATOR/NOTIFY ABIs and P67 RAM consumers, not evidence that Band 11 invokes
+those old chains today.
 
 At implementation time portable host tests, calendar Manager tests, and ten
 native tests passed. Four additional allowlist regressions check schemas, exact

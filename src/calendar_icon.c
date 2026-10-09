@@ -2,13 +2,12 @@
 #include "resource_hook_calendar_native.h"
 #include "resource_hook_platform.h"
 
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-void rh_p67_calendar_reset(void);
-#endif
-
 static struct rh_calendar_config *active;
 static struct rh_calendar_date generated;
-static unsigned initialized, busy, dirty = 1, ready, bank;
+static unsigned initialized, busy, dirty = 1, ready;
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
+static unsigned bank;
+#endif
 
 void rh_calendar_discard(struct rh_calendar_config *c) { if (c) rh_platform_free(c); }
 int rh_calendar_stage(struct rh_calendar_config **out) {
@@ -74,45 +73,66 @@ static int same_date(const struct rh_calendar_date *a, const struct rh_calendar_
 }
 static int generate(unsigned force) {
     struct rh_calendar_date now;
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
     const char *path;
     unsigned next;
+#endif
     int rc;
     uint32_t irq;
     if (!initialized || !active || !rh_platform_redraw_ready()) return -2154;
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    /* On P67 (Band 10 Pro), default calendar icon is already transparent natively.
-     * Do not generate or hook when there is no custom configuration. */
-    if (!active->custom) {
-        rh_p67_calendar_reset();
-        irq = rh_platform_lock();
-        ready = dirty = 0;
-        rh_platform_unlock(irq);
-        return 0;
-    }
-#endif
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
     busy = 1;
     rh_platform_unlock(irq);
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    /* On P67 (Band 10 Pro), default calendar icon is already transparent natively.
+     * Do not generate or hook when there is no custom configuration. */
+    if (!active->custom) {
+        if (rh_p67_calendar_reset()) { rc = -2154; goto done; }
+        irq = rh_platform_lock();
+        ready = dirty = 0;
+        rh_platform_unlock(irq);
+        rc = 0; goto done;
+    }
+#endif
     rc = rh_calendar_native_date(&now);
     if (rc) { rc = -2155; goto done; }
-    if (!force && !dirty && ready && same_date(&generated, &now)) { rc = 0; goto done; }
+    if (!force && !dirty && ready && same_date(&generated, &now)) {
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+        /* An app registered after generation adopts the existing RAM image. */
+        rh_platform_calendar_publish();
+#endif
+        rc = 0; goto done;
+    }
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
     next = ready ? bank ^ 1u : 0u;
     path = next ? RH_CALENDAR_BANK1 : RH_CALENDAR_BANK0;
-    /* Retire all three logical/physical keys, never global caches. Keep the
-     * old ready bank selected while the other file is being written. */
+#endif
+    /* Retire target-specific input/output keys, never global caches. Keep
+     * the previous RAM/file publication selected throughout rendering. */
     if (rh_platform_calendar_retire(active)) { rc = -2154; goto done; }
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    rc = rh_calendar_native_render(active, &now, 0);
+#else
     rc = rh_calendar_native_render(active, &now, path);
+#endif
     if (rc) { rc = -2156; goto done; }
-    /* Rendering dispatches callbacks. A nested logical read may have cached
-     * the old ready bank after the pre-render retirement. Retire again at the
-     * publication boundary so the publisher cannot reuse that stale decoder. */
-    if (rh_platform_calendar_retire(active)) { rc = -2154; goto done; }
+    /* Rendering dispatches callbacks. Retire reentrantly cached inputs and
+     * (Band 11 only) old file decoders at the publication boundary. */
+    if (rh_platform_calendar_retire(active)) {
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+        rh_p67_calendar_cancel();
+#endif
+        rc = -2154; goto done;
+    }
     irq = rh_platform_lock();
-    bank = next; ready = 1; dirty = 0; generated = now;
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
+    bank = next;
+#endif
+    ready = 1; dirty = 0; generated = now;
     rh_platform_unlock(irq);
-    /* No system GENERATE/NOTIFY call: publication only binds the logical key
-     * whose reads select the just-completed independent Alpha file. */
+    /* P67 binds the prepared RAM descriptor; Band 11 binds the logical key
+     * whose reads select the completed independent Alpha file. */
     rh_platform_calendar_publish();
     rc = 0;
 done:
@@ -129,13 +149,14 @@ int rh_calendar_pending(void) {
 #endif
 }
 const char *rh_calendar_redirect(const char *path) {
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    (void)path;
+    return 0; /* P67 publishes a RAM source, never a derived file. */
+#else
     static const char logical[] = RH_CALENDAR_OUTPUT_PATH;
     uint32_t i, irq;
     const char *out = 0;
     if (!path) return 0;
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-    if (!active || !active->custom) return 0;
-#endif
     /* The native '/' POSIX driver receives paths WITHOUT the leading slash. */
     for (i = 0; i < sizeof(logical) - 2u; ++i)
         if (!path[i] || path[i] != logical[i + 1u]) return 0;
@@ -144,4 +165,5 @@ const char *rh_calendar_redirect(const char *path) {
     if (ready) out = (bank ? RH_CALENDAR_BANK1 : RH_CALENDAR_BANK0) + 1;
     rh_platform_unlock(irq);
     return out;
+#endif
 }

@@ -243,7 +243,8 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
 }
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 void rh_p67_calendar_publish(void) {}
-void rh_p67_calendar_reset(void) {}
+void rh_p67_calendar_cancel(void) {}
+int rh_p67_calendar_reset(void) { return 0; }
 #endif
 #endif
 

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Opt-in exact-AP/model suite. Requires capstone, unicorn and pyelftools.
+# Opt-in Band11 exact-AP and four-target calendar model suite.
+# Requires capstone, unicorn and pyelftools.
 # Does not access a device or modify the external SDK.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -28,5 +29,7 @@ for target in 139 155 177; do
     RH_BACKGROUND_TARGET="$target" "$PYTHON" "$ROOT/tests/test_launcher_background_native.py"
     RH_BACKGROUND_TARGET="$target" "$PYTHON" "$ROOT/tests/test_blur_background_native.py"
 done
+"$PYTHON" "$ROOT/tests/test_calendar_adapter.py"
+"$PYTHON" "$ROOT/tests/test_p67_calendar_native.py"
 "$PYTHON" "$ROOT/tests/test_band11_feature_ports.py"
-printf 'Band11 exact-AP and model tests passed; device/GPU behavior remains NOT_PROBED.\n'
+printf 'Band11 exact-AP and four-target calendar models passed; device/GPU behavior remains NOT_PROBED.\n'

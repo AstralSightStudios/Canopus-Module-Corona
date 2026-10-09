@@ -441,6 +441,7 @@ static int rh_wrapper(void *d, const char *p, int m) {
     view = rh_snapshot_view(snapshot);
     rh_platform_unlock(irq);
     result = 0;
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
     if (d == S.driver && m == 2 && S.original) {
         const char *derived = rh_calendar_redirect(p);
         char mapped[RH_PATH];
@@ -449,6 +450,7 @@ static int rh_wrapper(void *d, const char *p, int m) {
         if (derived && rh_resolve_view(&view, RH_CALENDAR_OUTPUT_PATH, mapped) != 1)
             result = S.original(d, derived, m);
     }
+#endif
     if (!result || result == -1) result = rh_posix_open_view(&S, &view, d, p, m);
     snapshot_release(snapshot);
     return result;

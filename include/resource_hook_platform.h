@@ -37,7 +37,8 @@ int rh_platform_refresh_images(const struct rh_state *);
 int rh_platform_refresh_mapped_images(const struct rh_mapping_view *,
                                       const struct rh_mapping_view *);
 /* Derived calendar rendering is UI-owner-only, outside the IRQ lock.
- * No adapter invokes the stock opaque generator or app signal/notify chain. */
+ * Band 11 never invokes the stock opaque generator or signal/notify chain.
+ * P67 publishes RAM; restoring defaults delegates to its stock notifier. */
 int rh_platform_calendar_affected(const struct rh_mapping_view *,
                                   const struct rh_mapping_view *);
 int rh_platform_refresh_calendar(void);

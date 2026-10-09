@@ -3,6 +3,7 @@
 #include "resource_hook_background.h"
 #include "resource_hook_blur.h"
 #include "resource_hook_calendar_runtime.h"
+#include "resource_hook_calendar_native.h"
 #include "resource_hook_calendar_internal.h"
 #include "canopus_veneer.h"
 
@@ -845,8 +846,11 @@ int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
 }
 int rh_platform_refresh_calendar(void) { return rh_calendar_refresh(); }
 int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
-    static const char *const keys[] = {RH_CALENDAR_BACKGROUND, RH_CALENDAR_OUTPUT,
-                                      RH_CALENDAR_BANK0, RH_CALENDAR_BANK1};
+    static const char *const keys[] = {RH_CALENDAR_BACKGROUND,
+#if !defined(RH_TARGET_1043) || !RH_TARGET_1043
+                                      RH_CALENDAR_OUTPUT, RH_CALENDAR_BANK0, RH_CALENDAR_BANK1
+#endif
+                                      };
     uint32_t data, header, i, j, seen_count = 0;
     /* At most 12 month + 31 day + 7 weekday images; retain pool references,
      * not 50 absolute path buffers. Compare contents, not pool offsets. */
@@ -879,10 +883,6 @@ int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
     }
     return 0;
 }
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
-void rh_p67_calendar_publish(void);
-#endif
-
 void rh_platform_calendar_publish(void) {
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     rh_p67_calendar_publish();

@@ -4,6 +4,26 @@ Implementation and limits: [calendar reload contract](../../docs/CALENDAR_RELOAD
 
 Exact AP SHA-256: `519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec` (13795728 bytes).
 
+## Current RAM-only publication
+
+Custom configuration snapshots to one of two module-owned 112x112 ARGB8888 RAM
+buffers. The recovered signal-6 consumer stores that descriptor at `app+12`;
+publication hooks `app+56` and sends EventBus 43. There is no derived file write,
+file-bank selection, final-icon POSIX redirect or output-file cache retirement.
+Source files/configuration and targeted input-cache retirement remain unchanged.
+Prepared buffers are committed only after both cache retirements; failures keep
+the previous signal source. Defaults restore the stock callback/notifier after a
+successful GPU fence. The RAM buffers remain allocated for reuse.
+
+`tests/test_p67_calendar_native.py` compiles the real renderer and calendar owner
+and models native leaves; without `RH_AP_1043` it uses synthetic receipt words.
+It covers rendering/publication, date/locale rollover, delayed application lookup,
+metadata/allocation/snapshot/fence failures, publication-boundary cancellation,
+retained tree/image-path lifetimes and stock fallback. The RAM-only revision is
+**NOT_PROBED** on device; the historical user report below is not acceptance of
+this changed path. See the linked contract for GPU/restart and native stock
+failure limits.
+
 ## Exact native entries
 
 | Symbol | Even entry | Thumb callable | Evidence-window bytes | AP window SHA-256 |

@@ -11,6 +11,7 @@ int rh_calendar_refresh(void);
 int rh_calendar_poll(void);
 int rh_calendar_pending(void);
 /* Read hook only: no clock/config reads, allocation or rendering. Zero means
- * no ready derived file; caller continues the ordinary mapping/fallback path. */
+ * no ready derived file; caller continues the ordinary mapping/fallback path.
+ * Always zero on P67, which publishes only RAM sources. */
 const char *rh_calendar_redirect(const char *);
 #endif

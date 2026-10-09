@@ -1186,10 +1186,19 @@ static int test_calendar_alpha_hook(void) {
     calendar_hook_mode = 1;
     assert(d->activate(NULL) == 0);
     assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    /* Even a stub offering a legacy bank must not redirect P67 POSIX reads. */
+    assert(calendar_hook_calls == 1 && !strcmp(calendar_hook_path, &RH_CALENDAR_OUTPUT_PATH[1]));
+#else
     assert(calendar_hook_calls == 1 && !strcmp(calendar_hook_path, &RH_CALENDAR_BANK0[1]));
+#endif
     calendar_hook_fail = 1;
     assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    assert(calendar_hook_calls == 2 && !strcmp(calendar_hook_path, &RH_CALENDAR_OUTPUT_PATH[1]));
+#else
     assert(calendar_hook_calls == 3 && !strcmp(calendar_hook_path, &RH_CALENDAR_OUTPUT_PATH[1]));
+#endif
     fire_timers(50u);
     control_config = RH_CALENDAR_OUTPUT_PATH "\tthemes/current/final.bin\n";
     control_signal = "resource-hook-reload-v1\tcalendar-static-override\n";
@@ -1197,7 +1206,11 @@ static int test_calendar_alpha_hook(void) {
     calendar_hook_fail = 0;
     assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
     assert(!strcmp(calendar_hook_path, &(RH_THEME_ROOT "current/final.bin")[1]));
+#if defined(RH_TARGET_1043) && RH_TARGET_1043
+    puts("P67 skips calendar file-bank redirects and preserves ordinary explicit mappings");
+#else
     puts("calendar read-only hook, incomplete-bank fallback and explicit final-icon override passed");
+#endif
     return 0;
 }
 static int test_calendar_integration(void) {

@@ -120,8 +120,9 @@ unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
         self.output = ('/resource/app/perpetual_calendar/launcher.bin' if version == '1043'
                        else '/data/app/perpetual_calendar/calendar_icon.bin')
         self.root = ('/data/files/' if version == '1043' else '/data/quickapp/files/') + 'ng.lst.corona/'
-        self.keys = [self.background, self.output,
-                     self.root + 'calendar-alpha-0.bin', self.root + 'calendar-alpha-1.bin']
+        self.file_keys = [self.output, self.root + 'calendar-alpha-0.bin',
+                          self.root + 'calendar-alpha-1.bin']
+        self.keys = [self.background] + ([] if version == '1043' else self.file_keys)
         self.entries = {}
         self.unlink = True
         self.hook(drop, self.drop)
@@ -280,6 +281,15 @@ unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
                     self.assertEqual(self.calls, [])
                     self.assertEqual(self.word(self.symbols['test_refresh_calls']), 0)
 
+    def test_p67_retirement_does_not_touch_stock_output_or_legacy_banks(self):
+        self.machine('1043')
+        expected, unrelated = self.seed_keys(self.keys)
+        retained, extra = self.seed_keys(self.file_keys +
+            ['/data/app/perpetual_calendar/calendar_icon.bin'])
+        self.assertEqual(self.call('rh_platform_calendar_retire', 0), 0)
+        self.assertCountEqual(self.drops, expected)
+        self.assertEqual(self.survivors(), set(unrelated + retained + extra))
+
     def repeated_images(self, paths):
         config = self.mem(self.call('test_config_size'))
         source = 'version=1\n'
@@ -305,9 +315,10 @@ unsigned test_config_size(void) { return sizeof(struct rh_calendar_config); }
                     handle = self.u.hook_add(UC_HOOK_MEM_READ, read_head)
                     self.assertEqual(self.call('rh_platform_calendar_retire', config), 0)
                     self.u.hook_del(handle)
-                    # One validation + four fixed keys + each unique configured image.
-                    self.assertEqual(heads.count(self.header + 52), 5 + len(paths))
-                    self.assertEqual(heads.count(self.data + 52), 5 + len(paths))
+                    # One validation + target-specific fixed keys + unique inputs.
+                    scans = 1 + len(self.keys) + len(paths)
+                    self.assertEqual(heads.count(self.header + 52), scans)
+                    self.assertEqual(heads.count(self.data + 52), scans)
                     self.assertEqual(self.drops, [])
                     # Distinct pool offsets with equal strings must still retire
                     # every matching native entry, including duplicate cache keys.
