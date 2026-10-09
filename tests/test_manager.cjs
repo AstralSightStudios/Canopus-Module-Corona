@@ -5,6 +5,8 @@ const { spawnSync } = require('node:child_process');
 const tests = [
   'test_file.cjs',
   'test_interconnect.cjs',
+  'test_transfer_storage.cjs',
+  'test_interconnect_performance.cjs',
   'test_manager_launch.cjs',
   'test_manifest_filenames.cjs',
   'test_resource_storage.cjs',

@@ -8,6 +8,8 @@ import { validateResourcePackFiles } from "./resource-pack";
 import { readInstalledThemeIds, registerThemeInResourceOrder, writeThemeFileInventory } from "./resource-order";
 import { invalidateResourceCatalog, withResourceOperation } from "./resource-overrides";
 import { readProtectedThemeIds } from "./resource-activation";
+import { TransferStorage } from "./transfer-storage";
+import type { StoredFile, TransferState } from "./transfer-storage";
 
 const VERSION = 2;
 const TRANSFER_STATE_VERSION = 1;
@@ -21,7 +23,6 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_CHUNKS_PER_FILE = 2048;
 const QUICKAPP_FILES_URI = "internal://files/";
 const MAPPINGS_URI = `${QUICKAPP_FILES_URI}mappings.tsv`;
-const TRANSFER_STATE_URI = `${QUICKAPP_FILES_URI}interconnect-transfer.json`;
 const INSTALLED_THEMES_URI = `${QUICKAPP_FILES_URI}interconnect-themes.json`;
 const THEME_ROOT_URI = `${QUICKAPP_FILES_URI}themes/`;
 
@@ -36,26 +37,6 @@ for (let i = 0; i < BASE91_ALPHABET.length; i++)
 export interface ThemeManifestFile {
   relativePath: string;
   sizeBytes: number;
-}
-
-interface StoredFile extends ThemeManifestFile {
-  chunkSizeBytes: number | null;
-  chunkCount: number | null;
-  receivedBitmap: string;
-  complete: boolean;
-}
-
-interface TransferState {
-  version: 1;
-  themeId: string;
-  mode: "replace" | "resume";
-  fileCount: number;
-  totalBytes: number;
-  files: StoredFile[];
-  manifestComplete: boolean;
-  manifestReceiving: boolean;
-  manifestSeen: number;
-  finished: boolean;
 }
 
 interface ProtocolError extends Error {
@@ -265,6 +246,11 @@ export class InterconnectThemeReceiver {
   private link: InterconnectLink | null = null;
   private state: TransferState | null = null;
   private stateLoaded = false;
+  private readonly stateStorage = new TransferStorage();
+  private bytesReceived = 0;
+  private readonly receivedFileBytes: number[] = [];
+  private readonly preparedDirectories = new Set<string>();
+  private directoryEpoch = 0;
   private queue: Promise<void> = Promise.resolve();
   private stopped = false;
   private handshakeSent = false;
@@ -323,6 +309,7 @@ export class InterconnectThemeReceiver {
     if (this.link) return;
     if (this.started) this.preserveForUser();
     this.started = true;
+    this.clearPreparedDirectories();
     this.stopped = false;
     this.connectionGeneration++;
     this.transferActive = false;
@@ -337,7 +324,10 @@ export class InterconnectThemeReceiver {
     };
     const opened = (event: InterconnectEvent = {}) => {
       if (this.stopped) return;
-      if (event.isReconnected) this.preserveForUser();
+      if (event.isReconnected) {
+        this.clearPreparedDirectories();
+        this.preserveForUser();
+      }
       this.handshakeSent = false;
       this.setPhase("ready", event.isReconnected ? "互联已重连，正在恢复接收状态…" : "互联已连接，正在握手…");
       void this.sendHandshake().catch(error => {
@@ -346,6 +336,7 @@ export class InterconnectThemeReceiver {
     };
     link.onopen = opened;
     link.onclose = event => {
+      this.clearPreparedDirectories();
       this.connectionGeneration++;
       this.transferActive = false;
       this.preserveForUser();
@@ -356,6 +347,7 @@ export class InterconnectThemeReceiver {
       }
     };
     link.onerror = event => {
+      this.clearPreparedDirectories();
       this.connectionGeneration++;
       this.transferActive = false;
       this.preserveForUser();
@@ -382,6 +374,7 @@ export class InterconnectThemeReceiver {
   }
 
   stop(): void {
+    this.clearPreparedDirectories();
     this.stopped = true;
     this.connectionGeneration++;
     this.transferActive = false;
@@ -404,20 +397,30 @@ export class InterconnectThemeReceiver {
     this.updateSnapshot({ phase, message });
   }
 
+  private receivedBytesForFile(item: StoredFile): number {
+    if (item.complete) return item.sizeBytes;
+    if (item.chunkSizeBytes === null) return 0;
+    let bytes = 0;
+    for (let index = 0; index < (item.chunkCount || 0); index++) {
+      if (hasChunk(item.receivedBitmap, index))
+        bytes += Math.min(item.chunkSizeBytes, item.sizeBytes - index * item.chunkSizeBytes);
+    }
+    return bytes;
+  }
+
+  private rebuildTransferProgress(state: TransferState): void {
+    this.bytesReceived = 0;
+    this.receivedFileBytes.length = 0;
+    for (const item of state.files) {
+      const bytes = this.receivedBytesForFile(item);
+      this.receivedFileBytes.push(bytes);
+      this.bytesReceived += bytes;
+    }
+  }
+
   private updateTransferProgress(state: TransferState, fileIndex: number, message: string): void {
     const entry = state.files[fileIndex];
-    let bytesReceived = 0;
-    for (const item of state.files) {
-      if (item.complete) {
-        bytesReceived += item.sizeBytes;
-      } else if (item.chunkSizeBytes !== null) {
-        for (let chunkIndex = 0; chunkIndex < (item.chunkCount || 0); chunkIndex++) {
-          if (hasChunk(item.receivedBitmap, chunkIndex))
-            bytesReceived += Math.min(item.chunkSizeBytes,
-              item.sizeBytes - chunkIndex * item.chunkSizeBytes);
-        }
-      }
-    }
+    const bytesReceived = this.bytesReceived;
     const percent = state.totalBytes > 0
       ? Math.min(100, Math.floor(bytesReceived * 100 / state.totalBytes))
       : 0;
@@ -462,6 +465,7 @@ export class InterconnectThemeReceiver {
       });
     }).catch(async error => {
       if (!this.isCurrentConnection(generation)) return;
+      this.clearPreparedDirectories();
       const code = errorCode(error, "write-failed");
       this.setPhase("error", `接收错误（${code}）：${String((error as Error).message || error)}`);
       try {
@@ -578,11 +582,13 @@ export class InterconnectThemeReceiver {
 
   private async ensureStateLoaded(): Promise<void> {
     if (this.stateLoaded) return;
-    const text = await file.readOptionalText(TRANSFER_STATE_URI);
-    if (text !== null) {
-      let parsed: unknown;
-      try { parsed = JSON.parse(text); }
-      catch (_error) { throw protocolError("invalid-manifest", "本地续传状态损坏"); }
+    let parsed: unknown;
+    try { parsed = await this.stateStorage.load(); }
+    catch (error) {
+      if (isRecord(error) && typeof error.operation === "string") throw error;
+      throw protocolError("invalid-manifest", "本地续传状态损坏");
+    }
+    if (parsed !== null) {
       if (!isRecord(parsed) || parsed.version !== TRANSFER_STATE_VERSION || !validThemeId(parsed.themeId) ||
           (parsed.mode !== "replace" && parsed.mode !== "resume") ||
           !integer(parsed.fileCount, 1, MAX_PROTOCOL_TRANSFER_FILES) || !integer(parsed.totalBytes, 0, MAX_THEME_BYTES) ||
@@ -624,12 +630,28 @@ export class InterconnectThemeReceiver {
           (loaded.finished && (!loaded.manifestComplete || loaded.files.some(entry => !entry.complete))))
         throw protocolError("invalid-manifest", "本地续传清单状态无效");
       this.state = loaded;
+      this.rebuildTransferProgress(loaded);
     }
     this.stateLoaded = true;
   }
 
-  private async persist(next: TransferState): Promise<void> {
-    await file.writeText(TRANSFER_STATE_URI, JSON.stringify(next));
+  private async persist(
+    next: TransferState,
+    fileIndex?: number,
+    changedFile?: StoredFile,
+    receivedDelta?: number,
+  ): Promise<void> {
+    // The store commits changedFile only after its complete journal frame is durable.
+    await this.stateStorage.save(next, fileIndex, changedFile);
+    if (fileIndex === undefined || fileIndex < 0) {
+      if (!this.state || next.files !== this.state.files) this.rebuildTransferProgress(next);
+    } else {
+      const previous = this.receivedFileBytes[fileIndex] || 0;
+      const received = receivedDelta === undefined
+        ? this.receivedBytesForFile(next.files[fileIndex]) : previous + receivedDelta;
+      this.receivedFileBytes[fileIndex] = received;
+      this.bytesReceived += received - previous;
+    }
     this.state = next;
   }
 
@@ -654,6 +676,7 @@ export class InterconnectThemeReceiver {
         default: throw protocolError("invalid-manifest", "未知互联包类型");
       }
     } catch (error) {
+      this.clearPreparedDirectories();
       if (!this.isCurrentConnection(generation)) return;
       const themeId = this.state?.themeId;
       const operation = packet[0] === "T" ? this.safeOperation(packet) : "";
@@ -754,6 +777,7 @@ export class InterconnectThemeReceiver {
       throw protocolError("invalid-manifest", "主题清单头无效或超过本地上限");
 
     await this.ensureStateLoaded();
+    this.clearPreparedDirectories();
     const current = this.state;
     if (mode === "resume") {
       if (!current || !sameHeader(current, themeId, fileCount, totalBytes) || !current.manifestComplete)
@@ -765,7 +789,7 @@ export class InterconnectThemeReceiver {
       }
       const next = { ...current, mode: "resume" as const, manifestReceiving: true, manifestSeen: 0 };
       this.activateTransfer(generation);
-      await this.persist(next);
+      await this.persist(next, -1);
       if (current.finished) this.transferPageOpened = false;
       await this.sendTransferAck(themeId, "begin");
       this.updateSnapshot({ phase: "ready", message: `正在校验主题 ${themeId} 的续传清单…`, themeId,
@@ -835,15 +859,15 @@ export class InterconnectThemeReceiver {
     if (index !== state.manifestSeen)
       throw protocolError("invalid-manifest", "文件序号必须从 0 连续递增");
 
-    const next = { ...state, files: state.files.slice(), manifestSeen: state.manifestSeen + 1 };
+    const next = { ...state, manifestSeen: state.manifestSeen + 1 };
     if (state.mode === "resume") {
       const existing = state.files[index];
       if (!existing || !sameManifestFile(existing, entry))
         throw protocolError("invalid-manifest", "续传清单与原清单不同；请使用 replace");
+      await this.persist(next, -1);
     } else {
-      next.files.push(toStoredFile(entry));
+      await this.persist(next, index, toStoredFile(entry));
     }
-    await this.persist(next);
     await this.sendTransferFileAck(state.themeId, index);
   }
 
@@ -885,7 +909,7 @@ export class InterconnectThemeReceiver {
       manifestComplete: true,
       manifestReceiving: false
     };
-    await this.persist(next);
+    await this.persist(next, -1);
     await this.sendStatus(state.themeId, "ready");
     this.updateSnapshot({ phase: "ready", message: `主题 ${state.themeId} 清单已校验，等待文件分片。`,
       themeId: state.themeId, fileName: "", fileIndex: 0, fileCount: state.fileCount,
@@ -925,11 +949,10 @@ export class InterconnectThemeReceiver {
     this.activateTransfer(generation);
     if (stored.chunkSizeBytes !== chunkSize || stored.chunkCount !== chunkCount ||
         (!stored.complete && !stored.receivedBitmap)) {
-      const files = state.files.slice();
-      files[index] = { ...stored, chunkSizeBytes: chunkSize, chunkCount,
+      const changedFile = { ...stored, chunkSizeBytes: chunkSize, chunkCount,
         receivedBitmap: stored.complete ? "" : new Array(Math.ceil(chunkCount / 4) + 1).join("0") };
-      next = { ...state, files };
-      await this.persist(next);
+      next = { ...state };
+      await this.persist(next, index, changedFile);
     }
     await this.sendPrepared(index, next.files[index]);
     this.updateTransferProgress(next, index, `等待接收：${stored.relativePath}`);
@@ -970,10 +993,9 @@ export class InterconnectThemeReceiver {
     await this.ensureDirectory(targetUri.slice(0, slash + 1));
     await file.writeArrayBuffer(targetUri, data, position);
 
-    const files = state.files.slice();
-    files[fileIndex] = { ...stored, receivedBitmap: markChunk(stored.receivedBitmap, chunkIndex) };
-    const next = { ...state, files };
-    await this.persist(next);
+    const changedFile = { ...stored, receivedBitmap: markChunk(stored.receivedBitmap, chunkIndex) };
+    const next = { ...state };
+    await this.persist(next, fileIndex, changedFile, expectedLength);
     await this.sendChunkAck(fileIndex, chunkIndex);
     this.updateTransferProgress(next, fileIndex, `正在接收：${stored.relativePath}`);
   }
@@ -996,10 +1018,8 @@ export class InterconnectThemeReceiver {
     }
     let next = state;
     if (!stored.complete) {
-      const files = state.files.slice();
-      files[index] = { ...stored, complete: true, receivedBitmap: "" };
-      next = { ...state, files };
-      await this.persist(next);
+      next = { ...state };
+      await this.persist(next, index, { ...stored, complete: true, receivedBitmap: "" });
     }
     await this.send(`C${hex4(index)}`);
     this.updateTransferProgress(next, index, `文件已接收：${stored.relativePath}`);
@@ -1027,7 +1047,7 @@ export class InterconnectThemeReceiver {
       await file.writeText(this.themeFileUri(state.themeId, "mappings.tsv"),
         serializeResourcePackMappings(manifest));
       await writeThemeFileInventory(state.themeId, state.files, file);
-      if (!state.finished) await this.persist({ ...state, finished: true });
+      if (!state.finished) await this.persist({ ...state, finished: true }, -1);
       await this.registerTheme(state.themeId);
       this.transferActive = false;
     } finally {
@@ -1115,10 +1135,18 @@ export class InterconnectThemeReceiver {
     });
   }
 
+  private clearPreparedDirectories(): void {
+    this.directoryEpoch++;
+    this.preparedDirectories.clear();
+  }
+
   private async ensureDirectory(uri: string): Promise<void> {
+    if (this.preparedDirectories.has(uri)) return;
+    const epoch = this.directoryEpoch;
     try {
       const info = await file.readFileInfo(uri);
-      if (info.type === "file") throw protocolError("write-failed", "目标父路径已存在为普通文件");
+      if (info.type !== "dir") throw protocolError("write-failed", "目标父路径不是目录");
+      if (epoch === this.directoryEpoch) this.preparedDirectories.add(uri);
       return;
     } catch (error) {
       if ((error as FileOperationError).code !== 301) throw error;
@@ -1128,8 +1156,10 @@ export class InterconnectThemeReceiver {
     } catch (error) {
       // Treat EEXIST as success only after confirming the directory is now present.
       const info = await file.readFileInfo(uri).catch(() => null);
-      if (!info || info.type === "file") throw error;
+      if (!info || info.type !== "dir") throw error;
     }
+    // A disconnect during a native await must not repopulate a new session's cache.
+    if (epoch === this.directoryEpoch) this.preparedDirectories.add(uri);
   }
 
   private themeFileUri(themeId: string, relativePath: string): string {
@@ -1150,6 +1180,7 @@ export class InterconnectThemeReceiver {
   }
 
   private async removeThemeDirectory(themeId: string): Promise<void> {
+    this.clearPreparedDirectories();
     const uri = `${THEME_ROOT_URI}${themeId}/`;
     let info: file.FileInfo;
     try { info = await file.readFileInfo(uri); }

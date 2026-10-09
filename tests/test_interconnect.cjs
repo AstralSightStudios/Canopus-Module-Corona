@@ -123,7 +123,8 @@ async function main() {
   assert.equal(alphabet.length, 91);
   assert.equal(encodeBase91(Buffer.from('test')), 'fPNKd');
   execFileSync(path.join(root, 'manager/node_modules/.bin/tsc'), [
-    path.join(root, 'manager/src/ts/interconnect.ts'), '--outDir', temporary,
+    path.join(root, 'manager/src/ts/interconnect.ts'),
+    path.join(root, 'manager/src/ts/transfer-storage.ts'), '--outDir', temporary,
     '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck', '--allowJs'
   ], { stdio: 'inherit' });
 
@@ -158,6 +159,25 @@ async function main() {
   const { InterconnectThemeReceiver, decodeBase91, validateThemeRelativePath } = receiverModule;
   const { parseResourcePackManifest, serializeResourcePackMappings, validateResourcePackFiles } =
     require(path.join(temporary, 'resource-pack.js'));
+  const transferStateUri = 'internal://files/interconnect-transfer.json';
+  const { TransferStorage } = require(path.join(temporary, 'transfer-storage.js'));
+  const journalUris = [0, 1].map(slot => `${transferStateUri}.journal-${slot}`);
+  const durableStateText = async () => JSON.stringify(await new TransferStorage().load());
+  function clearTransferJournals() {
+    for (const uri of journalUris) {
+      native.binary.delete(uri);
+      native.text.delete(uri);
+    }
+  }
+  function seedLegacyTransfer(text) {
+    clearTransferJournals();
+    native.text.set(transferStateUri, text);
+  }
+  function clearTransferState() {
+    clearTransferJournals();
+    native.text.delete(transferStateUri);
+    native.binary.delete(transferStateUri);
+  }
   assert.equal(Buffer.from(decodeBase91('fPNKd')).toString(), 'test');
   assert.deepEqual([...decodeBase91(encodeBase91([0, 1, 2, 255]))], [0, 1, 2, 255]);
   for (let length = 0; length <= 128; length++) {
@@ -383,7 +403,7 @@ async function main() {
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(states.at(-1).phase, 'ready');
   assert.deepEqual([...native.binary.get('internal://files/themes/dark/corona.json')], [...coronaBytes]);
-  const savedProgress = JSON.parse(native.text.get('internal://files/interconnect-transfer.json'));
+  const savedProgress = JSON.parse(await durableStateText());
   assert.equal(savedProgress.files[0].receivedBitmap, '3');
   assert.equal(Object.hasOwn(savedProgress.files[0], 'receivedChunks'), false);
 
@@ -406,11 +426,11 @@ async function main() {
   assert.equal(transferPageRequests, 2); // A resumed upload on a new app session opens once.
   reply = await deliver('C0000');
   assert(reply.includes('C0000'));
-  const completedProgress = JSON.parse(native.text.get('internal://files/interconnect-transfer.json'));
+  const completedProgress = JSON.parse(await durableStateText());
   assert.equal(completedProgress.files[0].receivedBitmap, '');
   reply = await deliver(`F00000000${encodeBase91([97])}`);
   assert(reply.includes('A00000000'));
-  assert.equal(JSON.parse(native.text.get('internal://files/interconnect-transfer.json')).files[0].receivedBitmap, '');
+  assert.equal(JSON.parse(await durableStateText()).files[0].receivedBitmap, '');
 
   await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 1,
     sizeBytes: 3, chunkSizeBytes: 3, chunkCount: 1 }));
@@ -443,22 +463,21 @@ async function main() {
   assert.equal(resumedStates.at(-1).phase, 'success');
   assert.equal(resumedStates.at(-1).percent, 100);
 
-  const transferStateUri = 'internal://files/interconnect-transfer.json';
   const installedUri = 'internal://files/interconnect-themes.json';
-  const finishedDarkState = native.text.get(transferStateUri);
+  const finishedDarkState = await durableStateText();
   for (const fileCount of [0, -1, 1.5, '129', null, 65537, Number.MAX_SAFE_INTEGER + 1]) {
     reply = messages(await deliver('T' + JSON.stringify({
       operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount, totalBytes: 2
     })));
     assert(reply.some(packet => packet.errorCode === 'invalid-manifest'), `reject count ${fileCount}`);
-    assert.equal(native.text.get(transferStateUri), finishedDarkState, 'invalid headers preserve saved progress');
+    assert.equal(await durableStateText(), finishedDarkState, 'invalid headers preserve saved progress');
   }
   reply = messages(await deliver('T' + JSON.stringify({
     operation: 'begin', themeId: 'legacy', mode: 'replace', fileCount: 129,
     totalBytes: 64 * 1024 * 1024 + 1
   })));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
-  assert.equal(native.text.get(transferStateUri), finishedDarkState, 'the 64 MiB bound is unchanged');
+  assert.equal(await durableStateText(), finishedDarkState, 'the 64 MiB bound is unchanged');
 
   // The largest representable file index is 0xffff, allowing 65,536 files, not 65,535.
   reply = messages(await deliver('T' + JSON.stringify({
@@ -466,7 +485,7 @@ async function main() {
     totalBytes: 64 * 1024 * 1024
   })));
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'));
-  assert.equal(JSON.parse(native.text.get(transferStateUri)).fileCount, 65536);
+  assert.equal(JSON.parse(await durableStateText()).fileCount, 65536);
 
   // One directory mapping can back more than 128 actual transferred files.
   const manyFiles = [
@@ -496,7 +515,7 @@ async function main() {
   assert(reply.some(packet => packet.operation === 'status' && packet.status === 'ready'));
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'finish', themeId: 'legacy' })));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'), 'unreceived files cannot be installed');
-  const savedManyManifest = native.text.get(transferStateUri);
+  const savedManyManifest = await durableStateText();
 
   function restartReceiver(launchToken) {
     receiver.stop();
@@ -522,19 +541,19 @@ async function main() {
     const state = JSON.parse(savedManyManifest);
     mutate(state);
     const invalidText = JSON.stringify(state);
-    native.text.set(transferStateUri, invalidText);
+    seedLegacyTransfer(invalidText);
     restartReceiver();
     reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader, mode: 'resume' })));
     assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
     assert.equal(native.text.get(transferStateUri), invalidText, 'invalid loaded states must not be rewritten');
   }
 
-  native.text.set(transferStateUri, savedManyManifest);
+  seedLegacyTransfer(savedManyManifest);
   restartReceiver();
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader,
     mode: 'resume', fileCount: manyHeader.fileCount - 1 })));
   assert(reply.some(packet => packet.errorCode === 'invalid-manifest'));
-  assert.equal(native.text.get(transferStateUri), savedManyManifest, 'resume requires a matching count');
+  assert.equal(await durableStateText(), savedManyManifest, 'resume requires a matching count');
   reply = messages(await deliver('T' + JSON.stringify({ operation: 'begin', ...manyHeader, mode: 'resume' })));
   assert(reply.some(packet => packet.operation === 'ack' && packet.itemType === 'begin'),
     'a new receiver accepts a persisted manifest larger than 128 files');
@@ -688,7 +707,7 @@ async function main() {
     receivedBitmap: index === 65535 ? '0' : '',
     complete: index !== 65535
   }));
-  native.text.set(transferStateUri, JSON.stringify({
+  seedLegacyTransfer(JSON.stringify({
     version: 1, themeId: 'wirebound', mode: 'replace', fileCount: wireFiles.length,
     totalBytes: 2, files: wireFiles, manifestComplete: true, manifestReceiving: false,
     manifestSeen: wireFiles.length, finished: false
@@ -710,7 +729,7 @@ async function main() {
     operation: 'begin', themeId: 'dark', mode: 'replace', fileCount: 1, totalBytes: 2
   });
   function seedPriorPack() {
-    native.text.set(transferStateUri, finishedDarkState);
+    seedLegacyTransfer(finishedDarkState);
     native.text.set(installedUri, JSON.stringify(['dark']));
     native.text.set('internal://files/themes/dark/corona.json', coronaText);
     native.binary.set('internal://files/themes/dark/icons/a.bin', Uint8Array.from([1, 2, 255]));
@@ -744,7 +763,7 @@ async function main() {
     assert.equal(native.text.has('internal://files/themes/dark/corona.json'), false);
     assert.equal(native.binary.has('internal://files/themes/dark/icons/a.bin'), false);
     assert.deepEqual(JSON.parse(native.text.get(installedUri)), []);
-    assert.equal(JSON.parse(native.text.get(transferStateUri)).manifestReceiving, true);
+    assert.equal(JSON.parse(await durableStateText()).manifestReceiving, true);
     assert.equal(native.text.get(generationsUri), acknowledgedRegistry);
   }
 
@@ -950,6 +969,7 @@ async function main() {
 
   restartOwnedReceiver();
   const beforeQuit = nativeStorageSnapshot();
+  const beforeQuitStateText = await durableStateText();
   const quitSnapshot = resumedStates.at(-1);
   for (const invalid of ['Q{invalid', 'Q{}', 'Q[]', 'Q{"requestId":"bad id"}',
     'Q{"requestId":""}', 'Q' + JSON.stringify({ requestId: 'x'.repeat(65), launchToken }),
@@ -995,7 +1015,7 @@ async function main() {
   }
 
   // Valid T begin/replays mark this session busy, not merely loading disk state.
-  const manifestState = JSON.parse(beforeQuit.text.get(transferStateUri));
+  const manifestState = JSON.parse(beforeQuitStateText);
   const beginPacket = state => 'T' + JSON.stringify({ operation: 'begin', themeId: state.themeId,
     mode: state.mode, fileCount: state.fileCount, totalBytes: state.totalBytes });
   const partialState = { ...JSON.parse(finishedDarkState), finished: false,
@@ -1004,7 +1024,7 @@ async function main() {
   for (const state of [manifestState, partialState,
     { ...JSON.parse(finishedDarkState), finished: false },
     { ...JSON.parse(finishedDarkState), mode: 'resume', manifestReceiving: true, manifestSeen: 0 }]) {
-    native.text.set(transferStateUri, JSON.stringify(state));
+    seedLegacyTransfer(JSON.stringify(state));
     restartOwnedReceiver();
     const begin = messages(await deliver(beginPacket({ ...state,
       mode: state.manifestComplete ? 'resume' : 'replace' })));
@@ -1019,7 +1039,7 @@ async function main() {
   }
 
   // Valid direct P revokes ownership and marks uploads busy; restart cannot regain it.
-  native.text.set(transferStateUri, JSON.stringify(partialState));
+  seedLegacyTransfer(JSON.stringify(partialState));
   restartOwnedReceiver();
   const preparePacket = 'P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
     sizeBytes: coronaBytes.length, chunkSizeBytes: coronaChunkSize, chunkCount: coronaChunkCount });
@@ -1037,7 +1057,7 @@ async function main() {
     [beginPacket({ ...partialState, mode: 'resume' }), 'onclose'],
     [preparePacket, 'onerror']
   ]) {
-    native.text.set(transferStateUri, JSON.stringify(partialState));
+    seedLegacyTransfer(JSON.stringify(partialState));
     native.text.set(installedUri, '[]');
     restartOwnedReceiver();
     let resumeRead;
@@ -1059,10 +1079,10 @@ async function main() {
       'only the already-running handler may finish; stale queued duplicates are skipped');
     if (packet[0] === 'T') {
       assert.equal(replies.some(reply => reply[0] === 'P'), false, 'queued pre-close P is skipped');
-      assert.equal(JSON.parse(native.text.get(transferStateUri)).manifestReceiving, true,
+      assert.equal(JSON.parse(await durableStateText()).manifestReceiving, true,
         'in-flight begin preserves existing durable resume behavior');
     } else {
-      assert.deepEqual(JSON.parse(native.text.get(transferStateUri)), partialState);
+      assert.deepEqual(JSON.parse(await durableStateText()), partialState);
     }
     assert.deepEqual(await queryList(), [{ msg: 'L', replyTo: 'list_42', pageIndex: 0,
       done: true, total: 0, items: [] }]);
@@ -1086,31 +1106,52 @@ async function main() {
   resumeActiveCheck();
   await new Promise(resolve => setTimeout(resolve, 0));
   native.readText = originalReadText;
-  const replacedState = JSON.parse(native.text.get(transferStateUri));
+  const replacedState = JSON.parse(await durableStateText());
   assert.equal(replacedState.manifestReceiving, true);
   assert.deepEqual(replacedState.files, [], 'already-started replace persists resumable state as before');
   assert.equal((await queryList())[0].done, true);
   sent.length = 0;
   await checkQuit('not-owner');
 
-  // Interrupting P persistence must not reactivate the upload after its callback.
-  native.text.set(transferStateUri, JSON.stringify(partialState));
+  // Native journal failures must not acknowledge P or overwrite legacy progress.
+  const originalWriteArrayBuffer = native.writeArrayBuffer;
+  seedLegacyTransfer(JSON.stringify(partialState));
   restartOwnedReceiver();
-  const originalWriteText = native.writeText;
+  let failedJournalWrites = 0;
+  native.writeArrayBuffer = options => {
+    if (journalUris.includes(options.uri)) {
+      failedJournalWrites++;
+      options.fail('journal unavailable', 500);
+    } else originalWriteArrayBuffer(options);
+  };
+  const failedPrepare = messages(await deliver('P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
+    sizeBytes: coronaBytes.length, chunkSizeBytes: coronaBytes.length, chunkCount: 1 })));
+  native.writeArrayBuffer = originalWriteArrayBuffer;
+  assert.equal(failedJournalWrites, 1);
+  assert(failedPrepare.some(packet => packet.errorCode === 'write-failed'));
+  assert.equal(failedPrepare.some(packet => packet.status === 'ready' || packet.status === 'resume'), false);
+  assert.deepEqual(JSON.parse(await durableStateText()), partialState);
+  assert.equal(native.text.get(transferStateUri), JSON.stringify(partialState));
+
+  // Interrupting P persistence must not reactivate the upload after its callback.
+  seedLegacyTransfer(JSON.stringify(partialState));
+  restartOwnedReceiver();
   let resumePersist;
-  native.writeText = options => options.uri === transferStateUri
-    ? originalWriteText({ ...options, success: () => { resumePersist = options.success; } })
-    : originalWriteText(options);
+  native.writeArrayBuffer = options => journalUris.includes(options.uri)
+    ? originalWriteArrayBuffer({ ...options, success: () => { resumePersist = options.success; } })
+    : originalWriteArrayBuffer(options);
+  const persistStart = sent.length;
   connection.onmessage({ data: 'P' + JSON.stringify({ themeId: 'dark', fileIndex: 0,
     sizeBytes: coronaBytes.length, chunkSizeBytes: coronaBytes.length, chunkCount: 1 }) });
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(typeof resumePersist, 'function');
+  assert.equal(sent.length, persistStart, 'P must await durable journal success before acknowledging');
   connection.onerror({ code: 500 });
   connection.onopen({ isReconnected: true });
   resumePersist();
   await new Promise(resolve => setTimeout(resolve, 0));
-  native.writeText = originalWriteText;
-  assert.equal(JSON.parse(native.text.get(transferStateUri)).files[0].chunkCount, 1,
+  native.writeArrayBuffer = originalWriteArrayBuffer;
+  assert.equal(JSON.parse(await durableStateText()).files[0].chunkCount, 1,
     'in-flight persistence is not rolled back or discarded');
   assert.equal((await queryList())[0].done, true);
   sent.length = 0;
@@ -1120,7 +1161,7 @@ async function main() {
   // stop/start on the same receiver invalidates queued work just like close/error.
   const { withResourceOperation: lockOperation } = require(path.join(temporary, 'resource-overrides.js'));
   for (const reset of ['onclose', 'onerror', 'restart']) {
-    native.text.set(transferStateUri, JSON.stringify(partialState));
+    seedLegacyTransfer(JSON.stringify(partialState));
     restartOwnedReceiver();
     let releaseLock;
     const locked = lockOperation(() => new Promise(resolve => { releaseLock = resolve; }));
@@ -1144,7 +1185,7 @@ async function main() {
   }
 
   // onerror clears activity even if the upload UI was already in error.
-  native.text.set(transferStateUri, JSON.stringify(partialState));
+  seedLegacyTransfer(JSON.stringify(partialState));
   restartOwnedReceiver();
   await deliver(preparePacket);
   await deliver('E{"errorCode":"interrupted"}');
@@ -1173,7 +1214,7 @@ async function main() {
   await checkQuit('not-owner');
 
   // Corrupt/unreadable persisted state and failed L cannot prevent owned idle cleanup.
-  native.text.set(transferStateUri, '{invalid');
+  seedLegacyTransfer('{invalid');
   restartOwnedReceiver();
   await checkQuit();
   restartOwnedReceiver();
@@ -1197,7 +1238,7 @@ async function main() {
   await checkQuit();
 
   // The resource lock must be acquired before deciding to exit.
-  native.text.delete(transferStateUri);
+  clearTransferState();
   restartOwnedReceiver();
   const { withResourceOperation } = require(path.join(temporary, 'resource-overrides.js'));
   let releaseOperation;
@@ -1209,22 +1250,22 @@ async function main() {
   assert.equal(sent.length, quitStart);
   assert.equal(terminateCalls, expectedTerminateCalls);
   // Even if the preceding operation leaves unfinished durable state, idle Q exits.
-  native.text.set(transferStateUri, beforeQuit.text.get(transferStateUri));
+  seedLegacyTransfer(beforeQuitStateText);
   releaseOperation();
   await operation;
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(quitReply(innerSent().slice(quitStart)), [{ replyTo: 'quit_42', status: 'ready' }]);
   assert.equal(terminateCalls, ++expectedTerminateCalls);
-  assert.equal(native.text.get(transferStateUri), beforeQuit.text.get(transferStateUri));
+  assert.equal(await durableStateText(), beforeQuitStateText);
 
   // An interrupted write must drain before Q can reject, with activity/permission revoked.
-  native.text.set(transferStateUri, JSON.stringify(partialState));
+  seedLegacyTransfer(JSON.stringify(partialState));
   restartOwnedReceiver();
   await deliver(preparePacket);
-  const originalWriteArrayBuffer = native.writeArrayBuffer;
   let finishWrite;
-  native.writeArrayBuffer = options => originalWriteArrayBuffer({ ...options,
-    success: () => { finishWrite = options.success; } });
+  native.writeArrayBuffer = options => journalUris.includes(options.uri)
+    ? originalWriteArrayBuffer(options)
+    : originalWriteArrayBuffer({ ...options, success: () => { finishWrite = options.success; } });
   const writeStart = sent.length;
   connection.onmessage({ data: `F00000000${encodeBase91(coronaBytes.slice(0, coronaChunkSize))}` });
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -1240,7 +1281,7 @@ async function main() {
     'A00000000', 'Q{"replyTo":"quit_42","status":"reject","errorCode":"not-owner"}'
   ]);
   assert.equal(terminateCalls, expectedTerminateCalls);
-  assert.equal(JSON.parse(native.text.get(transferStateUri)).files[0].receivedBitmap, '1');
+  assert.equal(JSON.parse(await durableStateText()).files[0].receivedBitmap, '1');
   native.writeArrayBuffer = originalWriteArrayBuffer;
 
   // Old ready callbacks cannot terminate after disconnect, reconnect or same-instance restart.
@@ -1285,7 +1326,7 @@ async function main() {
   await checkQuit('not-owner');
 
   // Failed ready-send must not exit or poison the queue; retry can succeed.
-  native.text.set(transferStateUri, finishedDarkState);
+  seedLegacyTransfer(finishedDarkState);
   restartOwnedReceiver();
   connection.send = options => options.fail('disconnected', 500);
   assert.deepEqual(await deliver(quitPacket), []);
@@ -1309,12 +1350,12 @@ async function main() {
   await behindQuit;
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(terminateCalls, ++expectedTerminateCalls);
-  assert.equal(native.text.get(transferStateUri), finishedDarkState, 'queued upload never starts after ready');
+  assert.equal(await durableStateText(), finishedDarkState, 'queued upload never starts after ready');
   connection.send = originalSend;
   onTerminate = () => {};
 
   // Q validates cold ownership itself; no persisted upload/H prerequisite is needed.
-  native.text.delete(transferStateUri);
+  clearTransferState();
   restartOwnedReceiver();
   assert.deepEqual(quitReply(await deliver(quitPacket)), [{ replyTo: 'quit_42', status: 'ready' }]);
   assert.equal(terminateCalls, ++expectedTerminateCalls);

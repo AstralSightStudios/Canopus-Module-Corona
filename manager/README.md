@@ -38,6 +38,16 @@ npm run ts:watch
 npm run typecheck
 ```
 
+## Receiver performance and persistence
+
+The receiver caches successfully confirmed parent directories within the current transfer/connection epoch. Replace, resume, reconnect, stop and I/O errors invalidate the cache; callbacks from an older epoch cannot repopulate it. Progress is reconstructed once from durable state after launch and then updated only after successful saves. Duplicate chunks do not increase received bytes.
+
+New progress is stored in two binary slots, `internal://files/interconnect-transfer.json.journal-0` and `.journal-1`. A checkpoint contains the complete v1 state; subsequent records contain header changes and at most one changed file. Each frame has a boundary, checksum and sequence chain. Logs rotate after 1,024 records or 1 MiB of deltas, writing the inactive slot before switching. A failed append does not commit in-memory progress or send an ACK; retry uses a fresh checkpoint rather than relying on native writes to truncate a torn tail. Identifiable final partial writes recover the validated prefix; complete corruption (including an older slot), short reads and non-missing native I/O errors fail closed instead of rolling back acknowledged progress. Resource bytes are still written before the corresponding durable state and ACK.
+
+Existing `interconnect-transfer.json` v1 snapshots remain readable and undergo the same receiver validation. The legacy file is not rewritten: downgrading Manager cannot recover new journal progress. Do not remove journal slots independently or run old/new receivers against the same file area. Native write completion is the durability boundary available to Manager; hardware power-loss guarantees require device testing.
+
+Host regressions cover complete transfers, duplicate/out-of-order chunks, restart/resume, cache invalidation, delayed callbacks, failed/partial writes and checkpoint rotation. Run `node tests/test_interconnect_performance.cjs` and `node tests/test_transfer_storage.cjs` from the repository root. Reported byte counts are API payloads, not physical flash writes or device timings.
+
 ## 重载性能
 
 重叠目录先按资源包优先级和混搭选择解析到具体文件；生成的配置满足 256 条规则、32 KiB 限制时直接映射到包内文件，不复制图标。超出预算时才生成不可变的活动合并目录。
