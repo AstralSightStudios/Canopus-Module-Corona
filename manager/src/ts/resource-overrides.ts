@@ -13,6 +13,22 @@ import type { ResourceAssetFileApi, ThemeAssetFile } from "./resource-order";
 export const RESOURCE_OVERRIDES_URI = "internal://files/resource-overrides.json";
 export const DEFAULT_RESOURCE_CHOICE = "@default";
 export const SYSTEM_RESOURCE_CHOICE = "@system";
+export const BLUR_RESOURCE_CHOICE = "@blur";
+
+export const FEATURE_RESOURCE_ITEMS = [
+  { id: "launcher", name: "启动器背景" },
+  { id: "controlCenter", name: "控制中心背景" },
+  { id: "notifications", name: "通知中心背景" },
+  { id: "widgets", name: "快捷组件背景" },
+  { id: "calendar", name: "日历样式" }
+] as const;
+export type FeatureResourceId = typeof FEATURE_RESOURCE_ITEMS[number]["id"];
+export type FeatureOverrides = Partial<Record<FeatureResourceId, string>>;
+
+interface OverridesDocument {
+  overrides: ResourceOverrides;
+  features: FeatureOverrides;
+}
 
 const THEME_ROOT_URI = "internal://files/themes/";
 const MAX_OVERRIDE_BYTES = 64 * 1024;
@@ -174,30 +190,51 @@ function validChoice(value: unknown): value is string {
     (typeof value === "string" && VALID_THEME_ID.test(value));
 }
 
-function parseOverrides(text: string | null): ResourceOverrides {
-  if (text === null) return Object.create(null) as ResourceOverrides;
+export function validFeatureResourceId(value: unknown): value is FeatureResourceId {
+  return FEATURE_RESOURCE_ITEMS.some(item => item.id === value);
+}
+
+function validFeatureChoice(id: FeatureResourceId, value: unknown): value is string {
+  return validChoice(value) || (id !== "calendar" && value === BLUR_RESOURCE_CHOICE);
+}
+
+function parseOverrides(text: string | null): OverridesDocument {
+  const overrides = Object.create(null) as ResourceOverrides;
+  const features = Object.create(null) as FeatureOverrides;
+  if (text === null) return { overrides, features };
   if (utf8Length(text) > MAX_OVERRIDE_BYTES) throw new Error("混搭微调配置超过 64 KiB");
   let value: unknown;
   try { value = JSON.parse(text); }
   catch (_error) { throw new Error("混搭微调配置损坏"); }
   if (typeof value !== "object" || value === null || Array.isArray(value) ||
-      (value as { version?: unknown }).version !== 1 ||
+      ((value as { version?: unknown }).version !== 1 &&
+       (value as { version?: unknown }).version !== 2) ||
       typeof (value as { overrides?: unknown }).overrides !== "object" ||
       (value as { overrides?: unknown }).overrides === null ||
       Array.isArray((value as { overrides?: unknown }).overrides))
     throw new Error("混搭微调配置格式无效");
 
   const source = (value as { overrides: { [key: string]: unknown } }).overrides;
-  const overrides = Object.create(null) as ResourceOverrides;
   for (const sourcePath of Object.keys(source)) {
     if (!validSourcePath(sourcePath) || !validChoice(source[sourcePath]))
       throw new Error("混搭微调配置包含无效路径或选项");
     overrides[sourcePath] = source[sourcePath] as string;
   }
-  return overrides;
+  if ((value as { version: number }).version === 2) {
+    const sourceFeatures = (value as { features?: unknown }).features;
+    if (typeof sourceFeatures !== "object" || sourceFeatures === null || Array.isArray(sourceFeatures))
+      throw new Error("混搭微调功能配置格式无效");
+    for (const id of Object.keys(sourceFeatures)) {
+      const choice = (sourceFeatures as Record<string, unknown>)[id];
+      if (!validFeatureResourceId(id) || !validFeatureChoice(id, choice))
+        throw new Error("混搭微调配置包含无效功能或选项");
+      features[id] = choice;
+    }
+  }
+  return { overrides, features };
 }
 
-function serializeOverrides(overrides: ResourceOverrides): string {
+function serializeOverrides({ overrides, features }: OverridesDocument): string {
   const ordered: ResourceOverrides = Object.create(null) as ResourceOverrides;
   Object.keys(overrides).sort().forEach(sourcePath => {
     const choice = overrides[sourcePath];
@@ -205,7 +242,14 @@ function serializeOverrides(overrides: ResourceOverrides): string {
       throw new Error("混搭微调路径或选项无效");
     ordered[sourcePath] = choice;
   });
-  const text = JSON.stringify({ version: 1, overrides: ordered });
+  const orderedFeatures = Object.create(null) as FeatureOverrides;
+  for (const { id } of FEATURE_RESOURCE_ITEMS) {
+    const choice = features[id];
+    if (choice === undefined) continue;
+    if (!validFeatureChoice(id, choice)) throw new Error("混搭微调功能或选项无效");
+    orderedFeatures[id] = choice;
+  }
+  const text = JSON.stringify({ version: 2, overrides: ordered, features: orderedFeatures });
   if (utf8Length(text) > MAX_OVERRIDE_BYTES) throw new Error("混搭微调配置超过 64 KiB");
   return text;
 }
@@ -324,9 +368,15 @@ export async function loadResourcePackSnapshot(
     const inventoryCoversMappings = inventory && manifest.mappings.some(mapping =>
       inventory!.some(asset => mappingMatchesRelativeFile(mapping, asset.relativePath)));
     const calendarPaths = calendarImagePaths(manifest.calendar);
-    const inventoryCoversCalendar = calendarPaths.every(path =>
+    const backgroundPaths: string[] = [];
+    for (const { id } of FEATURE_RESOURCE_ITEMS) {
+      if (id === "calendar") continue;
+      const background = manifest.backgrounds?.[id];
+      if (background?.mode === "image") backgroundPaths.push(background.image);
+    }
+    const inventoryCoversImages = [...calendarPaths, ...backgroundPaths].every(path =>
       inventory?.some(asset => asset.relativePath === path));
-    if ((manifest.mappings.length && !inventoryCoversMappings) || !inventoryCoversCalendar) {
+    if ((manifest.mappings.length && !inventoryCoversMappings) || !inventoryCoversImages) {
       // Scan at most one package at a time; activation reuses the resolved fallback.
       inventory = await enumerateThemeFiles(themeId, file, isCurrent);
       checkCurrent();
@@ -358,7 +408,7 @@ export async function loadRegisteredResourcePaths(
 
 async function readOverrides(
   file: Pick<ResourceAssetFileApi, "readOptionalText">,
-): Promise<ResourceOverrides> {
+): Promise<OverridesDocument> {
   return parseOverrides(await file.readOptionalText(RESOURCE_OVERRIDES_URI));
 }
 
@@ -369,7 +419,78 @@ export async function loadResourceOverrides(
   file = session.file || file;
   // Returning pages must observe saves already queued by the selection page.
   await (session.overrideTransactions.get(file) || Promise.resolve());
-  return readOverrides(file);
+  return (await readOverrides(file)).overrides;
+}
+
+export async function loadFeatureOverrides(
+  file: Pick<ResourceAssetFileApi, "readOptionalText">,
+): Promise<FeatureOverrides> {
+  const session = resourceSession();
+  file = session.file || file;
+  await (session.overrideTransactions.get(file) || Promise.resolve());
+  return (await readOverrides(file)).features;
+}
+
+type FeatureCatalog = Pick<ResourcePackSnapshot, "installedThemeIds" | "themes">;
+
+export function featureResourceOptions(catalog: FeatureCatalog, id: FeatureResourceId): ResourcePackOption[] {
+  const options: ResourcePackOption[] = [];
+  for (const themeId of catalog.installedThemeIds) {
+    const manifest = catalog.themes.get(themeId)?.manifest;
+    if (!manifest || (id === "calendar" ? manifest.calendar === undefined :
+        manifest.backgrounds?.[id] === undefined)) continue;
+    const background = id === "calendar" ? undefined : manifest.backgrounds?.[id];
+    options.push({ themeId, name: manifest.name,
+      previewUri: background?.mode === "image" ? `${THEME_ROOT_URI}${themeId}/${background.image}` : "" });
+  }
+  return options;
+}
+
+export function resolveFeatureChoice(
+  catalog: FeatureCatalog, id: FeatureResourceId, features: FeatureOverrides,
+): string {
+  const choice = features[id] || DEFAULT_RESOURCE_CHOICE;
+  if (choice === DEFAULT_RESOURCE_CHOICE || choice === SYSTEM_RESOURCE_CHOICE ||
+      (id !== "calendar" && choice === BLUR_RESOURCE_CHOICE)) return choice;
+  return featureResourceOptions(catalog, id).some(theme => theme.themeId === choice)
+    ? choice : DEFAULT_RESOURCE_CHOICE;
+}
+
+export async function saveFeatureOverride(
+  id: FeatureResourceId, choice: string,
+  file: Pick<ResourceAssetFileApi, "readOptionalText" | "writeText">,
+): Promise<void> {
+  if (!validFeatureResourceId(id) || !validFeatureChoice(id, choice))
+    throw new Error("混搭微调功能或选项无效");
+  file = resourceSession().file || file;
+  await overrideTransaction(file, async () => {
+    const document = await readOverrides(file);
+    if (document.features[id] === choice) return;
+    document.features[id] = choice;
+    await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(document));
+  });
+}
+
+/** Reconcile feature declarations after deletion or same-ID package replacement. */
+export async function reconcileFeatureOverrides(
+  catalog: FeatureCatalog,
+  file: Pick<ResourceAssetFileApi, "readOptionalText" | "writeText">,
+): Promise<FeatureOverrides> {
+  file = resourceSession().file || file;
+  return overrideTransaction(file, async () => {
+    const document = await readOverrides(file);
+    let changed = false;
+    for (const { id } of FEATURE_RESOURCE_ITEMS) {
+      if (document.features[id] === undefined) continue;
+      const choice = resolveFeatureChoice(catalog, id, document.features);
+      if (choice !== document.features[id]) {
+        document.features[id] = choice;
+        changed = true;
+      }
+    }
+    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(document));
+    return document.features;
+  });
 }
 
 /** Resolves display choices without cleaning or writing a possibly outdated snapshot. */
@@ -391,10 +512,10 @@ export async function saveResourceOverride(
     throw new Error("混搭微调路径或选项无效");
   file = resourceSession().file || file;
   await overrideTransaction(file, async () => {
-    const overrides = await readOverrides(file);
-    if (overrides[sourcePath] === choice) return;
-    overrides[sourcePath] = choice;
-    await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+    const document = await readOverrides(file);
+    if (document.overrides[sourcePath] === choice) return;
+    document.overrides[sourcePath] = choice;
+    await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(document));
   });
 }
 
@@ -405,7 +526,8 @@ export async function reconcileResourceOverrides(
 ): Promise<ResourceOverrides> {
   file = resourceSession().file || file;
   return overrideTransaction(file, async () => {
-    const overrides = await readOverrides(file);
+    const document = await readOverrides(file);
+    const overrides = document.overrides;
     const registrations = new Map(catalog.map(item => [item.sourcePath, item]));
     let changed = false;
     for (const sourcePath of Object.keys(overrides)) {
@@ -421,7 +543,7 @@ export async function reconcileResourceOverrides(
         changed = true;
       }
     }
-    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(document));
     return overrides;
   });
 }
@@ -433,7 +555,8 @@ export async function removeThemeFromResourceOverrides(
 ): Promise<void> {
   file = resourceSession().file || file;
   await overrideTransaction(file, async () => {
-    const overrides = await readOverrides(file);
+    const document = await readOverrides(file);
+    const overrides = document.overrides;
     let changed = false;
     for (const sourcePath of Object.keys(overrides)) {
       if (overrides[sourcePath] === themeId) {
@@ -441,6 +564,12 @@ export async function removeThemeFromResourceOverrides(
         changed = true;
       }
     }
-    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(overrides));
+    for (const { id } of FEATURE_RESOURCE_ITEMS) {
+      if (document.features[id] === themeId) {
+        document.features[id] = DEFAULT_RESOURCE_CHOICE;
+        changed = true;
+      }
+    }
+    if (changed) await file.writeText(RESOURCE_OVERRIDES_URI, serializeOverrides(document));
   });
 }

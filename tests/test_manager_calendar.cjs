@@ -186,7 +186,8 @@ async function main() {
   const cached = await activation.regenerateActiveMappings(['low', '@system', 'top', 'reset', 'inherit'],
     'cached', file, {}, snap);
   assert.strictEqual(cached, first);
-  assert.equal(file.calls.length, before, 'unchanged plan performs no disk I/O');
+  assert.deepEqual(file.calls.slice(before), [['read', 'internal://files/resource-overrides.json']],
+    'unchanged plan rereads feature choices but performs no publication I/O');
   await assert.rejects(storage.removeInstalledTheme('low', file), e => e.resourceStorageReason === 'active-theme');
   const second = await activation.regenerateActiveMappings(['reset', 'low', '@system', 'top', 'inherit'],
     'second', file, {}, snap);

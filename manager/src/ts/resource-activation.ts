@@ -14,9 +14,13 @@ import {
 import type { ResourceAssetFileApi, ThemeAssetFile } from "./resource-order";
 import {
   DEFAULT_RESOURCE_CHOICE,
-  SYSTEM_RESOURCE_CHOICE
+  SYSTEM_RESOURCE_CHOICE,
+  BLUR_RESOURCE_CHOICE,
+  FEATURE_RESOURCE_ITEMS,
+  loadFeatureOverrides,
+  reconcileFeatureOverrides
 } from "./resource-overrides";
-import type { ResourceOverrides, ResourcePackSnapshot } from "./resource-overrides";
+import type { FeatureOverrides, ResourceOverrides, ResourcePackSnapshot } from "./resource-overrides";
 
 export const CALENDAR_RUNTIME_TARGETS: readonly string[] = ["xiaomi-band-11-4.100.177"];
 
@@ -164,14 +168,24 @@ function calendarThemes(config: string): string[] {
   return Array.from(ids);
 }
 
-export function resolveCalendar(themesHighToLow: ThemeRules[]): ThemeRules | null {
+export function resolveCalendar(
+  themesHighToLow: ThemeRules[], choice: string = DEFAULT_RESOURCE_CHOICE,
+): ThemeRules | null {
+  if (choice === SYSTEM_RESOURCE_CHOICE) return null;
+  if (choice !== DEFAULT_RESOURCE_CHOICE) {
+    const selected = themesHighToLow.find(theme => theme.themeId === choice &&
+      theme.manifest.calendar !== undefined);
+    if (selected) return selected;
+  }
   return themesHighToLow.find(theme => theme.active !== false &&
     theme.manifest.calendar !== undefined) || null;
 }
 
-/** Generic pack transport, not a runtime capability assertion: initially only .177 consumes this CFG. */
-export function serializeCalendar(themesHighToLow: ThemeRules[]): string {
-  const winner = resolveCalendar(themesHighToLow);
+/** Generic pack transport; the exact runtime module owns device adaptation. */
+export function serializeCalendar(
+  themesHighToLow: ThemeRules[], choice: string = DEFAULT_RESOURCE_CHOICE,
+): string {
+  const winner = resolveCalendar(themesHighToLow, choice);
   let config = "version=1\n";
   for (const name of CALENDAR_ITEM_NAMES) {
     const item = winner?.manifest.calendar?.[name];
@@ -191,9 +205,14 @@ export function serializeCalendar(themesHighToLow: ThemeRules[]): string {
 
 export function resolveBackgroundTarget(
   themesHighToLow: ThemeRules[],
-  target: "launcher" | "controlCenter" | "notifications" | "widgets"
-): { themeId: string; image?: string; mode: "image" | "blur" | "system" } | null {
-  const winner = themesHighToLow.find(theme => {
+  target: "launcher" | "controlCenter" | "notifications" | "widgets",
+  choice: string = DEFAULT_RESOURCE_CHOICE,
+): { themeId?: string; image?: string; mode: "image" | "blur" | "system" } | null {
+  if (choice === SYSTEM_RESOURCE_CHOICE) return { mode: "system" };
+  if (choice === BLUR_RESOURCE_CHOICE) return { mode: "blur" };
+  const selected = choice === DEFAULT_RESOURCE_CHOICE ? undefined : themesHighToLow.find(theme =>
+    theme.themeId === choice && theme.manifest.backgrounds?.[target] !== undefined);
+  const winner = selected || themesHighToLow.find(theme => {
     if (theme.active === false) return false;
     const bg = theme.manifest.backgrounds?.[target];
     return bg !== undefined;
@@ -207,9 +226,11 @@ export function resolveBackgroundTarget(
   return null;
 }
 
-export function serializeBackgrounds(themesHighToLow: ThemeRules[]): string {
+export function serializeBackgrounds(
+  themesHighToLow: ThemeRules[], features: FeatureOverrides = {},
+): string {
   const format = (target: "launcher" | "controlCenter" | "notifications" | "widgets", key: string): string => {
-    const res = resolveBackgroundTarget(themesHighToLow, target);
+    const res = resolveBackgroundTarget(themesHighToLow, target, features[target]);
     if (res?.mode === "image" && res.image) return `${key}=themes/${res.themeId}/${res.image}\n`;
     if (res?.mode === "blur") return `${key}=blur\n`;
     return `${key}=system\n`;
@@ -516,14 +537,9 @@ export async function regenerateActiveMappings(
 
   const canonicalOrder = serializeResourceOrder(order);
   if (!/^[a-z0-9_-]{1,32}$/.test(generation)) throw new Error("活动资源代次标识无效");
-  const cacheKey = JSON.stringify([canonicalOrder, runtimeTarget || null,
-    Object.keys(overrides).sort().map(sourcePath => [sourcePath, overrides[sourcePath]])]);
   const activeThemeIds = order.slice(0, systemIndex);
   const installedThemeIds = order.filter(themeId => themeId !== SYSTEM_STYLE_ID);
   const activeIds = new Set(activeThemeIds);
-  const selectedIds = new Set(Object.keys(overrides).map(sourcePath => overrides[sourcePath])
-    .filter(choice => choice !== DEFAULT_RESOURCE_CHOICE && choice !== SYSTEM_RESOURCE_CHOICE &&
-      installedThemeIds.includes(choice)));
   if (snapshot) {
     // Fail closed even on a cache hit. Identity checks are cheap; inventories
     // themselves are immutable until the shared catalog is invalidated.
@@ -534,8 +550,17 @@ export async function regenerateActiveMappings(
           !Array.isArray(theme.manifest.mappings) || !Array.isArray(theme.files))
         throw new Error(`资源快照缺少资源包 ${themeId}，无法生成映射`);
     }
-    if (snapshot.activeMappings?.key === cacheKey) return snapshot.activeMappings.plan;
   }
+  let features = snapshot ? await reconcileFeatureOverrides(snapshot, file) : await loadFeatureOverrides(file);
+  const cacheKeyFor = () => JSON.stringify([canonicalOrder, runtimeTarget || null,
+    Object.keys(overrides).sort().map(sourcePath => [sourcePath, overrides[sourcePath]]),
+    FEATURE_RESOURCE_ITEMS.map(item => [item.id, features[item.id] || DEFAULT_RESOURCE_CHOICE])]);
+  let cacheKey = cacheKeyFor();
+  if (snapshot?.activeMappings?.key === cacheKey) return snapshot.activeMappings.plan;
+  const selectedIds = new Set([
+    ...Object.keys(overrides).map(sourcePath => overrides[sourcePath]),
+    ...FEATURE_RESOURCE_ITEMS.map(item => features[item.id])
+  ].filter((choice): choice is string => typeof choice === "string" && installedThemeIds.includes(choice)));
   const themesHighToLow: ThemeRules[] = [];
   const loadManifest = async (themeId: string, required: boolean): Promise<ResourcePackManifest | null> => {
     if (snapshot) return snapshot.themes.get(themeId)!.manifest;
@@ -560,10 +585,14 @@ export async function regenerateActiveMappings(
     const selectedPaths = Object.keys(overrides).filter(sourcePath => overrides[sourcePath] === themeId);
     const mappings = manifest.mappings.filter(mapping =>
       selectedPaths.some(sourcePath => sourceRuleMatches(mapping.source, sourcePath)));
-    if (mappings.length)
-      themesHighToLow.push({ themeId, manifest: { ...manifest, mappings }, files: null, active: false });
+    themesHighToLow.push({ themeId, manifest: { ...manifest, mappings }, files: null, active: false });
   }
-
+  if (!snapshot) {
+    features = await reconcileFeatureOverrides({ installedThemeIds,
+      themes: new Map(themesHighToLow.map(theme => [theme.themeId,
+        { themeId: theme.themeId, manifest: theme.manifest, files: theme.files || [] }])) }, file);
+    cacheKey = cacheKeyFor();
+  }
 
   // Inventories resolve overlapping groups for exact rules or the overlay fallback.
   const inventoryThemeIds = themesNeedingInventory(
@@ -583,9 +612,9 @@ export async function regenerateActiveMappings(
   }
 
   const plan = planActiveMappings(themesHighToLow, generation, overrides);
-  plan.backgrounds = serializeBackgrounds(themesHighToLow);
-  plan.calendar = serializeCalendar(themesHighToLow);
-  const calendarWinner = resolveCalendar(themesHighToLow);
+  plan.backgrounds = serializeBackgrounds(themesHighToLow, features);
+  plan.calendar = serializeCalendar(themesHighToLow, features.calendar);
+  const calendarWinner = resolveCalendar(themesHighToLow, features.calendar);
   if (calendarWinner) {
     for (const path of new Set(calendarImagePaths(calendarWinner.manifest.calendar))) {
       if (snapshot) {
@@ -598,8 +627,8 @@ export async function regenerateActiveMappings(
     }
   }
   for (const target of ["launcher", "controlCenter", "notifications", "widgets"] as const) {
-    const bg = resolveBackgroundTarget(themesHighToLow, target);
-    if (bg?.mode === "image" && bg.image) {
+    const bg = resolveBackgroundTarget(themesHighToLow, target, features[target]);
+    if (bg?.mode === "image" && bg.image && bg.themeId) {
       if (snapshot) {
         if (!snapshot.themes.get(bg.themeId)!.files.some(asset => asset.relativePath === bg.image))
           throw new Error(`backgrounds.${target}.image 不存在于资源包文件中`);

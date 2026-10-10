@@ -9,11 +9,11 @@
     <text if="{{statusText}}" class="status">{{statusText}}</text>
     <scroll if="{{loaded && rows.length}}" id="resource-path-list" class="resource-list"
       scroll-y="true" scroll-x="false" bounces="false">
-      <div for="{{row in rows}}" tid="sourcePath" class="resource-row"
-        onclick="openPath(row.sourcePath)">
+      <div for="{{row in rows}}" tid="rowId" class="resource-row"
+        onclick="openRow(row)">
         <div class="resource-item">
           <div class="resource-copy">
-            <text class="resource-path">{{row.sourcePath}}</text>
+            <text class="resource-path">{{row.name}}</text>
             <text class="resource-choice">{{row.choiceName}}</text>
           </div>
         </div>
@@ -29,6 +29,12 @@ import router from "@system.router"
 import * as file from "../../ts/file"
 import {
   DEFAULT_RESOURCE_CHOICE,
+  BLUR_RESOURCE_CHOICE,
+  FEATURE_RESOURCE_ITEMS,
+  featureResourceOptions,
+  loadFeatureOverrides,
+  resolveFeatureChoice,
+  validFeatureResourceId,
   getResourceCatalog,
   isResourceCatalogCurrent,
   loadResourceOverrides,
@@ -76,15 +82,17 @@ export default {
     const version = ++this.loadVersion
     if (!this.loaded) this.statusText = "正在读取替换资源…"
     try {
-      const [catalog, overrides] = await Promise.all([
+      const [catalog, overrides, features] = await Promise.all([
         getResourceCatalog(file),
-        loadResourceOverrides(file)
+        loadResourceOverrides(file),
+        loadFeatureOverrides(file)
       ])
       if (version !== this.loadVersion || !this.visible) return
       if (!isResourceCatalogCurrent(catalog)) return this.loadCatalog()
       const choiceName = (item, choice) => {
         if (choice === DEFAULT_RESOURCE_CHOICE) return "默认"
         if (choice === SYSTEM_RESOURCE_CHOICE) return "系统"
+        if (choice === BLUR_RESOURCE_CHOICE) return "模糊"
         const selectedTheme = item.themes.find(theme => theme.themeId === choice)
         return selectedTheme ? selectedTheme.name : "默认"
       }
@@ -92,8 +100,12 @@ export default {
       if (this.loaded && this.catalogRevision === catalog.revision) {
         // Update retained rows without allocating replacements on return.
         this.pathRows.forEach(row => {
-          const item = catalog.byPath.get(row.sourcePath)
-          const choice = resolveResourceChoice(item, overrides)
+          const item = row.featureId
+            ? { themes: featureResourceOptions(catalog, row.featureId) }
+            : catalog.byPath.get(row.sourcePath)
+          const choice = row.featureId
+            ? resolveFeatureChoice(catalog, row.featureId, features)
+            : resolveResourceChoice(item, overrides)
           if (row.choiceId === choice) return
           if ((row.choiceId === DEFAULT_RESOURCE_CHOICE) !== (choice === DEFAULT_RESOURCE_CHOICE))
             reorder = true
@@ -102,10 +114,22 @@ export default {
         })
       } else {
         // Cache the original path order; regrouping the displayed order would lose it.
-        this.pathRows = catalog.paths.map(item => {
+        const featureRows = FEATURE_RESOURCE_ITEMS.map(item => {
+          const choice = resolveFeatureChoice(catalog, item.id, features)
+          return {
+            rowId: `feature:${item.id}`, featureId: item.id, sourcePath: "", name: item.name,
+            choiceId: choice,
+            choiceName: choiceName({ themes: featureResourceOptions(catalog, item.id) }, choice)
+          }
+        })
+        const resourceRows = catalog.paths.map(item => {
           const choice = resolveResourceChoice(item, overrides)
-          return { sourcePath: item.sourcePath, choiceId: choice, choiceName: choiceName(item, choice) }
+          return {
+            rowId: item.sourcePath, featureId: "", sourcePath: item.sourcePath,
+            name: item.sourcePath, choiceId: choice, choiceName: choiceName(item, choice)
+          }
         }).sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+        this.pathRows = featureRows.concat(resourceRows)
         reorder = true
       }
       if (reorder) this.orderRows()
@@ -135,9 +159,13 @@ export default {
       this.rows = rows
   },
 
-  openPath(sourcePath) {
-    if (!validSourcePath(sourcePath)) return
-    router.push({ uri: "pages/mix-match-select", params: { sourcePath } })
+  openRow(row) {
+    if (validFeatureResourceId(row.featureId)) {
+      router.push({ uri: "pages/mix-match-select", params: { featureId: row.featureId } })
+      return
+    }
+    if (!validSourcePath(row.sourcePath)) return
+    router.push({ uri: "pages/mix-match-select", params: { sourcePath: row.sourcePath } })
   },
 
   goBack() {

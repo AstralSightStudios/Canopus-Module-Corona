@@ -91,7 +91,8 @@ async function main() {
   await overridesModule.saveResourceOverride('/resource/b.bin', '@system', file);
   await overridesModule.saveResourceOverride('/resource/orphan.bin', 'inactive', file);
   const saved = JSON.parse(file.text.get(overridesUri));
-  assert.equal(saved.version, 1);
+  assert.equal(saved.version, 2);
+  assert.deepEqual(saved.features, {});
   assert.equal(saved.overrides['/resource/a.bin'], 'base');
   assert.equal(saved.overrides['/resource/b.bin'], '@system');
 

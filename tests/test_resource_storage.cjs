@@ -67,9 +67,21 @@ async function main() {
       { version: 1, order: ['light', '@system'] });
     assert.deepEqual(JSON.parse(storage.text.get(fileIndexUri)),
       { version: 1, themes: { light: [{ relativePath: 'light.bin', sizeBytes: 1 }] } });
-    assert.deepEqual(JSON.parse(storage.text.get(overridesUri)), { version: 1, overrides: {
+    assert.deepEqual(JSON.parse(storage.text.get(overridesUri)), { version: 2, overrides: {
       '/resource/dark.bin': '@default', '/resource/light.bin': '@system'
-    } });
+    }, features: {} });
+  }
+
+  {
+    const storage = makeStorage();
+    storage.text.set(overridesUri, JSON.stringify({ version: 2, overrides: {
+      '/resource/dark.bin': 'dark', '/resource/light.bin': '@system'
+    }, features: { calendar: 'dark', launcher: 'light', notifications: '@blur' } }));
+    await removeInstalledTheme('dark', storage.api);
+    assert.deepEqual(JSON.parse(storage.text.get(overridesUri)), { version: 2, overrides: {
+      '/resource/dark.bin': '@default', '/resource/light.bin': '@system'
+    }, features: { calendar: '@default', launcher: 'light', notifications: '@blur' } },
+    'uninstall clears feature references while preserving unrelated choices');
   }
 
   {
@@ -113,9 +125,9 @@ async function main() {
       { version: 1, order: ['light', '@system'] });
     assert.deepEqual(JSON.parse(storage.text.get(fileIndexUri)),
       { version: 1, themes: { light: [{ relativePath: 'light.bin', sizeBytes: 1 }] } });
-    assert.deepEqual(JSON.parse(storage.text.get(overridesUri)), { version: 1, overrides: {
+    assert.deepEqual(JSON.parse(storage.text.get(overridesUri)), { version: 2, overrides: {
       '/resource/dark.bin': '@default', '/resource/light.bin': '@system'
-    } });
+    }, features: {} });
     assert.equal(storage.text.get(generationsUri), acknowledgedRegistry);
   }
 

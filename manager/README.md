@@ -56,11 +56,23 @@ Host regressions cover complete transfers, duplicate/out-of-order chunks, restar
 
 目录合并仅等待原生 `file.copy` 完成，不做复制前后的逐文件大小/类型检查，也不计算内容哈希；保留清单和路径校验、复制错误回滚，以及成功回执之后的旧代次清理。直接映射仍受活动包禁止替换/删除的保护；已有活动代次索引会持久化可能仍被模块使用的新旧包，只有匹配的成功回执才释放旧包保护。更新包前需先切换并成功重载。
 
-## 界面背景（启动器、控制中心、通知中心）
+## 界面背景（启动器、控制中心、通知中心、快捷组件）
 
-`corona.json` 可选 `backgrounds: {"launcher":"assets/l.bin","controlCenter":"assets/c.bin","notifications":"assets/n.bin"}`，也可为每个项指定 `{"mode":"image","image":"..."}` 或 `{"mode":"system"}`；兼容旧版单项 `launcherBackground`。image 必须是安全的包内相对文件路径且实际存在；不指定则继承。系统样式分界以上按现有优先级逐区域取第一个声明生效；没有声明则使用系统背景。
+`corona.json` 可选 `backgrounds: {"launcher":"assets/l.bin","controlCenter":"assets/c.bin","notifications":"assets/n.bin"}`，可用 `widgets` 声明快捷组件背景，也可为每个项指定 `{"mode":"image","image":"..."}`、`{"mode":"blur"}` 或 `{"mode":"system"}`；兼容旧版单项 `launcherBackground`。image 必须是安全的包内相对文件路径且实际存在；不指定则继承。系统样式分界以上按现有优先级逐区域取第一个声明生效；没有声明则使用系统背景。
 
 激活时生成独立的 `internal://files/backgrounds.cfg`，内容为换行分隔的 `version=1` 及各区域键值（如 `launcher=themes/<id>/<path>`、`control_center=system`）。与 mappings 一起准备并写入，再走现有 reload 请求/回执；缓存命中不重复写入，没有逐帧检测。两个文件不是原子事务：任一写入失败不发送 reload，缓存失效后重试修复。背景所在包与直接映射包一样受保护，成功回执后释放旧包。需要支持此配置的运行时；旧运行时不应用自定义背景。
+
+## 混搭微调
+
+混搭列表不分组；默认顺序为启动器背景、控制中心背景、通知中心背景、快捷组件背景、日历样式，再接普通资源路径。非默认项置顶，组内保持原顺序。
+
+- 日历样式：可选「默认」「系统」或声明了 `calendar` 的资源包；按整体样式选择，不拆分月份、日期、星期。默认保留现有整包优先级，系统使用原生默认配置。日历底图仍通过普通资源映射选择。
+- 四项背景：各自可选「默认」「系统」「模糊」或声明了对应区域的资源包。默认保留现有优先级；系统和模糊直接覆盖该区域，不依赖包声明。实际效果需对应运行时支持。
+- 显式选择可使用系统样式分界以下的资源包，不会因此启用该包的其他资源。
+
+选择保存在 `internal://files/resource-overrides.json`，v2 的 `overrides` 保留普通资源选择，`features` 保存背景和日历选择；兼容读取 v1。保存选择后仍需通过现有重载入口应用。选中的包被删除或不再声明对应功能时回退默认。
+
+Host regressions: `node tests/test_resource_feature_overrides.cjs` and `node tests/test_manager_mix_match.cjs`.
 
 ## 首页模块状态
 

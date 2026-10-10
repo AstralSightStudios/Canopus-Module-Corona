@@ -34,6 +34,13 @@ import * as file from "../../ts/file"
 import { RESOURCE_ORDER_URI, resolveResourceOrder } from "../../ts/resource-order"
 import {
   DEFAULT_RESOURCE_CHOICE,
+  BLUR_RESOURCE_CHOICE,
+  FEATURE_RESOURCE_ITEMS,
+  featureResourceOptions,
+  loadFeatureOverrides,
+  resolveFeatureChoice,
+  saveFeatureOverride,
+  validFeatureResourceId,
   getResourceCatalog,
   isResourceCatalogCurrent,
   loadResourceOverrides,
@@ -44,9 +51,13 @@ import {
 } from "../../ts/resource-overrides"
 
 export default {
+  protected: {
+    sourcePath: "",
+    featureId: ""
+  },
+
   private: {
     headerTitle: "< 选择来源",
-    sourcePath: "",
     rows: [],
     statusText: "正在读取可选资源…",
     loaded: false,
@@ -82,20 +93,26 @@ export default {
   async loadChoices() {
     const version = ++this.loadVersion
     if (!this.loaded) this.statusText = "正在读取可选资源…"
-    if (!validSourcePath(this.sourcePath)) {
+    const isFeature = validFeatureResourceId(this.featureId)
+    if ((!isFeature && this.featureId) || (!isFeature && !validSourcePath(this.sourcePath))) {
       this.statusText = "替换资源路径无效"
       return
     }
+    const feature = isFeature && FEATURE_RESOURCE_ITEMS.find(item => item.id === this.featureId)
+    this.headerTitle = feature ? `< ${feature.name}` : "< 选择来源"
     try {
-      const [catalog, overrides, orderText] = await Promise.all([
+      const [catalog, overrides, orderText, features] = await Promise.all([
         getResourceCatalog(file),
         loadResourceOverrides(file),
-        file.readOptionalText(RESOURCE_ORDER_URI)
+        file.readOptionalText(RESOURCE_ORDER_URI),
+        loadFeatureOverrides(file)
       ])
       if (version !== this.loadVersion || !this.visible) return
       if (!isResourceCatalogCurrent(catalog)) return this.loadChoices()
       const order = resolveResourceOrder(catalog.installedThemeIds, orderText)
-      const registration = catalog.byPath.get(this.sourcePath)
+      const registration = isFeature
+        ? { themes: featureResourceOptions(catalog, this.featureId) }
+        : catalog.byPath.get(this.sourcePath)
       if (!registration) {
         this.rows = []
         this.loaded = false
@@ -104,10 +121,14 @@ export default {
       }
       const orderIndex = Object.create(null)
       order.forEach((themeId, index) => { orderIndex[themeId] = index })
-      this.selectedChoice = resolveResourceChoice(registration, overrides)
+      this.selectedChoice = isFeature
+        ? resolveFeatureChoice(catalog, this.featureId, features)
+        : resolveResourceChoice(registration, overrides)
       const options = [
         { choiceId: DEFAULT_RESOURCE_CHOICE, name: "默认", previewUri: "" },
         { choiceId: SYSTEM_RESOURCE_CHOICE, name: "系统", previewUri: "" },
+        ...(isFeature && this.featureId !== "calendar"
+          ? [{ choiceId: BLUR_RESOURCE_CHOICE, name: "模糊", previewUri: "" }] : []),
         ...registration.themes.slice().sort((left, right) =>
           (orderIndex[left.themeId] === undefined ? Number.MAX_SAFE_INTEGER : orderIndex[left.themeId]) -
           (orderIndex[right.themeId] === undefined ? Number.MAX_SAFE_INTEGER : orderIndex[right.themeId]))
@@ -135,7 +156,10 @@ export default {
     const version = this.loadVersion
     this.saving = true
     try {
-      await saveResourceOverride(this.sourcePath, choiceId, file)
+      if (validFeatureResourceId(this.featureId))
+        await saveFeatureOverride(this.featureId, choiceId, file)
+      else
+        await saveResourceOverride(this.sourcePath, choiceId, file)
       if (version !== this.loadVersion || !this.visible) return
       this.selectedChoice = choiceId
       this.rows.forEach(row => {
