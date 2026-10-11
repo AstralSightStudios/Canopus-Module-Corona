@@ -37,13 +37,12 @@ import {
   BLUR_RESOURCE_CHOICE,
   FEATURE_RESOURCE_ITEMS,
   featureResourceOptions,
-  loadFeatureOverrides,
+  loadResourceOverrideDocument,
   resolveFeatureChoice,
   saveFeatureOverride,
   validFeatureResourceId,
   getResourceCatalog,
   isResourceCatalogCurrent,
-  loadResourceOverrides,
   resolveResourceChoice,
   saveResourceOverride,
   validSourcePath,
@@ -101,11 +100,10 @@ export default {
     const feature = isFeature && FEATURE_RESOURCE_ITEMS.find(item => item.id === this.featureId)
     this.headerTitle = feature ? `< ${feature.name}` : "< 选择来源"
     try {
-      const [catalog, overrides, orderText, features] = await Promise.all([
+      const [catalog, { overrides, features }, orderText] = await Promise.all([
         getResourceCatalog(file),
-        loadResourceOverrides(file),
-        file.readOptionalText(RESOURCE_ORDER_URI),
-        loadFeatureOverrides(file)
+        loadResourceOverrideDocument(file),
+        file.readOptionalText(RESOURCE_ORDER_URI)
       ])
       if (version !== this.loadVersion || !this.visible) return
       if (!isResourceCatalogCurrent(catalog)) return this.loadChoices()

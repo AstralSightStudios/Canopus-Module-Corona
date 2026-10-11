@@ -25,7 +25,7 @@ export const FEATURE_RESOURCE_ITEMS = [
 export type FeatureResourceId = typeof FEATURE_RESOURCE_ITEMS[number]["id"];
 export type FeatureOverrides = Partial<Record<FeatureResourceId, string>>;
 
-interface OverridesDocument {
+export interface OverridesDocument {
   overrides: ResourceOverrides;
   features: FeatureOverrides;
 }
@@ -412,23 +412,27 @@ async function readOverrides(
   return parseOverrides(await file.readOptionalText(RESOURCE_OVERRIDES_URI));
 }
 
-export async function loadResourceOverrides(
+/** Reads both sections once without retaining a document across later saves. */
+export async function loadResourceOverrideDocument(
   file: Pick<ResourceAssetFileApi, "readOptionalText">,
-): Promise<ResourceOverrides> {
+): Promise<OverridesDocument> {
   const session = resourceSession();
   file = session.file || file;
   // Returning pages must observe saves already queued by the selection page.
   await (session.overrideTransactions.get(file) || Promise.resolve());
-  return (await readOverrides(file)).overrides;
+  return readOverrides(file);
+}
+
+export async function loadResourceOverrides(
+  file: Pick<ResourceAssetFileApi, "readOptionalText">,
+): Promise<ResourceOverrides> {
+  return (await loadResourceOverrideDocument(file)).overrides;
 }
 
 export async function loadFeatureOverrides(
   file: Pick<ResourceAssetFileApi, "readOptionalText">,
 ): Promise<FeatureOverrides> {
-  const session = resourceSession();
-  file = session.file || file;
-  await (session.overrideTransactions.get(file) || Promise.resolve());
-  return (await readOverrides(file)).features;
+  return (await loadResourceOverrideDocument(file)).features;
 }
 
 type FeatureCatalog = Pick<ResourcePackSnapshot, "installedThemeIds" | "themes">;

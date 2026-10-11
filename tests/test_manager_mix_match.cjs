@@ -17,6 +17,7 @@ const catalog = { revision: 1, paths: [registration], byPath: new Map([[registra
 let features = {};
 let overrides = {};
 let available = true;
+let documentReads = 0;
 const saves = [];
 const routes = [];
 const globals = {
@@ -24,8 +25,9 @@ const globals = {
   FEATURE_RESOURCE_ITEMS: items,
   getResourceCatalog: async () => catalog,
   isResourceCatalogCurrent: () => true,
-  loadResourceOverrides: async () => overrides,
-  loadFeatureOverrides: async () => features,
+  loadResourceOverrideDocument: async () => { documentReads++; return { overrides, features }; },
+  loadResourceOverrides() { throw new Error('Pages must read both selections together'); },
+  loadFeatureOverrides() { throw new Error('Pages must read both selections together'); },
   featureResourceOptions: () => available ? [pack] : [],
   resolveFeatureChoice: (_catalog, _id, choices) => {
     const choice = choices[_id] || '@default';
@@ -53,37 +55,48 @@ function page(name, values = {}) {
     if (key === 'featureId' || key === 'sourcePath')
       assert(Object.hasOwn(context.page.protected || {}, key), 'route parameters must use protected data');
   }
-  return { ...context.page, ...context.page.private, ...context.page.protected, visible: true, ...values };
+  return { ...context.page, ...context.page.private, ...context.page.protected,
+    $nextTick(callback) { callback(); }, visible: true, ...values };
 }
 const names = rows => Array.from(rows, row => row.name);
+const listNames = list => Array.from(list.rows, row => list.rowName(row.rowId));
 async function main() {
   const list = page('mix-match');
   await list.loadCatalog();
-  assert.deepEqual(names(list.rows), [...items.map(item => item.name), registration.sourcePath]);
+  assert.equal(documentReads, 1, 'the list loads ordinary and feature choices in one document');
+  assert.deepEqual(listNames(list), [...items.map(item => item.name), registration.sourcePath]);
+  for (const row of list.rows)
+    assert.deepEqual(Object.keys(row).sort(), ['choiceId', 'choiceName', 'rowId'], 'all rows have only three reactive fields');
   assert.equal(new Set(list.rows.map(row => row.rowId)).size, 6, 'feature and path identities are unique');
-  list.openRow(list.rows[4]);
+  list.openRow(list.rows[4].rowId);
   assert.deepEqual(JSON.parse(JSON.stringify(routes.pop())), {
     uri: 'pages/mix-match-select', params: { featureId: 'calendar' }
   });
-  list.openRow(list.rows[5]);
+  assert.equal(list.rows.length, 0, 'feature navigation releases the list');
+  await list.onShow();
+  list.openRow(list.rows[5].rowId);
   assert.equal(routes.pop().params.sourcePath, registration.sourcePath);
+  assert.equal(list.pathRows.length, 0, 'ordinary navigation releases the cached row order');
+  await list.onShow();
 
   const retained = list.pathRows.slice();
   features = { calendar: 'pack', controlCenter: '@blur' };
   overrides = { [registration.sourcePath]: '@system' };
   await list.loadCatalog();
-  assert.deepEqual(names(list.rows), ['控制中心背景', '日历样式', registration.sourcePath,
+  assert.deepEqual(listNames(list), ['控制中心背景', '日历样式', registration.sourcePath,
     '启动器背景', '通知中心背景', '快捷组件背景']);
   assert.equal(list.rows[0].choiceName, '模糊');
   assert.equal(list.rows[1].choiceName, 'Pack');
-  assert(list.pathRows.every((row, index) => row === retained[index]), 'returning pages retain row objects');
+  assert(list.pathRows.every((row, index) => row === retained[index]), 'visible refreshes retain row objects');
   features = {};
   overrides = {};
   await list.loadCatalog();
-  assert.deepEqual(names(list.rows), [...items.map(item => item.name), registration.sourcePath]);
+  assert.deepEqual(listNames(list), [...items.map(item => item.name), registration.sourcePath]);
 
+  const readsBeforeCalendar = documentReads;
   const calendar = page('mix-match-select', { featureId: 'calendar' });
   await calendar.loadChoices();
+  assert.equal(documentReads, readsBeforeCalendar + 1, 'feature selection loads one configuration document');
   assert.deepEqual(names(calendar.rows), ['默认', '系统', 'Pack']);
   assert.equal(calendar.headerTitle, '< 日历样式');
   await calendar.selectChoice('pack');
@@ -97,8 +110,10 @@ async function main() {
   assert.deepEqual(names(background.rows), ['默认', '系统', '模糊', 'Pack']);
   await background.selectChoice('@blur');
   assert.deepEqual(saves.pop(), ['feature', 'launcher', '@blur']);
+  const readsBeforeResource = documentReads;
   const resource = page('mix-match-select', { sourcePath: registration.sourcePath });
   await resource.loadChoices();
+  assert.equal(documentReads, readsBeforeResource + 1, 'ordinary selection also loads one configuration document');
   assert.deepEqual(names(resource.rows), ['默认', '系统', 'Pack']);
   await resource.selectChoice('@system');
   assert.deepEqual(saves.pop(), ['resource', registration.sourcePath, '@system']);
@@ -116,7 +131,7 @@ async function main() {
   catalog.revision++;
   const noPacks = page('mix-match');
   await noPacks.loadCatalog();
-  assert.deepEqual(names(noPacks.rows), ['启动器背景', ...items.slice(1).map(item => item.name)],
+  assert.deepEqual(listNames(noPacks), ['启动器背景', ...items.slice(1).map(item => item.name)],
     'feature rows remain accessible with an empty resource catalog');
   const failed = page('mix-match-select', { featureId: 'widgets' });
   await failed.loadChoices();
@@ -124,16 +139,16 @@ async function main() {
   await failed.selectChoice('@blur');
   assert.equal(saves.length, 0, 'hidden pages do not save selections');
 
-  const originalLoad = globals.loadFeatureOverrides;
+  const originalLoad = globals.loadResourceOverrideDocument;
   let resume;
-  globals.loadFeatureOverrides = () => new Promise(resolve => { resume = resolve; });
+  globals.loadResourceOverrideDocument = () => new Promise(resolve => { resume = resolve; });
   const stale = page('mix-match');
   const pending = stale.loadCatalog();
   stale.onHide();
-  resume({});
+  resume({ overrides: {}, features: {} });
   await pending;
   assert.equal(stale.loaded, false, 'late loading results cannot update hidden pages');
-  globals.loadFeatureOverrides = originalLoad;
+  globals.loadResourceOverrideDocument = originalLoad;
 
   const originalSave = globals.saveFeatureOverride;
   globals.saveFeatureOverride = async () => { throw new Error('write failed'); };

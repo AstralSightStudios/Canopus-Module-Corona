@@ -14,9 +14,11 @@ const tests = [
   'test_resource_order.cjs',
   'test_manager_calendar.cjs',
   'test_resource_overrides.cjs',
+  'test_resource_feature_overrides.cjs',
   'test_resource_catalog_async.cjs',
   'test_reload_native_copy.cjs',
   'test_mix_match_pages.cjs',
+  'test_manager_mix_match.cjs',
   'test_manager_layout.cjs'
 ];
 

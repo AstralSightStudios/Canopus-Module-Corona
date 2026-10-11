@@ -10,6 +10,9 @@ const inventoryUri = 'internal://files/resource-files.json';
 const installedUri = 'internal://files/interconnect-themes.json';
 const mappingsUri = 'internal://files/mappings.tsv';
 const generationsUri = 'internal://files/resource-active-generations.json';
+const overridesUri = 'internal://files/resource-overrides.json';
+const backgroundsUri = 'internal://files/backgrounds.cfg';
+const calendarUri = 'internal://files/calendar.cfg';
 const oldMappings = '/resource/\tthemes/.active-old/r0/\n';
 const manifestUri = id => `${themeRoot}${id}/corona.json`;
 const generationRoot = id => `${themeRoot}.active-${id}/`;
@@ -138,6 +141,10 @@ function assertNativeOnly(file) {
   for (const method of ['binaryRead', 'binaryWrite', 'delete']) assert.equal(file.count(method), 0, method);
 }
 
+function assertOnlyOverrideRead(file, before, message) {
+  assert.deepEqual(file.calls.slice(before), [{ method: 'read', uri: overridesUri }], message);
+}
+
 function assertRolledBack(file, generation) {
   assert.equal(file.text.get(mappingsUri), oldMappings, 'failed reload retains old TSV verbatim');
   assert.equal(file.count('write', mappingsUri), 0, 'failed reload never publishes a TSV');
@@ -176,10 +183,12 @@ async function testFreshSnapshots(api, activation) {
   for (const id of ids) file.text.set(manifestUri(id), '{not to be read again');
   file.text.set(inventoryUri, '{not to be read again');
   const choices = { '/resource/a.bin': 'below', '/resource/b.bin': '@system' };
-  const readsBefore = file.count('read');
+  const readsBefore = file.calls.length;
   const plan = await activation.regenerateActiveMappings(['top', 'base', '@system', 'below', 'unused'],
     'fresh', file, choices, snapshot);
-  assert.equal(file.count('read') - readsBefore, 4, 'only protection metadata, prior active TSV, backgrounds and calendar configs are read');
+  assert.deepEqual(file.calls.slice(readsBefore).filter(call => call.method === 'read').map(call => call.uri),
+    [overridesUri, generationsUri, mappingsUri, backgroundsUri, calendarUri],
+    'only feature choices, protection metadata and prior active configs are read');
   assert.match(plan.mappings, /\/resource\/a\.bin\tthemes\/below\/assets\/a\.bin\n/,
     'explicit selection below the system boundary remains available');
   assert.match(plan.mappings, /\/resource\/b\.bin\t@system\n/);
@@ -354,7 +363,7 @@ async function testCopyBarrierAndDirectories(api, activation) {
   assert.strictEqual(reused, snapshot.activeMappings.plan);
   assert.equal(reused.generation, 'barrier');
   assert.equal(reused.mappings, plan.mappings);
-  assert.equal(file.calls.length, before, 'unchanged fallback reload does zero file operations');
+  assertOnlyOverrideRead(file, before, 'unchanged fallback reload only refreshes feature choices');
   assertNativeOnly(file);
 }
 
@@ -372,7 +381,7 @@ async function testInventoryValidation(api, activation) {
     assert.equal(file.count('info'), 0, 'zero-length rejection comes from inventory, not stats');
     assert.equal(snapshot.activeMappings, undefined);
     if (overlay) assertRolledBack(file, 'empty-asset');
-    else assert.equal(file.calls.length, before, 'invalid direct plan is never published');
+    else assertOnlyOverrideRead(file, before, 'invalid direct plan reads feature choices but is never published');
   }
   {
     const file = fallbackFile(['top', 'base', 'below']);
@@ -450,12 +459,15 @@ async function testReadBudget(api, activation) {
   assert.equal(sharedPlan.generation, null);
   for (const id of ids) assert.equal(shared.count('read', manifestUri(id)), 1);
   assert.equal(shared.count('read', inventoryUri), 1);
-  assert.equal(shared.count('read'), 9, 'both names for two manifests, one inventory, protection registry, prior TSV, backgrounds and calendar configs');
+  assert.deepEqual(shared.calls.filter(call => call.method === 'read').map(call => call.uri).sort(), [
+    ...ids.flatMap(id => [manifestUri(id), `${themeRoot}${id}/canora.json`]),
+    inventoryUri, overridesUri, generationsUri, mappingsUri, backgroundsUri, calendarUri
+  ].sort(), 'fresh snapshot activation reads feature choices once without reloading package metadata');
   for (const method of ['info', 'copy', 'mkdir', 'list']) assert.equal(shared.count(method), 0, method);
   const before = shared.calls.length;
   assert.strictEqual(await activation.regenerateActiveMappings([...ids, '@system'], 'sample2', shared, {}, snapshot),
     sharedPlan, 'request revisions do not affect the cache key');
-  assert.equal(shared.calls.length, before, 'cache hit skips registry and TSV reads/writes');
+  assertOnlyOverrideRead(shared, before, 'cache hit reads only feature choices, with no scanning, copying or publication');
 
   const separate = indexedFile(ids, assets);
   await api.loadRegisteredResourcePaths(ids, separate);
@@ -464,7 +476,11 @@ async function testReadBudget(api, activation) {
   assert.deepEqual(separatePlan.copies, []);
   for (const id of ids) assert.equal(separate.count('read', manifestUri(id)), 2);
   assert.equal(separate.count('read', inventoryUri), 2);
-  assert.equal(separate.count('read'), 14, 'includes prior backgrounds and calendar protection reads');
+  assert.deepEqual(separate.calls.filter(call => call.method === 'read').map(call => call.uri).sort(), [
+    ...ids.flatMap(id => [manifestUri(id), manifestUri(id), `${themeRoot}${id}/canora.json`, `${themeRoot}${id}/canora.json`]),
+    inventoryUri, inventoryUri, overridesUri, overridesUri,
+    generationsUri, mappingsUri, backgroundsUri, calendarUri
+  ].sort(), 'without a snapshot, activation loads then reconciles feature choices with two document reads');
 
   const choices = { '/resource/icon0.bin': '@system', '/resource/icon1.bin': 'base' };
   const selected = await activation.regenerateActiveMappings([...ids, '@system'], 'choices', shared, choices, snapshot);
@@ -472,7 +488,7 @@ async function testReadBudget(api, activation) {
   assert.strictEqual(await activation.regenerateActiveMappings([...ids, '@system'], 'choices-retry', shared,
     { '/resource/icon1.bin': 'base', '/resource/icon0.bin': '@system' }, snapshot), selected,
     'override key order is canonical');
-  assert.equal(shared.calls.length, afterChoices);
+  assertOnlyOverrideRead(shared, afterChoices, 'canonical override order still refreshes only feature choices');
   const reversed = await activation.regenerateActiveMappings(['base', 'top', '@system'], 'reversed',
     shared, choices, snapshot);
   assert.match(reversed.mappings, /\/resource\/icon2\.bin\tthemes\/base\/assets\/icon2\.bin\n/);
@@ -485,7 +501,7 @@ async function testReadBudget(api, activation) {
   assert.equal(fresh.mappings, sharedPlan.mappings);
   assertNativeOnly(shared);
   assertNativeOnly(separate);
-  console.log('2-pack/100-icons activation: 0 native copies, 0 stats; unchanged reload: 0 file operations.');
+  console.log('2-pack/100-icons activation: 0 native copies, 0 stats; unchanged reload: 1 feature-config read only.');
 }
 
 async function testPublishedCache(api, activation) {
@@ -539,7 +555,7 @@ async function testPublishedCache(api, activation) {
   const reused = await activation.regenerateActiveMappings(order, 'cache-new-request', file, {}, snapshot);
   assert.equal(reused.generation, 'cache-c');
   assert.deepEqual(reused.copies, []);
-  assert.equal(file.calls.length, before, '>256-file repeated reload performs 0 additional copies or other I/O');
+  assertOnlyOverrideRead(file, before, '>256-file repeated reload refreshes feature choices without copies or other I/O');
   assertNativeOnly(file);
 }
 
@@ -557,7 +573,7 @@ async function testDirectDependencyReceipts(api, activation) {
     'a failed or missing switch receipt retains both potentially resident direct packs');
   const before = file.calls.length;
   await activation.regenerateActiveMappings(['base', 'top', '@system'], 'direct-base-retry', file, {}, snapshot);
-  assert.equal(file.calls.length, before, 'unacknowledged direct plan remains reusable');
+  assertOnlyOverrideRead(file, before, 'unacknowledged direct plan remains reusable after refreshing feature choices');
   assert.deepEqual(await activation.readProtectedThemeIds(file), ['base', 'top']);
   await activation.cleanupInactiveGenerations(base.generation, file, base.mappings);
   assert.deepEqual(await activation.readProtectedThemeIds(file), ['base'],

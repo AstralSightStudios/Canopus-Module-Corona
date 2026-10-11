@@ -10,10 +10,10 @@
     <scroll if="{{loaded && rows.length}}" id="resource-path-list" class="resource-list"
       scroll-y="true" scroll-x="false" bounces="false">
       <div for="{{row in rows}}" tid="rowId" class="resource-row"
-        onclick="openRow(row)">
+        onclick="openRow(row.rowId)">
         <div class="resource-item">
           <div class="resource-copy">
-            <text class="resource-path">{{row.name}}</text>
+            <text class="resource-path">{{rowName(row.rowId)}}</text>
             <text class="resource-choice">{{row.choiceName}}</text>
           </div>
         </div>
@@ -32,16 +32,19 @@ import {
   BLUR_RESOURCE_CHOICE,
   FEATURE_RESOURCE_ITEMS,
   featureResourceOptions,
-  loadFeatureOverrides,
+  loadResourceOverrideDocument,
   resolveFeatureChoice,
-  validFeatureResourceId,
   getResourceCatalog,
   isResourceCatalogCurrent,
-  loadResourceOverrides,
   resolveResourceChoice,
   validSourcePath,
   SYSTEM_RESOURCE_CHOICE
 } from "../../ts/resource-overrides"
+
+function featureForRow(rowId) {
+  if (typeof rowId !== "string" || !rowId.startsWith("feature:")) return undefined
+  return FEATURE_RESOURCE_ITEMS.find(item => item.id === rowId.slice(8))
+}
 
 export default {
   private: {
@@ -65,27 +68,33 @@ export default {
 
   onShow() {
     this.visible = true
-    this.loadCatalog()
+    return this.loadCatalog()
   },
 
   onHide() {
     this.visible = false
     this.loadVersion += 1
+    this.clearRows()
   },
 
   onDestroy() {
-    this.visible = false
-    this.loadVersion += 1
+    this.onHide()
+  },
+
+  clearRows() {
+    this.loaded = false
+    this.rows = []
+    this.pathRows = []
+    this.catalogRevision = -1
   },
 
   async loadCatalog() {
     const version = ++this.loadVersion
     if (!this.loaded) this.statusText = "正在读取替换资源…"
     try {
-      const [catalog, overrides, features] = await Promise.all([
+      const [catalog, { overrides, features }] = await Promise.all([
         getResourceCatalog(file),
-        loadResourceOverrides(file),
-        loadFeatureOverrides(file)
+        loadResourceOverrideDocument(file)
       ])
       if (version !== this.loadVersion || !this.visible) return
       if (!isResourceCatalogCurrent(catalog)) return this.loadCatalog()
@@ -98,13 +107,14 @@ export default {
       }
       let reorder = false
       if (this.loaded && this.catalogRevision === catalog.revision) {
-        // Update retained rows without allocating replacements on return.
+        // Refresh a visible list in place; hidden pages release their rows.
         this.pathRows.forEach(row => {
-          const item = row.featureId
-            ? { themes: featureResourceOptions(catalog, row.featureId) }
-            : catalog.byPath.get(row.sourcePath)
-          const choice = row.featureId
-            ? resolveFeatureChoice(catalog, row.featureId, features)
+          const feature = featureForRow(row.rowId)
+          const item = feature
+            ? { themes: featureResourceOptions(catalog, feature.id) }
+            : catalog.byPath.get(row.rowId)
+          const choice = feature
+            ? resolveFeatureChoice(catalog, feature.id, features)
             : resolveResourceChoice(item, overrides)
           if (row.choiceId === choice) return
           if ((row.choiceId === DEFAULT_RESOURCE_CHOICE) !== (choice === DEFAULT_RESOURCE_CHOICE))
@@ -117,18 +127,16 @@ export default {
         const featureRows = FEATURE_RESOURCE_ITEMS.map(item => {
           const choice = resolveFeatureChoice(catalog, item.id, features)
           return {
-            rowId: `feature:${item.id}`, featureId: item.id, sourcePath: "", name: item.name,
-            choiceId: choice,
+            rowId: `feature:${item.id}`, choiceId: choice,
             choiceName: choiceName({ themes: featureResourceOptions(catalog, item.id) }, choice)
           }
         })
         const resourceRows = catalog.paths.map(item => {
           const choice = resolveResourceChoice(item, overrides)
           return {
-            rowId: item.sourcePath, featureId: "", sourcePath: item.sourcePath,
-            name: item.sourcePath, choiceId: choice, choiceName: choiceName(item, choice)
+            rowId: item.sourcePath, choiceId: choice, choiceName: choiceName(item, choice)
           }
-        }).sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+        }).sort((left, right) => left.rowId.localeCompare(right.rowId))
         this.pathRows = featureRows.concat(resourceRows)
         reorder = true
       }
@@ -138,9 +146,7 @@ export default {
       this.statusText = ""
     } catch (error) {
       if (version !== this.loadVersion || !this.visible) return
-      this.rows = []
-      this.pathRows = []
-      this.loaded = false
+      this.clearRows()
       this.statusText = String(error && error.message || "读取混搭资源失败")
     }
   },
@@ -159,13 +165,27 @@ export default {
       this.rows = rows
   },
 
-  openRow(row) {
-    if (validFeatureResourceId(row.featureId)) {
-      router.push({ uri: "pages/mix-match-select", params: { featureId: row.featureId } })
-      return
-    }
-    if (!validSourcePath(row.sourcePath)) return
-    router.push({ uri: "pages/mix-match-select", params: { sourcePath: row.sourcePath } })
+  rowName(rowId) {
+    const feature = featureForRow(rowId)
+    return feature ? feature.name : rowId
+  },
+
+  openRow(rowId) {
+    if (!this.visible || !this.loaded) return
+    const feature = featureForRow(rowId)
+    if (!feature && !validSourcePath(rowId)) return
+    const params = feature ? { featureId: feature.id } : { sourcePath: rowId }
+    const version = ++this.loadVersion
+    // Release both reactive row arrays and their native tree before creating another page.
+    this.clearRows()
+    this.$nextTick(() => {
+      if (version !== this.loadVersion || !this.visible) return
+      try {
+        router.push({ uri: "pages/mix-match-select", params })
+      } catch (_error) {
+        return this.loadCatalog()
+      }
+    })
   },
 
   goBack() {

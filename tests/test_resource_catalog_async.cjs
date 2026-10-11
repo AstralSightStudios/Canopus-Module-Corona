@@ -368,10 +368,14 @@ async function testOverrideTransactions(api) {
     await file.when('write', overridesUri);
     const recovery = api.saveResourceOverride('/resource/b.bin', 'base', file);
     const readAfterSave = api.loadResourceOverrides(file);
+    const documentAfterSave = api.loadResourceOverrideDocument(file);
     gate.reject(new Error('write failed'));
     await rejection;
     await recovery;
     assert.deepEqual({ ...await readAfterSave }, { '/resource/b.bin': 'base' }, 'a failed write does not poison the queue');
+    const recovered = await documentAfterSave;
+    assert.deepEqual({ ...recovered.overrides }, { '/resource/b.bin': 'base' });
+    assert.deepEqual({ ...recovered.features }, {}, 'document readers recover after failed mutations too');
     assert.equal(file.count('write'), 2);
   }
 }
@@ -414,30 +418,34 @@ async function testPageReadBudget(api, order) {
     }));
   }
   file.text.set(inventoryUri, JSON.stringify({ version: 1, themes }));
-  setOverrides(file, { '/resource/icon0.bin': 'pack0' });
+  file.text.set(overridesUri, JSON.stringify({ version: 2,
+    overrides: { '/resource/icon0.bin': 'pack0' }, features: { calendar: 'pack0' } }));
   file.text.set(orderUri, JSON.stringify({ version: 1, order: [...ids, '@system'] }));
 
-  const [coldCatalog, coldOverrides] = await Promise.all([
-    api.getResourceCatalog(file), api.loadResourceOverrides(file)
+  const [coldCatalog, coldDocument] = await Promise.all([
+    api.getResourceCatalog(file), api.loadResourceOverrideDocument(file)
   ]);
   assert.equal(coldCatalog.paths.length, 100);
-  assert.equal(api.resolveResourceChoice(coldCatalog.paths[0], coldOverrides), 'pack0');
+  assert.equal(api.resolveResourceChoice(coldCatalog.paths[0], coldDocument.overrides), 'pack0');
+  assert.deepEqual({ ...coldDocument.features }, { calendar: 'pack0' });
   const coldReads = file.count('read');
   const coldIndexes = file.count('read', inventoryUri);
   assert.equal(coldReads, 23, 'cold list checks both names for ten manifests, installed IDs, one inventory and overrides');
   assert.equal(coldIndexes, 1);
 
-  const [selectionCatalog, selectionOverrides, orderText] = await Promise.all([
-    api.getResourceCatalog(file), api.loadResourceOverrides(file), file.readOptionalText(orderUri)
+  const [selectionCatalog, selectionDocument, orderText] = await Promise.all([
+    api.getResourceCatalog(file), api.loadResourceOverrideDocument(file), file.readOptionalText(orderUri)
   ]);
   assert.strictEqual(selectionCatalog, coldCatalog);
-  assert.equal(api.resolveResourceChoice(selectionCatalog.paths[0], selectionOverrides), 'pack0');
+  assert.equal(api.resolveResourceChoice(selectionCatalog.paths[0], selectionDocument.overrides), 'pack0');
+  assert.deepEqual({ ...selectionDocument.features }, { calendar: 'pack0' });
   assert.deepEqual(order.resolveResourceOrder(selectionCatalog.installedThemeIds, orderText), [...ids, '@system']);
-  const [returnedCatalog, returnedOverrides] = await Promise.all([
-    api.getResourceCatalog(file), api.loadResourceOverrides(file)
+  const [returnedCatalog, returnedDocument] = await Promise.all([
+    api.getResourceCatalog(file), api.loadResourceOverrideDocument(file)
   ]);
   assert.strictEqual(returnedCatalog, coldCatalog);
-  assert.equal(api.resolveResourceChoice(returnedCatalog.paths[0], returnedOverrides), 'pack0');
+  assert.equal(api.resolveResourceChoice(returnedCatalog.paths[0], returnedDocument.overrides), 'pack0');
+  assert.deepEqual({ ...returnedDocument.features }, { calendar: 'pack0' });
   const roundtripReads = file.count('read') - coldReads;
   const roundtripIndexes = file.count('read', inventoryUri) - coldIndexes;
   assert.equal(roundtripReads, 3, 'warm selection reads overrides/order and returning list reads overrides only');
@@ -479,14 +487,20 @@ async function testApplicationSession(api, entry, storageEntry) {
     const first = selectBundle.saveResourceOverride('/resource/shared.bin', 'base', selectFile);
     await file.when('write', overridesUri);
     const second = listBundle.saveResourceOverride('/resource/other.bin', '@system', listFile);
-    const reading = receiverBundle.loadResourceOverrides(makeFile());
+    const third = receiverBundle.saveFeatureOverride('calendar', 'base', makeFile());
+    const reading = receiverBundle.loadResourceOverrideDocument(makeFile());
     await drainCallbacks();
     assert.equal(file.count('read', overridesUri), 1, 'transactions in different bundles share one queue');
     gate.resolve();
-    await Promise.all([first, second]);
-    assert.deepEqual({ ...await reading }, {
+    await Promise.all([first, second, third]);
+    const committed = await reading;
+    assert.deepEqual({ ...committed.overrides }, {
       '/resource/shared.bin': 'base', '/resource/other.bin': '@system'
     });
+    assert.deepEqual({ ...committed.features }, { calendar: 'base' },
+      'one document reader observes queued resource and feature saves across bundles');
+    assert.equal(file.count('read', overridesUri), 4, 'three mutations and one combined document read use the app adapter');
+    assert.equal(listFile.calls.length + selectFile.calls.length, 0);
     file.onWrite = undefined;
 
     file.text.set(manifestUri('base'), manifest('base', 'Updated across bundles'));

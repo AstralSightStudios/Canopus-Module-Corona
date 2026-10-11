@@ -36,12 +36,62 @@ function makeFile() {
   };
 }
 
+async function testOverrideDocument(choices) {
+  const file = makeFile();
+  const expected = { overrides: { '/resource/ordinary.bin': '@system' }, features: { calendar: 'inactive', launcher: '@blur' } };
+  file.text.set(overridesUri, JSON.stringify({ version: 2, ...expected }));
+  const originalParse = JSON.parse;
+  let parses = 0;
+  JSON.parse = (...args) => { parses++; return originalParse(...args); };
+  let document;
+  try {
+    document = await choices.loadResourceOverrideDocument(file);
+  } finally {
+    JSON.parse = originalParse;
+  }
+  assert.deepEqual({ overrides: { ...document.overrides }, features: { ...document.features } }, expected);
+  assert.deepEqual(file.calls, [['read', overridesUri]], 'both sections need one document read');
+  assert.equal(parses, 1, 'both sections need one document parse');
+
+  file.text.set(overridesUri, JSON.stringify({ version: 1, overrides: expected.overrides }));
+  const legacy = await choices.loadResourceOverrideDocument(file);
+  assert.deepEqual({ ...legacy.overrides }, expected.overrides);
+  assert.deepEqual({ ...legacy.features }, {}, 'legacy documents have no feature selections');
+  file.text.delete(overridesUri);
+  const missing = await choices.loadResourceOverrideDocument(file);
+  assert.deepEqual({ ...missing.overrides }, {});
+  assert.deepEqual({ ...missing.features }, {});
+  assert.equal(Object.getPrototypeOf(missing.overrides), null);
+  assert.equal(Object.getPrototypeOf(missing.features), null);
+  assert.equal(file.calls.length, 3, 'later reads see current disk contents instead of cached documents');
+
+  const originalRead = file.readOptionalText;
+  const nativeError = Object.assign(new Error('native read failed'), { code: 300 });
+  file.readOptionalText = async () => { throw nativeError; };
+  await assert.rejects(choices.loadResourceOverrideDocument(file), error => error === nativeError,
+    'native I/O errors pass through unchanged');
+  file.readOptionalText = originalRead;
+  for (const [text, message] of [
+    ['{broken', /配置损坏/],
+    [' '.repeat(64 * 1024 + 1), /超过 64 KiB/],
+    [JSON.stringify({ version: 2, overrides: { '/resource/': '@system' }, features: {} }), /无效路径或选项/]
+  ]) {
+    file.text.set(overridesUri, text);
+    await assert.rejects(choices.loadResourceOverrideDocument(file), message);
+  }
+  file.text.set(overridesUri, JSON.stringify({ version: 2, ...expected }));
+  const recovered = await choices.loadResourceOverrideDocument(file);
+  assert.deepEqual({ overrides: { ...recovered.overrides }, features: { ...recovered.features } }, expected,
+    'failed reads and invalid documents do not poison subsequent loads');
+}
+
 async function main() {
   execFileSync(path.join(root, 'manager/node_modules/.bin/tsc'), [
     path.join(root, 'manager/src/ts/resource-overrides.ts'), '--outDir', temporary,
     '--module', 'commonjs', '--target', 'es2018', '--lib', 'es2018,dom', '--skipLibCheck'
   ], { stdio: 'inherit' });
   const choices = require(path.join(temporary, 'resource-overrides.js'));
+  await testOverrideDocument(choices);
   const activation = require(path.join(temporary, 'resource-activation.js'));
   const pack = require(path.join(temporary, 'resource-pack.js'));
   const parsed = value => pack.parseResourcePackManifest(JSON.stringify(value));
@@ -201,6 +251,7 @@ async function main() {
     const badFile = makeFile();
     badFile.text.set(overridesUri, JSON.stringify(bad));
     await assert.rejects(choices.loadFeatureOverrides(badFile), /配置/);
+    await assert.rejects(choices.loadResourceOverrideDocument(badFile), /配置/);
   }
   console.log('resource feature override tests passed');
 }

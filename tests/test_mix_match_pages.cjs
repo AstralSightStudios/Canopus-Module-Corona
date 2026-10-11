@@ -1,4 +1,4 @@
-/* Host tests for parallel page loading, retained rows and lifecycle guards. */
+/* Host tests for single-document loading, visible-row reuse and lifecycle release. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -35,13 +35,19 @@ function page(name, dependencies = {}) {
     .replace('export default', 'globalThis.page =');
   const context = {
     DEFAULT_RESOURCE_CHOICE, SYSTEM_RESOURCE_CHOICE, RESOURCE_ORDER_URI,
+    BLUR_RESOURCE_CHOICE: '@blur', FEATURE_RESOURCE_ITEMS: [],
+    featureResourceOptions: () => [],
+    resolveFeatureChoice: () => DEFAULT_RESOURCE_CHOICE,
+    validFeatureResourceId: () => false,
     getResourceCatalog: async () => catalog(),
     getResourceFileApi: file => file,
     withResourceOperation: operation => operation(),
     withModuleControlOperation: operation => operation(),
     getInitialModuleStatus: async () => ({ status: null, reason: 'timeout' }),
     isResourceCatalogCurrent: () => true,
-    loadResourceOverrides: async () => ({}),
+    loadResourceOverrideDocument: async () => ({ overrides: {}, features: {} }),
+    loadResourceOverrides() { throw new Error('Pages must read the whole document once'); },
+    loadFeatureOverrides() { throw new Error('Pages must read the whole document once'); },
     validSourcePath: value => typeof value === 'string' && !value.endsWith('/') &&
       (value.startsWith('/') || value === '@quickapp-icon/ng.lst.corona'),
     resolveResourceChoice(registration, overrides) {
@@ -54,10 +60,12 @@ function page(name, dependencies = {}) {
     file: { readOptionalText: async () => null },
     prompt: { showToast() {} },
     router: { back() {}, push() {} },
+    $nextTick(callback) { callback(); },
     ...dependencies
   };
   vm.runInNewContext(script, context, { filename: `${name}.ux` });
-  return { ...context.page, ...context.page.private, visible: true };
+  return { ...context.page, ...context.page.private, ...context.page.protected,
+    $nextTick: context.$nextTick, visible: true };
 }
 
 async function testList() {
@@ -69,12 +77,15 @@ async function testList() {
   let cold = true;
   const list = page('mix-match', {
     getResourceCatalog() { started.push('catalog'); return cold ? catalogRead.promise : Promise.resolve(snapshot); },
-    loadResourceOverrides() { started.push('overrides'); return cold ? overrideRead.promise : Promise.resolve(choices); }
+    loadResourceOverrideDocument() {
+      started.push('overrides');
+      return cold ? overrideRead.promise : Promise.resolve({ overrides: choices, features: {} });
+    }
   });
   const initial = list.loadCatalog();
   assert.deepEqual(started, ['catalog', 'overrides'], 'independent reads start before either completes');
   catalogRead.resolve(snapshot);
-  overrideRead.resolve({});
+  overrideRead.resolve({ overrides: {}, features: {} });
   await initial;
   assert.equal(list.loaded, true);
   assert.equal(list.statusText, '');
@@ -82,16 +93,20 @@ async function testList() {
   const first = rows[0];
   cold = false;
   list.onHide();
+  assert.equal(list.loaded, false, 'hiding unmounts the list');
+  assert.equal(list.rows.length, 0, 'hidden pages release the display rows');
+  assert.equal(list.pathRows.length, 0, 'hidden pages release the cached row order');
+  assert.equal(list.catalogRevision, -1);
   choices = { '/resource/a.bin': 'dark' };
   list.visible = true;
   const returning = list.loadCatalog();
-  assert.equal(list.loaded, true, 'returning does not unmount the list');
-  assert.equal(list.statusText, '', 'returning does not flash the loading state');
+  assert.equal(list.loaded, false, 'returning rebuilds the released list');
   await returning;
-  assert.equal(list.rows, rows, 'returning retains the rows array');
-  assert.equal(list.rows[0], first, 'returning retains individual row identity');
-  assert.equal(first.choiceName, 'Dark');
-  assert.equal(first.choiceId, 'dark');
+  assert.notEqual(list.rows, rows, 'returning allocates only the new visible rows');
+  assert.notEqual(list.rows[0], first);
+  assert.equal(list.rows[0].choiceName, 'Dark');
+  assert.equal(list.rows[0].choiceId, 'dark');
+  assert.deepEqual(Object.keys(list.rows[0]).sort(), ['choiceId', 'choiceName', 'rowId']);
 
   const old = deferred();
   let calls = 0;
@@ -117,6 +132,65 @@ async function testList() {
   assert.equal(hidden.loaded, false, 'hidden pages ignore completed loads');
 }
 
+async function testNavigationRelease() {
+  const snapshot = catalog(1, Array.from({ length: 60 }, (_, index) => String(index)));
+  const callbacks = [];
+  const routes = [];
+  let documentReads = 0;
+  const list = page('mix-match', {
+    getResourceCatalog: async () => snapshot,
+    loadResourceOverrideDocument: async () => { documentReads++; return { overrides: {}, features: {} }; },
+    $nextTick(callback) { callbacks.push(callback); },
+    router: { push(route) {
+      assert.equal(list.loaded, false, 'navigation cannot retain a mounted list');
+      assert.equal(list.rows.length, 0);
+      assert.equal(list.pathRows.length, 0);
+      routes.push(route);
+    } }
+  });
+  await list.onShow();
+  assert.equal(documentReads, 1, 'one configuration document is loaded per list show');
+  assert.equal(list.rows.length, 60);
+  assert.equal(list.rows.reduce((count, row) => count + Object.keys(row).length, 0), 180,
+    'sixty ordinary rows retain only three reactive fields each');
+  list.openRow('/resource/0.bin');
+  assert.equal(list.loaded, false);
+  assert.equal(list.rows.length, 0, 'rows are released before waiting for the DOM update');
+  assert.equal(list.pathRows.length, 0);
+  assert.equal(routes.length, 0, 'router.push waits until the list tree is unmounted');
+  list.openRow('/resource/1.bin');
+  assert.equal(callbacks.length, 1, 'repeated taps cannot queue another navigation');
+  callbacks.shift()();
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].params.sourcePath, '/resource/0.bin');
+  list.onHide();
+  await list.onShow();
+  assert.equal(documentReads, 2, 'returning rereads the current choices once');
+  assert.equal(list.rows.length, 60, 'returning rebuilds the visible list from the shared catalog');
+
+  for (const hook of ['onHide', 'onDestroy']) {
+    list.openRow('/resource/0.bin');
+    list[hook]();
+    callbacks.shift()();
+    assert.equal(routes.length, 1, `${hook} cancels a pending navigation callback`);
+    assert.equal(list.loaded, false);
+    assert.equal(list.rows.length, 0);
+    assert.equal(list.pathRows.length, 0);
+    await list.onShow();
+  }
+
+  const failedCallbacks = [];
+  const failed = page('mix-match', {
+    $nextTick(callback) { failedCallbacks.push(callback); },
+    router: { push() { throw new Error('navigation failed'); } }
+  });
+  await failed.onShow();
+  failed.openRow('/resource/a.bin');
+  await failedCallbacks.shift()();
+  assert.equal(failed.loaded, true, 'a synchronous routing failure restores the released list');
+  assert.equal(failed.rows.length, 2);
+}
+
 async function testListOrdering() {
   let snapshot = catalog(1, ['f', 'd', 'b', 'a', 'e', 'c']);
   let choices = {
@@ -128,12 +202,12 @@ async function testListOrdering() {
   let readFailure = false;
   const list = page('mix-match', {
     getResourceCatalog: async () => snapshot,
-    loadResourceOverrides: async () => {
+    loadResourceOverrideDocument: async () => {
       if (readFailure) throw new Error('override read failed');
-      return choices;
+      return { overrides: choices, features: {} };
     }
   });
-  const paths = () => Array.from(list.rows, row => row.sourcePath);
+  const paths = () => Array.from(list.rows, row => row.rowId);
   const expected = names => names.map(name => `/resource/${name}.bin`);
   await list.loadCatalog();
   assert.deepEqual(paths(), expected(['b', 'd', 'a', 'c', 'e', 'f']),
@@ -141,8 +215,8 @@ async function testListOrdering() {
   assert.deepEqual(snapshot.paths.map(item => item.sourcePath), expected(['f', 'd', 'b', 'a', 'e', 'c']),
     'display ordering does not mutate the shared catalog');
   const pathRows = list.pathRows;
-  const retained = new Map(list.rows.map(row => [row.sourcePath, row]));
-  assert.deepEqual(Array.from(pathRows, row => row.sourcePath), expected(['a', 'b', 'c', 'd', 'e', 'f']));
+  const retained = new Map(list.rows.map(row => [row.rowId, row]));
+  assert.deepEqual(Array.from(pathRows, row => row.rowId), expected(['a', 'b', 'c', 'd', 'e', 'f']));
   assert.equal(retained.get('/resource/d.bin').choiceName, '系统');
   assert.equal(retained.get('/resource/e.bin').choiceId, '@default');
 
@@ -150,11 +224,9 @@ async function testListOrdering() {
   const orderRows = list.orderRows;
   list.orderRows = function () { regroups++; return orderRows.call(this); };
   const reload = async () => {
-    list.onHide();
-    list.visible = true;
     await list.loadCatalog();
-    assert.equal(list.pathRows, pathRows, 'choice changes retain the cached path order');
-    for (const row of list.rows) assert.equal(row, retained.get(row.sourcePath), 'regrouping retains row objects');
+    assert.equal(list.pathRows, pathRows, 'visible refreshes retain the cached path order');
+    for (const row of list.rows) assert.equal(row, retained.get(row.rowId), 'regrouping retains row objects');
   };
   const initialRows = list.rows;
   await reload();
@@ -184,7 +256,7 @@ async function testListOrdering() {
   assert.deepEqual(paths(), expected(['a', 'b', 'c', 'd', 'e', 'f']));
   assert.equal(retained.get('/resource/d.bin').choiceName, '默认');
   const defaultRows = list.rows;
-  choices = Object.fromEntries(pathRows.map(row => [row.sourcePath, '@system']));
+  choices = Object.fromEntries(pathRows.map(row => [row.rowId, '@system']));
   await reload();
   assert.equal(list.rows, defaultRows, 'group changes with identical positions do not replace the array');
 
@@ -211,7 +283,7 @@ async function testListOrderingWork() {
   let resolutions = 0;
   const list = page('mix-match', {
     getResourceCatalog: async () => snapshot,
-    loadResourceOverrides: async () => choices,
+    loadResourceOverrideDocument: async () => ({ overrides: choices, features: {} }),
     resolveResourceChoice(item, overrides) {
       resolutions++;
       return overrides[item.sourcePath] || DEFAULT_RESOURCE_CHOICE;
@@ -244,22 +316,22 @@ async function testListOrderingWork() {
     assert.equal(visits, count * (1 + expectedRegroups), 'each required pass visits each cached row once');
     assert.equal(list.pathRows, pathRows);
     assert.equal(list.rows.length, count);
-    for (const row of list.rows) assert.equal(row, pathRows[Number(row.sourcePath.match(/\d+/)[0])]);
+    for (const row of list.rows) assert.equal(row, pathRows[Number(row.rowId.match(/\d+/)[0])]);
   };
   const originalRows = list.rows;
   await reload(0);
   assert.equal(list.rows, originalRows);
-  choices = { [last.sourcePath]: '@system' };
+  choices = { [last.rowId]: '@system' };
   await reload(1);
   assert.equal(list.rows[0], last);
   assert.equal(list.rows[1], first);
   const pinnedRows = list.rows;
-  choices[last.sourcePath] = 'dark';
+  choices[last.rowId] = 'dark';
   await reload(0);
   assert.equal(list.rows, pinnedRows, 'custom-to-custom changes avoid regrouping even at the catalog limit');
-  choices[last.sourcePath] = '@default';
+  choices[last.rowId] = '@default';
   await reload(1);
-  assert.deepEqual(Array.from(list.rows, row => row.sourcePath), names.map(name => `/resource/${name}.bin`));
+  assert.deepEqual(Array.from(list.rows, row => row.rowId), names.map(name => `/resource/${name}.bin`));
 }
 
 async function testSelection() {
@@ -271,7 +343,7 @@ async function testSelection() {
   let saveGate = deferred();
   const select = page('mix-match-select', {
     getResourceCatalog() { started.push('catalog'); return gates[0].promise; },
-    loadResourceOverrides() { started.push('overrides'); return gates[1].promise; },
+    loadResourceOverrideDocument() { started.push('overrides'); return gates[1].promise; },
     file: { readOptionalText(uri) {
       assert.equal(uri, RESOURCE_ORDER_URI);
       started.push('order');
@@ -289,7 +361,7 @@ async function testSelection() {
   const loading = select.loadChoices();
   assert.deepEqual(started, ['catalog', 'overrides', 'order']);
   gates[0].resolve(snapshot);
-  gates[1].resolve({ '/resource/a.bin': 'base' });
+  gates[1].resolve({ overrides: { '/resource/a.bin': 'base' }, features: {} });
   gates[2].resolve('ordering snapshot');
   await loading;
   assert.equal(select.loaded, true);
@@ -350,8 +422,8 @@ async function testSelection() {
   const iconList = page('mix-match', { getResourceCatalog: async () => iconCatalog,
     router: { push: value => pushes.push(value) } });
   await iconList.loadCatalog();
-  iconList.openPath(iconSource);
-  iconList.openPath('@unknown/package');
+  iconList.openRow('@unknown/package');
+  iconList.openRow(iconSource);
   assert.equal(pushes.length, 1);
   assert.equal(pushes[0].params.sourcePath, iconSource);
   const iconSelect = page('mix-match-select', { getResourceCatalog: async () => iconCatalog });
@@ -602,12 +674,13 @@ const failOnIdle = () => idle.reject(new Error('Page test stalled waiting for an
 process.once('beforeExit', failOnIdle);
 Promise.race([(async () => {
   await testList();
+  await testNavigationRelease();
   await testListOrdering();
   await testListOrderingWork();
   await testSelection();
   await testReload();
   await testHomepageStatus();
-  console.log('Mix-match custom-first ordering, linear regrouping, retained rows, lifecycle and reload sequencing tests passed.');
+  console.log('Mix-match ordering, visible-row reuse, lifecycle release and reload sequencing tests passed.');
 })(), idle.promise]).finally(() => {
   process.removeListener('beforeExit', failOnIdle);
 }).catch(error => {

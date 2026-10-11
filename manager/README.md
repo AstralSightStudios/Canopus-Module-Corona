@@ -72,7 +72,9 @@ Host regressions cover complete transfers, duplicate/out-of-order chunks, restar
 
 选择保存在 `internal://files/resource-overrides.json`，v2 的 `overrides` 保留普通资源选择，`features` 保存背景和日历选择；兼容读取 v1。保存选择后仍需通过现有重载入口应用。选中的包被删除或不再声明对应功能时回退默认。
 
-Host regressions: `node tests/test_resource_feature_overrides.cjs` and `node tests/test_manager_mix_match.cjs`.
+Both mix-match pages load ordinary and feature choices from a single configuration read. List rows retain only their identity and resolved choice; before opening the source selector, Manager releases both row arrays and waits for the next DOM update to unmount the list. Hidden pages also release their rows. Returning rebuilds the list from the shared package catalog and freshly read choices, rather than retaining its UI in the page stack. Preview images are unchanged.
+
+Host regressions: `node tests/test_resource_feature_overrides.cjs`, `node tests/test_manager_mix_match.cjs` and `node tests/test_mix_match_pages.cjs`, also included in `npm --prefix manager test`.
 
 ## 首页模块状态
 
