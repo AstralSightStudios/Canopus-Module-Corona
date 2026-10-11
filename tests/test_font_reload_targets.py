@@ -183,10 +183,13 @@ class InstallerContract(unittest.TestCase):
         env = {key: val for key, val in os.environ.items()
                if key not in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE')}
         env['RH_P67_BLUR_DIAGNOSTICS'] = '1'
-        result = subprocess.run([sys.executable, str(ROOT / 'scripts/build-watchface.py'),
-            '--target', TARGET_IDS[0], '--target', TARGET_IDS[2],
-            '--certificate-zip', '/missing-module-installer-certificate.zip'],
-            env=env, capture_output=True, text=True)
+        # Existing user delivery artifacts must not mask certificate preflight.
+        with tempfile.TemporaryDirectory(prefix='rh-certificate-preflight-') as directory:
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/build-watchface.py'),
+                '--target', TARGET_IDS[0], '--target', TARGET_IDS[2],
+                '--output', str(Path(directory) / 'installer'),
+                '--certificate-zip', '/missing-module-installer-certificate.zip'],
+                env=env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('certificate ZIP not found', result.stderr)
         self.assertNotIn('requires only', result.stderr)

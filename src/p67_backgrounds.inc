@@ -19,6 +19,13 @@ static struct p67_surface p67_surfaces[3] = {
     { .root_slot=0x201100e0u, .image_slot=0x201100ccu, .callback=0x0c50abb5u }
 };
 static const char *p67_surface_path(struct p67_surface *s) { return s->path_index ? s->alternate : s->path; }
+#if defined(__arm__) || defined(__thumb__)
+#include "p67_battery.inc"
+#else
+/* Native rendering is exercised separately through the battery host seams. */
+#define p67_battery_detach() ((void)0)
+#define p67_battery_poll(enabled) ((void)(enabled))
+#endif
 static void p67_surface_event(void *event);
 static void p67_surface_scroll_for(struct p67_surface *s,void *event);
 static void p67_surface_refresh_list(struct p67_surface *s);
@@ -111,6 +118,7 @@ static void p67_surface_end(struct p67_surface *s) {
 }
 static void p67_surface_detach(struct p67_surface *s) {
     uint32_t *d;
+    if(s==&p67_surfaces[0]) p67_battery_detach();
     p67_blur_session_clear(&s->session,p67_surface_entry_bit(s));
     p67_surface_native(s);
     if (p67_live(s->owner)) {
@@ -360,6 +368,8 @@ void rh_platform_backgrounds_poll(void) {
     for(i=0;i<3;++i) demand |= rh_background_is_blur(p67_surface_path(&p67_surfaces[i]));
     p67_blur_watch(demand); p67_launcher_poll();
     for(i=0;i<3;++i) p67_surface_poll(&p67_surfaces[i]);
+    p67_battery_poll(p67_surface_path(&p67_surfaces[0])[0] &&
+                     p67_surface_binding_valid(&p67_surfaces[0]));
 }
 static int p67_stage_path(const char *path) {
     uint32_t header[3] = {0, 0, 0}, cache;

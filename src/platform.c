@@ -939,6 +939,11 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
     struct object_list *list;
     uint32_t i;
     if (rh_validate_view(current) || (previous && rh_validate_view(previous))) return -1;
+#if defined(RH_TARGET_1043) && RH_TARGET_1043 && (defined(__arm__) || defined(__thumb__))
+    /* This stage follows font reload as well as image retirement. Source
+     * pointer equality cannot prove cached battery pixels are still current. */
+    p67_battery_invalidate();
+#endif
     if (!current->count && (!previous || !previous->count)) return 0;
     list = rh_platform_alloc(sizeof(*list));
     if (!list) return -1;

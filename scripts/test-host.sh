@@ -38,6 +38,7 @@ CC="$CC" python3 "$ROOT/tests/test_launcher_background_native.py"
 CC="$CC" python3 "$ROOT/tests/test_blur_background_native.py"
 python3 "$ROOT/tests/test_p67_launcher_native.py"
 CC="$CC" python3 "$ROOT/tests/test_p67_blur_provider.py"
+CC="$CC" python3 "$ROOT/tests/test_p67_battery.py"
 # Production native blur must link without a diagnostic getter; the opt-in
 # variant separately exercises the existing bounded diagnostic writer.
 "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
