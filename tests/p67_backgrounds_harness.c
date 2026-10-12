@@ -35,6 +35,15 @@ static unsigned buffer_releases, pool_releases, image_deletes, end_bookkeeping;
 static unsigned begin_bookkeeping, end_reentry;
 static int native_buffer, reenter_on_end, delete_on_end;
 static uint32_t timer_resume_hook;
+static uint32_t edit_container_slot;
+static unsigned edit_opa_calls;
+static uint32_t last_edit_opa_obj, last_edit_opa_val;
+static void set_bg_opa(uint32_t obj, uint32_t val, uint32_t selector) {
+    (void)selector;
+    ++edit_opa_calls;
+    last_edit_opa_obj = obj;
+    last_edit_opa_val = val;
+}
 static unsigned timer_resets, timer_resumes, predelete_reentry;
 static int reenter_before_delete;
 static uint32_t populated;
@@ -76,6 +85,7 @@ static uint32_t load32(uint32_t a) {
     if(a==0x2010fe50u || a==0x20110ef4u || a==0x201100e0u) return surface_root;
     if(a==0x2010fe64u || a==0x20110ed4u || a==0x201100ccu) return surface_image;
     if(a==0x20110ee8u || a==0x201100dcu) return populated;
+    if(a==0x2010fe80u) return edit_container_slot;
     if(a==0x20103218u) return timer_resume_hook;
     if (a == 0x201102ecu) return root_slot;
     if (a == 0x201102dcu) return image_slot;
@@ -247,6 +257,7 @@ static uintptr_t native(uint32_t a) {
     case 0x0c588351u: return (uintptr_t)rect_draw;
     case 0x0c5882b9u: return (uintptr_t)image_init;
     case 0x0c5882a1u: return (uintptr_t)image_draw;
+    case 0x0c5883f9u: return (uintptr_t)set_bg_opa;
     default: assert(!"unknown native call"); return 0;
     }
 }
@@ -989,5 +1000,44 @@ int main(void) {
   s->moving=1;check_steady_scroll(s);s->moving=0;
   p67_blur_source=0;s->owner=s->page=s->root=0;s->path[0]=0;
  }
+
+ {
+  /* Control Center edit button transparency hook. */
+  struct p67_surface *cc = &p67_surfaces[0];
+  memset(cc, 0, sizeof(*cc));
+  cc->root_slot = 0x2010fe50u;
+  cc->callback = 0x0c5036c5u;
+  strcpy(cc->path, "themes/test/cc.bin");
+  surface_root = LIST;
+  object(LIST)->live = 1;
+  object(LIST)->parent = PAGE;
+  object(PAGE)->live = 1;
+  object(PAGE)->parent = OWNER;
+  object(OWNER)->live = 1;
+  object(OWNER)->d[0][0] = cc->callback;
+  object(OWNER)->d[0][1] = PAGE;
+  object(OWNER)->d[0][2] = 0;
+  object(OWNER)->count = 1;
+  p67_surface_poll(cc);
+  assert(p67_surface_binding_valid(cc));
+
+  edit_container_slot = FOREGROUND;
+  object(FOREGROUND)->live = 1;
+  edit_opa_calls = 0;
+  rh_platform_backgrounds_poll();
+  assert(edit_opa_calls == 1);
+  assert(last_edit_opa_obj == FOREGROUND && last_edit_opa_val == 0u);
+
+  /* Idempotent: poll does not repeatedly call style setter. */
+  rh_platform_backgrounds_poll();
+  assert(edit_opa_calls == 1);
+
+  /* Detaching restores opaque background. */
+  p67_surface_detach(cc);
+  assert(edit_opa_calls == 2);
+  assert(last_edit_opa_obj == FOREGROUND && last_edit_opa_val == 255u);
+  edit_container_slot = 0;
+ }
+
  puts("p67 three native-owned live surfaces and deferred blur modes passed");return 0;
 }

@@ -30,6 +30,37 @@ static void p67_surface_event(void *event);
 static void p67_surface_scroll_for(struct p67_surface *s,void *event);
 static void p67_surface_refresh_list(struct p67_surface *s);
 static uint32_t p67_surface_serial;
+
+/* Exact .043 Control Center edit button container transparency hook.
+ * The firmware's sub_C504C20 creates the 336x78 container at 0x2010FE80, but
+ * omits resetting its bg_opa to 0 (unlike header/status and list containers).
+ * Neutralize the opaque black background to reveal the wallpaper beneath. */
+#define P67_CC_EDIT_CONTAINER_SLOT 0x2010fe80u
+#define P67_CC_SET_STYLE_BG_OPA 0x0c5883f9u
+
+static uint32_t p67_cc_edit_neutralized;
+
+static void p67_cc_edit_detach(void) {
+    if (p67_cc_edit_neutralized && p67_live(p67_cc_edit_neutralized)) {
+        ((void (*)(uint32_t, uint32_t, uint32_t))(uintptr_t)
+            P67_NATIVE(P67_CC_SET_STYLE_BG_OPA))(p67_cc_edit_neutralized, 255u, 0u);
+    }
+    p67_cc_edit_neutralized = 0;
+}
+
+static void p67_cc_edit_poll(int enabled) {
+    uint32_t container;
+    if (!enabled) {
+        p67_cc_edit_detach();
+        return;
+    }
+    container = load32(P67_CC_EDIT_CONTAINER_SLOT);
+    if (!container || !p67_live(container) || container == p67_cc_edit_neutralized) return;
+    ((void (*)(uint32_t, uint32_t, uint32_t))(uintptr_t)
+        P67_NATIVE(P67_CC_SET_STYLE_BG_OPA))(container, 0u, 0u);
+    p67_cc_edit_neutralized = container;
+}
+
 static void p67_scroll_cc(void *e) { p67_surface_scroll_for(&p67_surfaces[0],e); }
 static void p67_scroll_notify(void *e) { p67_surface_scroll_for(&p67_surfaces[1],e); }
 static void p67_scroll_widget(void *e) { p67_surface_scroll_for(&p67_surfaces[2],e); }
@@ -118,7 +149,10 @@ static void p67_surface_end(struct p67_surface *s) {
 }
 static void p67_surface_detach(struct p67_surface *s) {
     uint32_t *d;
-    if(s==&p67_surfaces[0]) p67_battery_detach();
+    if(s==&p67_surfaces[0]) {
+        p67_battery_detach();
+        p67_cc_edit_detach();
+    }
     p67_blur_session_clear(&s->session,p67_surface_entry_bit(s));
     p67_surface_native(s);
     if (p67_live(s->owner)) {
@@ -369,6 +403,8 @@ void rh_platform_backgrounds_poll(void) {
     p67_blur_watch(demand); p67_launcher_poll();
     for(i=0;i<3;++i) p67_surface_poll(&p67_surfaces[i]);
     p67_battery_poll(p67_surface_path(&p67_surfaces[0])[0] &&
+                     p67_surface_binding_valid(&p67_surfaces[0]));
+    p67_cc_edit_poll(p67_surface_path(&p67_surfaces[0])[0] &&
                      p67_surface_binding_valid(&p67_surfaces[0]));
 }
 static int p67_stage_path(const char *path) {
