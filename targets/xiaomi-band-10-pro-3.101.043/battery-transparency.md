@@ -16,7 +16,7 @@ Native battery (white backing -> fill -> black cutout / charging icon)
                     |
           drain LVGL tasks + GPU fence
                     |
-          invalidate -> #000 alpha=0 -> clean
+          invalidate -> mask-driven alpha recovery -> clean
                     |
    immutable image task at current object coordinates + current layer clip
 ```
@@ -26,11 +26,68 @@ with the native image task, and the cutout has already removed square white
 corners before the black pixels become transparent. No display framebuffer is
 read or written by the adapter.
 
-The literal key removes **all exact RGB black** pixels in this battery-only
-image, including intentional internal black pixels. Near-black / gray pixels
-are retained; this is not an antialiasing reconstruction and may retain a dark
-edge on a light wallpaper. No color threshold is applied, since it would erase
-valid dark content. White backing, colored fill and nonblack alpha are retained.
+The original literal black key left opaque gray antialiasing fringes on the
+user's device. The new path samples the **actual mapped black mask** through
+the native image decoder and reconstructs coverage, rather than thresholding
+battery colors. For a source-over black mask with alpha `k`, output alpha `A`
+contains both the mask and battery: the corrected alpha is `max(A-k,0)`.
+Premultiplied RGB already holds the desired covered battery color and is left
+unchanged. Straight RGB, if reported by the native descriptor, is recovered
+with `RGB * A / corrected_alpha`. Zero-alpha pixels have zero RGB.
+
+Only covered mask pixels are corrected. Unmasked dark text, gray fill and the
+later charging overlay are not blanket color-keyed. Values incompatible with
+a mask-last pixel are conservatively preserved (one 8-bit unit of rounding
+tolerance). A centered charging image is drawn after the mask: the integration
+caches its actual 16x48 alpha and removes only the surviving black contribution,
+`k * (1 - charging_alpha)`. This preserves the glyph and clears the black behind
+its transparent pixels; excluding its entire rectangle would leave black strips.
+Noncentered charging starts at `x2+2`, outside the used mask rectangle.
+Do not run this operation twice on the same snapshot or run the old key after it.
+
+## Strict recovery: no fallback
+
+The legacy black-color key has been removed. A bound battery submits only a
+successfully recovered image. Unsupported resources, failed sampling, stale
+state and allocation/GPU failures leave the battery undrawn until recovery
+succeeds; they never substitute the old key or native on-screen DRAW_MAIN.
+Native DRAW_MAIN is still called for deliberate offscreen capture, and other
+native events retain their original lifecycle/layout handling. Disabling custom
+backgrounds restores the original native class as an explicit configuration
+change, not an error fallback.
+
+## Screen-size sampler bug and diagnostics
+
+The first edge-recovery build created the sampling image with parent=NULL.
+That makes it a screen with display-sized coordinates (336x480), even after
+set_size(64,36). Size refresh at 0x1C02B374 exits when parent is NULL
+(0x1C02B394 -> 0x1C02B448); it does not resize screen coordinates. Snapshot
+0x1C06035E therefore requests display-sized storage, which reshape 0x1C03191C
+rejects against the small alpha-sampling allocation. This static defect explains
+why recovery could never become ready, while silent fallback hid the error.
+
+The corrected sampler creates an unthemed inactive root IMAGE and a second,
+unthemed CHILD image. Source, size and snapshot apply to the child only; the
+display-sized root is never sampled. Deleting the retained root recursively
+deletes the child after verified LVGL/GPU completion. The host model now enforces
+the real parentless-screen resize prohibition and checks actual coordinates
+against the requested snapshot dimensions.
+
+The serialized UI poll writes a bounded snapshot to:
+
+`/data/offlinelog/resource-hook-p67-battery.log`
+
+Header `P67BATTERY2`, build `alpha-strict-diag-1`. It records mode/reason,
+sample kind (mask/charge/main/draw), actual style values, source header/intrinsic
+dimensions, **coordinate-derived draw dimensions**, extra size, snapshot result,
+buffer dimensions/flags, alpha min/max/counts and the first nonblack sample.
+Only latched integers are formatted; draw/DELETE never perform diagnostic I/O.
+Writes are deduplicated and rate-limited, and replace rather than append the
+file. Failed writes have a bounded retry cooldown.
+
+A valid fractional black mask need not contain alpha exactly 255. Validation
+requires transparent and nonzero coverage, not an unnecessary exact-opaque
+sample. No RGB threshold is introduced.
 
 ## Exact recovered ABI
 
@@ -50,6 +107,8 @@ valid dark content. White backing, colored fill and nonblack alpha are retained.
 | `0x0C588F89` / `0x0C588449` | CPU cache clean / invalidate |
 | `0x0CAC0DB9` | Draw-buffer destruction |
 | `0x0C5882B9` / `0x0C5882A1` | 112-byte image descriptor init / image submission |
+| `0x0C588D59` | Image creation `(parent, init_options)`; explicit byte-zero options disable theming |
+| `0x0C587FA1` / `0x0C588629` / `0x0C588DE9` | Mask image source / dimensions / deletion |
 
 Native Control Center construction at `0x0C504C20`, battery creation at
 `0x0C504D28`, establishes the battery as a direct child of the status bar.
@@ -82,7 +141,31 @@ size, giving a **122x92** snapshot. ARGB8888 raw storage is 44,896 bytes
 (~43.8 KiB); actual native stride/alignment and allocation overhead apply.
 The earlier 64x36 / 4.5 KiB proposal was incorrect. There is one persistent
 native buffer, bounded to 128x128 geometry and a validated native allocation.
-No buffer is allocated per frame.
+No buffer is allocated per frame. The coverage caches add **3,072 CPU bytes**:
+2,304 for the mask and 768 for centered charging. One auxiliary ARGB8888 buffer
+(64x36: 9,216 raw bytes; 16x48 charging: 3,072 raw bytes; plus native overhead)
+and an unthemed inactive root image with one resizable child image exist only
+while sampling a new source. Only the child is captured.
+The same auxiliary ownership slots serve both captures, never concurrently. They
+are released after successful queue drain and GPU completion; failed fences
+pin that bounded auxiliary allocation for later safe cleanup. No new copy is
+allocated until retained storage is safely released.
+
+The native mask image is 64x36, but the battery draw passes the destination
+`{x1-2,y1-1,x2,y2}` with stock properties 104/105 zero. GPU drawing uses the
+supplied blit width/height: **64x33** for the stock 62x32 battery, not all 36
+source rows. Recovery samples the full mask, then processes only the used
+source rectangle at `(extra-2,extra-1)` within the main snapshot. Style image
+opacity (68), recolor opacity (70), transform width/height (104/105) must have
+stock defaults; otherwise source coverage alone is not sufficient and recovery
+falls back.
+
+GPU dispatcher `0x1C045360` sets image-header flag `PREMULTIPLIED` (bit 0 at
+buffer+2). Creation starts with allocation/modifiability flags 0x30; the adapter
+checks the final flag rather than assuming straight RGB. In the normal GPU
+case, correcting edge pixels therefore requires alpha subtraction, **no RGB
+division**. Coverage is sampled only on source/revision changes; charge-state
+updates reuse the CPU coverage cache and scrolling only submits cached pixels.
 
 The snapshot area is the current object coordinates (+28..+40), expanded by
 extended draw size in all directions. The image is placed at that same area
@@ -90,7 +173,9 @@ on every draw, not the position used during capture.
 
 The immutable cache key comprises width/height/extra, bytes +52..+71
 (sources, cached image dimensions, extra), and bytes +80..+101 (level,
-colors and charge/percentage/position flags). It excludes absolute position
+colors and charge/percentage/position flags). Fields +60/+64 are the cached
+**charging image** dimensions from source +56, not the mask dimensions; witness
+`0x0C4C2092`. It excludes absolute position
 and callback/event pointers at +72..+79. Capture may initialize +60/+64 from
 -1 to source dimensions, and invokes layout; the adapter records the key
 **after** capture and revalidates geometry, binding and generation. Resource/font
@@ -124,7 +209,9 @@ Exact target-pack restricted symbol evidence accompanies the build; no broad
 address ranges or public approvals are added to satisfy verification.
 
 The user reported **device test PASS** for the signed .043 battery-transparent
-package on 2026-10-11. Tested module SHA256:
+package on 2026-10-11, and subsequently reported antialiased gray fringes.
+The mask-driven correction described above has **not yet been device-tested**.
+Previously tested module SHA256:
 `f4d9ae2d0b282c81772720d31145701b3c39858b74ebd77ab875dea993df44c3`.
 This establishes user-reported acceptance of the delivered rendering change,
 not an instrumented cache-coherency, GPU-failure, latency or frame-time probe.
