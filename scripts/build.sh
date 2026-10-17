@@ -1,17 +1,11 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus"}
-if [ -z "${CANOPUS_ROOT:-}" ] && [ ! -d "$SDK" ]; then
-    SDK="$ROOT/../Canopus-Private"
-fi
+SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus-Private"}
 [ "$#" -le 1 ] || { printf 'usage: build.sh [target-id]\n' >&2; exit 1; }
 TARGET_ID=${1:-xiaomi-band-11-4.100.139}
 case "$TARGET_ID" in
-    xiaomi-band-11-4.100.139) TARGET_DEFINE=; NATIVE_PLATFORM=platform_band11 ;;
-    xiaomi-band-11-4.100.177) TARGET_DEFINE=-DRH_TARGET_177=1; NATIVE_PLATFORM=platform_band11 ;;
-    xiaomi-band-11-4.100.155) TARGET_DEFINE=-DRH_TARGET_155=1; NATIVE_PLATFORM=platform_band11 ;;
-    xiaomi-band-10-pro-3.101.043) TARGET_DEFINE=-DRH_TARGET_1043=1; NATIVE_PLATFORM=platform_band10pro ;;
+    xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.177|xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043) ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 # One complete product per exact target. Refuse stale product selectors,
@@ -22,11 +16,14 @@ for legacy in RH_P67_LIVE_LAUNCHER RH_P67_LIVE_BACKGROUNDS RH_P67_BLUR_NATIVE; d
 done
 if [ "${RH_P67_BLUR_DIAGNOSTICS:-0}" = 1 ]; then
     [ "$TARGET_ID" = xiaomi-band-10-pro-3.101.043 ] || { printf 'Blur diagnostics requires exact .043 target.\n' >&2; exit 1; }
-    TARGET_DEFINE="$TARGET_DEFINE -DRH_P67_BLUR_DIAGNOSTICS=1"
 fi
 CC=${CC:-cc}
 CLANG=${CLANG:-clang}
 LD_LLD=${LD_LLD:-ld.lld}
+if [ -z "${CANOPUS_CLI:-}" ] && [ ! -x "$SDK/target/debug/canopus" ] && \
+    [ -x "$ROOT/build/canopus-cli/debug/canopus" ]; then
+    CANOPUS_CLI="$ROOT/build/canopus-cli/debug/canopus"
+fi
 CANOPUS_CLI=${CANOPUS_CLI:-"$SDK/target/debug/canopus"}
 for tool in "$CC" "$CLANG" "$LD_LLD"; do
     command -v "$tool" >/dev/null 2>&1 || { printf 'Missing tool: %s\n' "$tool" >&2; exit 1; }
@@ -52,25 +49,9 @@ if (metadata.get('target_id') != target or metadata.get('firmware_sha256') != fi
         or not identity or identity[1] != target or header_hash != firmware):
     raise SystemExit('Framework target/firmware identity mismatch')
 PY
-CANOPUS_ROOT="$SDK" CC="$CC" sh "$ROOT/scripts/test-host.sh"
-for name in module resource_hook config calendar_config calendar_icon calendar_native launcher_background platform "$NATIVE_PLATFORM" font_reload quickapp_icon; do
-    "$CLANG" -Wall -Wextra -Werror --target=arm-none-eabi -mcpu=cortex-m33 -mthumb \
-        -mfloat-abi=soft -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
-        -Os $TARGET_DEFINE -I"$SDK/sdk/c" -I"$SDK/manager/target/band11" \
-        -I"$SDK/targets/$TARGET_ID/generated" -I"$ROOT/include" \
-        -c "$ROOT/src/$name.c" -o "$ROOT/build/$name.o"
-done
-"$CLANG" -Wall -Wextra -Werror --target=arm-none-eabi -mcpu=cortex-m33 -mthumb \
-    -mfloat-abi=soft -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
-    -Os -I"$SDK/sdk/c" -c "$SDK/runtime/control/canopus_control.c" -o "$ROOT/build/control.o"
-"$LD_LLD" -r -T "$SDK/scripts/canopus_supervisor_sections.ld" \
-    "$ROOT/build/module.o" "$ROOT/build/resource_hook.o" "$ROOT/build/config.o" \
-    "$ROOT/build/launcher_background.o" "$ROOT/build/calendar_config.o" \
-    "$ROOT/build/calendar_icon.o" "$ROOT/build/calendar_native.o" \
-    "$ROOT/build/platform.o" "$ROOT/build/$NATIVE_PLATFORM.o" "$ROOT/build/font_reload.o" \
-    "$ROOT/build/quickapp_icon.o" \
-    "$ROOT/build/control.o" -o "$ROOT/build/resource-hook.elf"
-"$CANOPUS_CLI" verify "$ROOT/build/resource-hook.elf" \
-    --target "$TARGET_ID" --targets-dir "$SDK/targets"
+CANOPUS_ROOT="$SDK" CANOPUS_CLI="$CANOPUS_CLI" CC="$CC" sh "$ROOT/scripts/test-host.sh"
+CANOPUS_ROOT="$SDK" CC="$ROOT/scripts/canopus-cc.py" CLANG="$CLANG" LD="$LD_LLD" \
+    "$CANOPUS_CLI" build --manifest "$ROOT/Canopus.toml" --target "$TARGET_ID"
+cp "$ROOT/build/$TARGET_ID/corona.elf" "$ROOT/build/resource-hook.elf"
 printf 'Built resource-hook.elf for %s. Static/build verification only; this artifact and .177 device behavior: NOT_PROBED.\n' "$TARGET_ID"
 printf 'GPU recovery and framework restart safety remain unsupported.\n'

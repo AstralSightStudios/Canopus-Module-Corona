@@ -1,11 +1,23 @@
 schema = 1
 [module]
-id = "ng.lst.corona"
+id = "corona"
 version = "0.3.0"
+version_code = 3
+kind = "target"
 language = "c"
 lifecycle = "resident-after-activation"
 canopus_abi = "1"
+[build]
+sources = [
+    "src/module.c", "src/resource_hook.c", "src/config.c",
+    "src/calendar_config.c", "src/calendar_icon.c", "src/calendar_native.c",
+    "src/launcher_background.c", "src/platform.c", "src/platform_memory.c",
+    "src/font_reload.c", "src/quickapp_icon.c",
+    "${CANOPUS_ROOT}/runtime/control/canopus_control.c",
+]
+include_dirs = ["include", "${CANOPUS_ROOT}/manager/target/band11"]
+
 [targets]
 include = ["xiaomi-band-11-4.100.177", "xiaomi-band-11-4.100.139", "xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043"]
 [capabilities]
-required = ["identity-guard"]
+required = []

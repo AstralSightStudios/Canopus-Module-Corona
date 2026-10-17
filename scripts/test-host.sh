@@ -4,11 +4,14 @@ set -eu
 # Exact .177 pack/fingerprint checks are also available via tests/test_target_177.py;
 # they require the reviewed private pack and AP, unlike portable host suites.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus"}
-if [ -z "${CANOPUS_ROOT:-}" ] && [ ! -d "$SDK" ]; then
-    SDK="$ROOT/../Canopus-Private"
-fi
+SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus-Private"}
 CC=${CC:-cc}
+if [ -z "${CANOPUS_CLI:-}" ] && [ ! -x "$SDK/target/debug/canopus" ] && \
+    [ -x "$ROOT/build/canopus-cli/debug/canopus" ]; then
+    CANOPUS_CLI="$ROOT/build/canopus-cli/debug/canopus"
+    export CANOPUS_CLI
+fi
+export CANOPUS_ROOT="$SDK"
 [ -f "$SDK/sdk/c/canopus_abi.h" ] || { printf 'Set CANOPUS_ROOT to the Canopus checkout.\n' >&2; exit 1; }
 mkdir -p "$ROOT/build"
 for test in hook boundaries; do
