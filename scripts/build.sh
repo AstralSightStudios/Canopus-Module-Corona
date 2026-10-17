@@ -50,7 +50,8 @@ if (metadata.get('target_id') != target or metadata.get('firmware_sha256') != fi
     raise SystemExit('Framework target/firmware identity mismatch')
 PY
 CANOPUS_ROOT="$SDK" CANOPUS_CLI="$CANOPUS_CLI" CC="$CC" sh "$ROOT/scripts/test-host.sh"
-CANOPUS_ROOT="$SDK" CC="$ROOT/scripts/canopus-cc.py" CLANG="$CLANG" LD="$LD_LLD" \
+CANOPUS_ROOT="$SDK" CC="$ROOT/scripts/canopus-cc.py" CLANG="$CLANG" \
+    LD="$ROOT/scripts/canopus-ld.sh" LD_LLD="$LD_LLD" \
     "$CANOPUS_CLI" build --manifest "$ROOT/Canopus.toml" --target "$TARGET_ID"
 cp "$ROOT/build/$TARGET_ID/corona.elf" "$ROOT/build/resource-hook.elf"
 printf 'Built resource-hook.elf for %s. Static/build verification only; this artifact and .177 device behavior: NOT_PROBED.\n' "$TARGET_ID"

@@ -31,7 +31,10 @@ def main():
         if target != 'xiaomi-band-10-pro-3.101.043':
             sys.exit('Blur diagnostics requires exact .043 target')
         flags.append('-DRH_P67_BLUR_DIAGNOSTICS=1')
-    return subprocess.call([os.environ.get('CLANG', 'clang'), *flags, *args])
+    # The custom loader has a fixed section budget. Keep ARM exception-index
+    # sections per translation unit; the linker merges ordinary sections.
+    return subprocess.call([os.environ.get('CLANG', 'clang'), *flags, *args,
+                            '-fno-function-sections', '-fno-data-sections'])
 
 
 if __name__ == '__main__':
