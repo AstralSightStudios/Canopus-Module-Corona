@@ -140,17 +140,23 @@ GPU 故障恢复与帧时间仍未验证，详见
 sh scripts/build.sh xiaomi-band-11-4.100.155
 sh scripts/build.sh xiaomi-band-10-pro-3.101.043
 
-# Build the unsigned CMI2 installer (font reload is included by default)
-python3 scripts/build-watchface.py --target xiaomi-band-10-pro-3.101.043
-
-# 2. 运行宿主单测 (包含紧凑算法差分与边界测试)
-python3 tests/test_delivery.py
-
-# 3. 完整打包交付（CMI2，无需签名密钥；产物生成到 dist 目录）
+# 2. 生成原生模块交付（.canopus + CMI2，无需签名密钥）
 python3 scripts/build-delivery.py dist/0.3.0-155 --target xiaomi-band-11-4.100.155
+
+# 3. 对已有 payload 运行交付校验测试
+RESOURCE_HOOK_PAYLOAD=dist/0.3.0-155/payload/xiaomi-band-11-4.100.155 \
+  RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.155 python3 tests/test_delivery.py
 ```
 
-构建全部 target 后，可用新 CLI 生成统一模块包：
+原生交付目录根部的 `corona-0.3.0.canopus` 是可安装模块包，通过 AstroBox 的 Canopus
+入口安装。四个 target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
+Canopus 处理。主题文件和 Corona Manager 仍单独安装，不放进原生模块包。
+默认交付运行宿主与产物校验；如需同时执行固件仿真，追加 `--firmware-tests`。
+
+Supervisor 的安装表盘仍用于引导框架。`build-watchface.py` 和
+`build-quickapp-watchface.py` 是保留的旧模块投递工具，不属于新版默认交付。
+
+构建全部 target 后，也可用新 CLI 生成统一模块包：
 
 ```sh
 for target in xiaomi-band-11-4.100.139 xiaomi-band-11-4.100.155 \

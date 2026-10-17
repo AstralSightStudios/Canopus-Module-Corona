@@ -2,8 +2,10 @@
 
 适用交付：Canopus-Module-Resource-Hook **0.3.0**，支持 Xiaomi Band 11
 **4.100.139 / 4.100.155 / 4.100.177** 与 Xiaomi Band 10 Pro **3.101.043**。各固件使用独立
-ELF 和收据，不能混用。新框架使用 `.canopus` 包及无签名 CMI2 回执；安装器从包中提取
-精确 target 的 ELF 和回执。当前新版框架下 `.043` 仍被两项既有地址的 target 白名单
+ELF 和收据，不能混用。新版模块交付为 `.canopus` 包，包含按精确 target 绑定的
+ELF 和无签名 CMI2 回执。AstroBox 的 Canopus 入口查询设备 target，选择对应产物，
+通过 WearPacket L2 `0x43` / CPC2 原生分块安装；四个目标遵循相同协议，通信后端由框架适配。
+Supervisor 的安装表盘只负责引导框架，模块无需安装表盘。当前新版框架下 `.043` 仍被两项既有地址的 target 白名单
 缺口拦截，尚不能生成通过校验的交付；详情见 [构建状态](../README.md#常用命令)。
 用户已反馈三个目标的正常字体重载实机验收通过（**USER_REPORTED_PASS**），字体事务
 现已默认启用；该反馈不自动覆盖 GPU 故障、框架重启或所有资源 owner，也不代表新生成
@@ -69,10 +71,10 @@ CMI2 校验模块 ID、版本、生命周期、精确 target、固件 SHA-256 �
 3. 检查 `mappings.tsv.example`，按实际资源源路径修改，然后保存为
    `/data/quickapp/files/ng.lst.corona/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
    不意味着固件的所有字体和图片都经过这个目录。
-4. 使用新版框架的 `.canopus` 安装流程，或导入匹配的 ELF 和 receipt。
-   自定义安装器应写 `/data/canopus/inbox/<token>.ko.next` 和 `<token>.cmi.next`，
-   然后提交 CPC2 INSTALL。**仅复制文件不等于完成安装**；不要直接编辑 registry.bin
-   或直接调用 ELF。升级返回 `REBOOT_REQUIRED(8)` 也表示成功，重启后生效。
+4. 在 AstroBox 的 Canopus 入口选择交付目录根部的 `corona-0.3.0.canopus`。
+   客户端查询设备精确 target、选择并校验回执与 ELF，再通过原生通道暂存并提交 INSTALL。
+   新装模块保持禁用；升级返回 `REBOOT_REQUIRED(8)` 也表示成功，重启并重新引导框架后生效。
+   主题资源与 Corona Manager 单独安装，原生模块包不包含主题资源。
 5. 在 Manager 的模块列表打开 `corona` 详情，点击“启用”并确认。
    “启用”只保存下次启动的启用意图，**不**立即安装 Hook；“已启用”
    不能作为已经生效的证明。
