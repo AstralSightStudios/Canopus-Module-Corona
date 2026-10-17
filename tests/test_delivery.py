@@ -48,6 +48,9 @@ class FirmwareSelection(unittest.TestCase):
                 self.assertNotIn('firmware_quickapp_reload_1043', suites)
                 self.assertEqual(suites['firmware_calendar'][-2:], ['--target', target])
 
+    def test_177_has_no_unrelated_firmware_suites(self):
+        self.assertEqual(self.suites('xiaomi-band-11-4.100.177'), {})
+
     def test_unknown_native_target_refused(self):
         with self.assertRaisesRegex(ValueError, 'unsupported target'):
             self.suites('xiaomi-band-11-4.100.108')
@@ -58,12 +61,11 @@ class Delivery(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='resource-hook-delivery-test-')
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
-        for name in ('receipt.bin', 'resource-hook.elf', 'signer-public.pem'):
+        for name in ('receipt.bin', 'resource-hook.elf'):
             shutil.copyfile(PAYLOAD / name, self.directory / name)
-        self.key = self.directory / 'signer-public.pem'
 
     def check(self):
-        return verifier.verify(self.directory, self.key, TARGET)
+        return verifier.verify(self.directory, TARGET)
 
     def test_valid_receipt(self):
         self.assertEqual(len(self.check()), 64)
@@ -71,7 +73,7 @@ class Delivery(unittest.TestCase):
     def test_wrong_expected_target(self):
         other = next(target for target in verifier.TARGETS if target != TARGET)
         with self.assertRaisesRegex(ValueError, 'target ID'):
-            verifier.verify(self.directory, self.key, other)
+            verifier.verify(self.directory, other)
 
     def test_tampered_artifact(self):
         p = self.directory / 'resource-hook.elf'
@@ -79,16 +81,16 @@ class Delivery(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'digest'):
             self.check()
 
-    def test_tampered_signature(self):
+    def test_tampered_receipt_digest(self):
         p = self.directory / 'receipt.bin'
         b = bytearray(p.read_bytes()); b[-1] ^= 1; p.write_bytes(b)
-        with self.assertRaisesRegex(ValueError, 'signature'):
+        with self.assertRaisesRegex(ValueError, 'digest'):
             self.check()
 
     def test_wrong_identity_version_and_lifecycle(self):
         p = self.directory / 'receipt.bin'
         original = p.read_bytes()
-        for offset in (4, 8, 12, 16, 20, 24, 28, 32, 64, 112, 176):
+        for offset in (0, 4, 8, 12, 16, 20, 24, 28, 32, 64, 112):
             with self.subTest(offset=offset):
                 b = bytearray(original); b[offset] ^= 1; p.write_bytes(b)
                 with self.assertRaises(ValueError):
@@ -97,30 +99,33 @@ class Delivery(unittest.TestCase):
     def test_receipt_truncation_and_trailing_data(self):
         p = self.directory / 'receipt.bin'
         original = p.read_bytes()
-        for size in (0, 31, 192, 255, 257):
-            p.write_bytes((original + b'x')[:size])
-            with self.subTest(size=size), self.assertRaisesRegex(ValueError, '256'):
+        for size in (0, 31, 175, 177, 256):
+            p.write_bytes((original + bytes(80))[:size])
+            with self.subTest(size=size), self.assertRaisesRegex(ValueError, '176'):
                 self.check()
 
-    def test_wrong_trusted_key(self):
-        private = self.directory / 'untrusted-private.pem'
-        subprocess.run(['openssl', 'genpkey', '-algorithm', 'ED25519', '-out', str(private)],
-                       check=True, capture_output=True)
-        subprocess.run(['openssl', 'pkey', '-in', str(private), '-pubout', '-out', str(self.key)],
-                       check=True, capture_output=True)
-        with self.assertRaisesRegex(ValueError, 'signature'):
-            self.check()
+    def test_package_contains_the_verified_payload_and_receipt(self):
+        import tarfile
+        with tarfile.open(PAYLOAD / 'corona-0.3.0.canopus') as archive:
+            self.assertEqual(archive.extractfile(f'artifacts/{TARGET}/module.elf').read(),
+                             (PAYLOAD / 'resource-hook.elf').read_bytes())
+            self.assertEqual(archive.extractfile(f'receipts/{TARGET}.cmi').read(),
+                             (PAYLOAD / 'receipt.bin').read_bytes())
+        self.assertFalse((PAYLOAD / 'signer-public.pem').exists())
 
     def test_manifest_and_release_identity(self):
         manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
         metadata = json.loads((PAYLOAD / 'release.json').read_text())
-        self.assertEqual(manifest['module']['id'], 'ng.lst.corona')
+        self.assertEqual(manifest['module']['id'], 'corona')
         self.assertEqual(manifest['module']['version'], '0.3.0')
         self.assertEqual(metadata['project_id'], manifest['module']['id'])
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)
         self.assertEqual(metadata['version'], manifest['module']['version'])
         self.assertEqual(metadata['physical_device'], 'NOT_PROBED')
-        self.assertEqual(metadata['font_reload_device_status'], 'USER_REPORTED_PASS')
+        self.assertEqual(metadata['font_reload_device_status'],
+                         'NOT_PROBED' if TARGET.endswith('4.100.177') else 'USER_REPORTED_PASS')
+        self.assertEqual(metadata['receipt_format_version'], 2)
+        self.assertEqual(metadata['format'], 'elf-cmi2')
         self.assertTrue(metadata['font_reload'])
         self.assertEqual(metadata['module_build_id'], 'resource-hook-0.3.0')
         self.assertEqual(metadata['gpu_recovery'], 'UNSUPPORTED')
@@ -139,7 +144,8 @@ class Delivery(unittest.TestCase):
         source = ROOT / 'targets' / TARGET
         expected = [item for item in source.iterdir()
                     if item.is_file() and item.suffix in ('.json', '.md')]
-        self.assertTrue(any(item.name.startswith('font-reload') for item in expected))
+        if not TARGET.endswith('4.100.177'):
+            self.assertTrue(any(item.name.startswith('font-reload') for item in expected))
         for item in expected:
             self.assertEqual((PAYLOAD / 'evidence' / item.name).read_bytes(), item.read_bytes())
         checksums = (PAYLOAD / 'SHA256SUMS').read_text()

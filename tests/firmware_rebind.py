@@ -37,9 +37,10 @@ class Rebind(unittest.TestCase):
     def load_fixture(self, enabled):
         elf_path, receipt_path = PAYLOAD / 'resource-hook.elf', PAYLOAD / 'receipt.bin'
         if not elf_path.exists() or not receipt_path.exists():
-            self.fail(f'build the signed {TARGET} payload in {PAYLOAD} before running firmware_rebind.py')
+            self.fail(f'build the CMI2 {TARGET} payload in {PAYLOAD} before running firmware_rebind.py')
         elf, receipt = elf_path.read_bytes(), receipt_path.read_bytes()
-        self.assertEqual(len(receipt), 256)
+        self.assertEqual(len(receipt), 176)
+        self.assertEqual(receipt[:4], b'CMI2')
         self.assertEqual(receipt[32:64].split(b'\0')[0], b'corona')
         self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'),
                          'fixture receipt must match RESOURCE_HOOK_TARGET')
@@ -50,8 +51,8 @@ class Rebind(unittest.TestCase):
         record = bytearray(registry('corona', lifecycle, version))
         struct.pack_into('<I', record, 60, int(enabled))
         m.disk['/data/canopus/registry.bin'] = bytes(record)
-        m.disk['/data/canopus/inbox/corona.cmi'] = receipt
-        m.disk['/data/canopus/inbox/corona.ko'] = elf
+        m.disk['/data/canopus/inbox/corona.cmi.next'] = receipt
+        m.disk['/data/canopus/inbox/corona.ko.next'] = elf
         m.disk[CONFIG_PATH] = '/resource/\tthemes/current/\n'.encode()
         m.disk[THEME_ROOT + 'current/a.bin'] = b'mapped file'
         # The bootstrap VFS deliberately accepts only Supervisor-owned paths.
@@ -218,10 +219,6 @@ class Rebind(unittest.TestCase):
         self.assertEqual(m.call(m.word(m.fops + 8)), 384)
         self.assertEqual(m.word(status), 0x43505331)
         error = m.word(status + 32)
-        if error == (-103 & 0xffffffff):  # CANOPUS_SUP_ERR_STAGE_SIGNATURE
-            self.fail('Supervisor rejected the fixture receipt signature (-103); '
-                      'provide a payload signed by its independently trusted key. '
-                      'Do not replace that key with a bundled payload key.')
         return m.word(status + 24), error
 
     def test_resident_elf_reinstalls_same_callback_without_reloading_image(self):

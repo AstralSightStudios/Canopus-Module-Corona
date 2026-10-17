@@ -1,78 +1,27 @@
 #!/usr/bin/env python3
-"""Build signed Resource Hook watchfaces for exact supported firmware targets."""
+"""Build Resource Hook watchfaces with Canopus-generated unsigned CMI2 receipts."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CANOPUS = ROOT.parent / 'Canopus'
-if not DEFAULT_CANOPUS.is_dir():
-    DEFAULT_CANOPUS = ROOT.parent / 'Canopus-Private'
+DEFAULT_CANOPUS = ROOT.parent / 'Canopus-Private'
 CANOPUS = Path(os.environ.get('CANOPUS_ROOT', DEFAULT_CANOPUS)).resolve()
 DEFAULT_TARGETS = ['xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155']
 P67_TARGET = 'xiaomi-band-10-pro-3.101.043'
 TARGETS = DEFAULT_TARGETS + [P67_TARGET, 'xiaomi-band-11-4.100.177']
-DEFAULT_CERTS = [
-    Path.home() / 'develop/Astrobox-certs/module-installer-ed25519.pem.zip',
-    Path.home() / 'develop/AstroBox-Certs/module-installer-ed25519.pem.zip',
-]
-DEFAULT_CERT = next((p for p in DEFAULT_CERTS if p.is_file()), DEFAULT_CERTS[0])
-SUPERVISOR = CANOPUS / 'manager/service/canopus_supervisor_platform.c'
-RECEIPT_BUILDER = CANOPUS / 'scripts/build-module-installer-receipt.py'
 WATCHFACE_BUILDER = CANOPUS / 'scripts/build_module_installer_prod.py'
 
 
 def run(command, *, env=None):
     subprocess.run([str(arg) for arg in command], cwd=ROOT, env=env, check=True)
-
-
-def trusted_public_key():
-    source = SUPERVISOR.read_text()
-    match = re.search(r's_installer_public_key\[32\]\s*=\s*\{(.*?)\};', source, re.S)
-    if not match:
-        raise ValueError('Cannot locate the resident Supervisor installer trust key')
-    key = bytes(int(value, 16) for value in re.findall(r'0x([0-9a-fA-F]{2})', match[1]))
-    if len(key) != 32:
-        raise ValueError('Invalid resident Supervisor Ed25519 trust key')
-    return key
-
-
-def extract_private_key(archive_path, key_path):
-    with zipfile.ZipFile(archive_path) as archive:
-        files = [item for item in archive.infolist() if not item.is_dir()]
-        if len(files) != 1 or files[0].filename != 'module-installer-ed25519.pem':
-            raise ValueError('Expected only module-installer-ed25519.pem in the AstroBox certificate ZIP')
-        item = files[0]
-        if item.file_size > 16384 or item.flag_bits & 1:
-            raise ValueError('Unexpected or encrypted signing-key archive entry')
-        mode = item.external_attr >> 16
-        if stat.S_ISLNK(mode):
-            raise ValueError('Signing-key ZIP entry must not be a symlink')
-        key_path.write_bytes(archive.read(item))
-    key_path.chmod(0o600)
-
-
-def assert_key_matches_supervisor(private_key, expected, work):
-    public_der = work / 'signer-public.der'
-    public_pem = work / 'signer-public.pem'
-    subprocess.run(['openssl', 'pkey', '-in', str(private_key), '-pubout',
-                    '-outform', 'DER', '-out', str(public_der)],
-                   check=True, capture_output=True)
-    raw = public_der.read_bytes()
-    if len(raw) < 32 or raw[-32:] != expected:
-        raise ValueError('Selected AstroBox signing key does not match the installed Supervisor')
-    subprocess.run(['openssl', 'pkey', '-in', str(private_key), '-pubout',
-                    '-out', str(public_pem)], check=True, capture_output=True)
-    return public_pem, hashlib.sha256(expected).hexdigest()
 
 
 def copy_tree(source, destination):
@@ -160,8 +109,6 @@ def main():
                         help='new output directory (default name follows selected device/firmware)')
     parser.add_argument('--target', choices=TARGETS, action='append',
                         help='target to include; repeat for multi-target bundle (default: both Band 11 targets)')
-    parser.add_argument('--certificate-zip', type=Path, default=DEFAULT_CERT,
-                        help='AstroBox module-installer Ed25519 certificate ZIP')
     parser.add_argument('--overwrite', action='store_true',
                         help='overwrite existing output directory if it already exists')
     args = parser.parse_args()
@@ -188,13 +135,9 @@ def main():
     else:
         output = args.output.expanduser().absolute()
 
-    cert = args.certificate_zip.expanduser().resolve()
     if (output.exists() or output.is_symlink()) and not args.overwrite:
         parser.error(f'output already exists; refusing to overwrite: {output}')
-    if not cert.is_file():
-        parser.error(f'certificate ZIP not found: {cert}')
-    if not (CANOPUS.is_dir() and SUPERVISOR.is_file() and RECEIPT_BUILDER.is_file()
-            and WATCHFACE_BUILDER.is_file()):
+    if not WATCHFACE_BUILDER.is_file():
         parser.error(f'Canopus production installer tooling not found under: {CANOPUS}')
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -203,16 +146,9 @@ def main():
     for target in targets:
         firmware_sha = CANOPUS / 'targets' / target / 'target.toml'
         firmwares[target] = tomllib.loads(firmware_sha.read_text())['firmware_sha256']
-    private_trust = trusted_public_key()
 
     with tempfile.TemporaryDirectory(prefix=output.name + '.staging-', dir=output.parent) as temporary:
         stage = Path(temporary)
-        secure = stage / '.signing'
-        secure.mkdir(mode=0o700)
-        private_key = secure / 'module-installer-ed25519.pem'
-        extract_private_key(cert, private_key)
-        public_key, public_fingerprint = assert_key_matches_supervisor(
-            private_key, private_trust, secure)
 
         modules = {}
         receipts = {}
@@ -220,29 +156,11 @@ def main():
             env = target_build_environment(target, os.environ)
             env['CANOPUS_ROOT'] = str(CANOPUS)
             env['RESOURCE_HOOK_TARGET'] = target
-            # Always rebuild: target/build ID alone cannot distinguish an old
-            # registry-only artifact from the current font-enabled module.
-            run(['sh', ROOT / 'scripts/build.sh', target], env=env)
-            elf = ROOT / 'build/resource-hook.elf'
-            if not elf.is_file():
-                raise ValueError(f'missing normal module ELF for {target}: {elf}')
-
             payload = stage / 'payload' / target
-            payload.mkdir(parents=True)
+            # Always rebuild and package through the common payload entrypoint.
+            run(['sh', ROOT / 'scripts/build-install-payload.sh', target, payload], env=env)
             module = payload / 'resource-hook.elf'
-            shutil.copyfile(elf, module)
-            # Validate the exact staged bytes before signing, not just the
-            # mutable build-directory artifact or a self-consistent receipt.
-            run([env.get('CANOPUS_CLI', str(CANOPUS / 'target/debug/canopus')),
-                 'verify', module, '--target', target,
-                 '--targets-dir', CANOPUS / 'targets'], env=env)
             receipt = payload / 'receipt.bin'
-            run([sys.executable, RECEIPT_BUILDER,
-                 '--module', module, '--module-id', 'corona', '--version', 3,
-                 '--lifecycle', 1, '--target-id', target, '--firmware-sha256', firmwares[target],
-                 '--private-key', private_key, '--output', receipt])
-            run([sys.executable, ROOT / 'scripts/verify-payload.py', payload,
-                 '--target', target, '--public-key', public_key])
             modules[target] = module
             receipts[target] = receipt
 
@@ -264,8 +182,8 @@ def main():
                 f'Targets: {device_name}, firmware {target_versions}. This watchface installs '
                 f'the {module_description} (`resource-hook-0.3.0`) in the disabled state.\n\n'
                 'Pack only `main.lua` and the .bin files in this directory. '
-                'Requires a Canopus Supervisor whose Ed25519 trust key matches this receipt. '
-                'Opening the watchface installs the module; it does not enable/restart the framework.\n\n'
+                'Requires the current Canopus Supervisor with CMI2 support. '
+                'Opening the watchface installs the module; upgrades take effect after reboot.\n\n'
                 'Use Manager 1.2.2 or newer for transaction acknowledgements; install it separately. '
                 f'Font reload: {font_status}. This new artifact: '
                 'NOT_PROBED on hardware. GPU recovery and framework restart safety remain '
@@ -278,7 +196,7 @@ def main():
             manifest['gpu_recovery'] = 'UNSUPPORTED'
             manifest['framework_restart_safety'] = 'UNSUPPORTED'
             manifest['module_build_id'] = 'resource-hook-0.3.0'
-            manifest['signer_public_key_sha256'] = public_fingerprint
+            manifest['receipt_format_version'] = 2
             manifest['hardware_status'] = 'NOT_PROBED'
             manifest.update(background_metadata(device_targets, diagnostics))
             manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
@@ -296,15 +214,14 @@ def main():
         package.mkdir()
         (package / 'docs').mkdir()
         (package / 'docs/README.md').write_text(
-            f'# Signed Resource Hook installer watchface\n\n'
+            f'# Resource Hook installer watchface\n\n'
             f'This complete package targets {", ".join(targets)} and installs '
             f'the {module_description}.\n\n'
             'Open the appropriate device folder in the watchface packer, or use its '
             '`build/resource-hook-prod.zip` as the flat watchface input. Keep the '
             '`.cmi.bin` beside the module `.bin`.\n\n'
-            f'Signer: AstroBox module-installer Ed25519 certificate '
-            f'(public SHA-256 `{public_fingerprint}`). The public key matches the '
-            'Supervisor trust key. Private signing material is not included.\n\n'
+            'Receipts are unsigned CMI2 generated by `canopus package`. '
+            'Install the current Canopus Supervisor before using this package.\n\n'
             'Manager 1.2.2 or newer is recommended for revision-matched transaction '
             'results. Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'This new package is NOT_PROBED on hardware. GPU recovery and framework '
@@ -321,10 +238,9 @@ def main():
         (package / 'README.md').write_text(
             f'# Resource Hook installer ({", ".join(groups)})\n\n'
             'Build output from the latest checked `resource-hook-0.3.0` ELF. '
-            'The module receipt is signed by the user-selected AstroBox certificate and '
-            'verified against the Canopus Supervisor public trust key.\n\n'
+            'The unsigned CMI2 receipt binds the artifact to its exact firmware target.\n\n'
             + ''.join(f'- `{name}/`: complete watchface source/resources and ready-to-pack ZIP.\n'
-                      f'- `{name}/build/manifest.json`: target, resource hashes and signer identity.\n'
+                      f'- `{name}/build/manifest.json`: target and resource hashes.\n'
                       for name in groups) +
             '- `SHA256SUMS`: package file checksums.\n\n'
             'Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
@@ -339,12 +255,11 @@ def main():
             }
         build_meta = {
             'name': output.name, 'version': '0.3.0',
-            'runtime_id': 'corona', 'project_id': 'ng.lst.corona',
+            'runtime_id': 'corona', 'project_id': 'corona',
             'targets': targets,
             'module_build_id': 'resource-hook-0.3.0',
             'target_details': target_details,
-            'signer_public_key_sha256': public_fingerprint,
-            'signer_certificate_archive': cert.name,
+            'receipt_format_version': 2,
             'hardware_status': 'NOT_PROBED',
             'font_reload': True, 'font_reload_device_status': (
                 'NOT_PROBED' if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
@@ -380,14 +295,13 @@ def main():
             shutil.rmtree(output)
         package.rename(output)
 
-    print(f'Complete signed watchface package: {output}')
+    print(f'Complete watchface package: {output}')
     for device_name in groups:
         print(f'Watchface input ZIP: {output}/{device_name}/build/resource-hook-prod.zip')
     for target in targets:
         elf_sha = hashlib.sha256((output / target.rsplit('-', 1)[0] / f'resource-hook-{target}.bin').read_bytes()).hexdigest()
         print(f'ELF SHA-256 ({target}): {elf_sha}')
-    print(f'Supervisor-matched AstroBox signing key SHA-256: {public_fingerprint}')
-    print('Private key excluded. Font reload: legacy user reports; .177 NOT_PROBED.')
+    print('Unsigned CMI2 receipts. Font reload: legacy user reports; .177 NOT_PROBED.')
     print('New artifact: NOT_PROBED. GPU recovery/restart safety unsupported.')
 
 

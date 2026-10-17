@@ -1,4 +1,4 @@
-"""Default font target contracts and signed installer packaging consistency.
+"""Default font target contracts and installer packaging consistency.
 
 Preprocess the real source against the independent historical Band11 address
 oracle. Installer marker tests check routing/byte fidelity only, not ELF or
@@ -179,19 +179,19 @@ class InstallerContract(unittest.TestCase):
                         self.assertIn('Retired build flag ' + name, result.stderr)
                         self.assertNotIn('certificate ZIP not found', result.stderr)
 
-    def test_mixed_watchface_bundle_reaches_normal_certificate_preflight(self):
+    def test_mixed_watchface_bundle_reaches_tooling_preflight_without_keys(self):
         env = {key: val for key, val in os.environ.items()
                if key not in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE')}
         env['RH_P67_BLUR_DIAGNOSTICS'] = '1'
-        # Existing user delivery artifacts must not mask certificate preflight.
-        with tempfile.TemporaryDirectory(prefix='rh-certificate-preflight-') as directory:
+        with tempfile.TemporaryDirectory(prefix='rh-tooling-preflight-') as directory:
+            env['CANOPUS_ROOT'] = str(Path(directory) / 'missing-canopus')
             result = subprocess.run([sys.executable, str(ROOT / 'scripts/build-watchface.py'),
                 '--target', TARGET_IDS[0], '--target', TARGET_IDS[2],
-                '--output', str(Path(directory) / 'installer'),
-                '--certificate-zip', '/missing-module-installer-certificate.zip'],
+                '--output', str(Path(directory) / 'installer')],
                 env=env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('certificate ZIP not found', result.stderr)
+        self.assertIn('Canopus production installer tooling not found', result.stderr)
+        self.assertNotIn('certificate', result.stderr)
         self.assertNotIn('requires only', result.stderr)
         self.assertNotIn('requires exact .043', result.stderr)
 
@@ -202,7 +202,7 @@ class InstallerContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unsupported'):
             INSTALLER['device_groups'](['xiaomi-band-10-pro-3.101.036'])
 
-    def test_duplicate_target_rejected_before_build_or_signing(self):
+    def test_duplicate_target_rejected_before_build(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / 'scripts/build-watchface.py'),
              '--target', TARGET_IDS[2], '--target', TARGET_IDS[2]],
@@ -212,18 +212,27 @@ class InstallerContract(unittest.TestCase):
 
     def test_prebuilt_artifact_bypass_is_not_supported(self):
         # An old normal ELF has the same build ID but may contain the former
-        # font stub. Refuse bypass before any certificate/key/file work.
+        # font stub. Refuse bypass before any build or file work.
         result = subprocess.run(
-            [sys.executable, str(ROOT / 'scripts/build-watchface.py'),
-             '--no-build', '--certificate-zip', '/missing-certificate.zip'],
+            [sys.executable, str(ROOT / 'scripts/build-watchface.py'), '--no-build'],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('unrecognized arguments: --no-build', result.stderr)
         self.assertNotIn('certificate ZIP not found', result.stderr)
 
+    def test_installer_entrypoints_need_no_certificate(self):
+        quickapp = runpy.run_path(str(ROOT / 'scripts/build-quickapp-watchface.py'))
+        self.assertEqual(set(quickapp['ALL_TARGETS']), set(INSTALLER['TARGETS']))
+        for script in ('build-watchface.py', 'build-quickapp-watchface.py'):
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts' / script), '--help'],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn('--certificate-zip', result.stdout)
+            self.assertIn('xiaomi-band-11-4.100.177', result.stdout)
+
     def test_per_device_byte_fidelity_and_archive_isolation(self):
         # Opaque text markers exercise packaging consistency only. They are NOT
-        # ELF/receipt fixtures and do not prove native or signature acceptance.
+        # ELF/receipt fixtures and do not prove native or CMI2 acceptance.
         verify = INSTALLER['verify_watchface']
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a signed, tested Resource Hook integration delivery (never deploys it)."""
+"""Build a tested Resource Hook integration delivery (never deploys it)."""
 import argparse
 import hashlib
 import json
@@ -23,6 +23,9 @@ def firmware_test_commands(target, python):
     """Select only suites that actually support the exact requested AP."""
     if target not in TARGETS:
         raise ValueError(f'unsupported target: {target}')
+    if target == 'xiaomi-band-11-4.100.177':
+        # Existing native harnesses contain only .139/.155/.043 address maps.
+        return []
     if target == 'xiaomi-band-10-pro-3.101.043':
         names = ('firmware_font_1043', 'firmware_quickapp_reload_1043')
     else:
@@ -58,12 +61,10 @@ def main():
     output = args.output.absolute()
     if output.exists() or output.is_symlink():
         parser.error('output already exists; choose a new directory')
-    default_canopus = ROOT.parent / 'Canopus'
-    if not default_canopus.is_dir():
-        default_canopus = ROOT.parent / 'Canopus-Private'
-    canopus = Path(os.environ.get('CANOPUS_ROOT') or default_canopus).resolve()
+    canopus = Path(os.environ.get('CANOPUS_ROOT') or ROOT.parent / 'Canopus-Private').resolve()
+    firmware_targets = [target for target in targets if firmware_test_commands(target, 'python')]
     firmware_python = os.environ.get('FIRMWARE_PYTHON', str(canopus / 'build/band11-tests/bin/python'))
-    if not shutil.which(firmware_python):
+    if firmware_targets and not shutil.which(firmware_python):
         parser.error('set FIRMWARE_PYTHON to a Python with the Canopus firmware-test dependencies')
     lua = os.environ.get('CANOPUS_TEST_LUA', 'lua')
     if not shutil.which(lua):
@@ -91,7 +92,7 @@ def main():
                 dict(os.environ, CANOPUS_ROOT=str(canopus)))
             env['RESOURCE_HOOK_TARGET'] = target
             env['RESOURCE_HOOK_PAYLOAD'] = str(payload)
-            run(f'{target}: Host sanitizers, ARM verifier and signed payload',
+            run(f'{target}: Host sanitizers, ARM verifier and CMI2 payload',
                 ['sh', str(ROOT / 'scripts/build-install-payload.sh'), target, str(payload)])
             run(f'{target}: Delivery identity and tamper rejection',
                 [sys.executable, str(ROOT / 'tests/test_delivery.py')])
@@ -104,17 +105,19 @@ def main():
                 native_env['RESOURCE_HOOK_FIRMWARE'] = str(local_ap)
             for name, command in firmware_test_commands(target, firmware_python):
                 run(f'{target}: {name}', command, native_env)
-        run('All three exact targets: firmware_quickapp_icon',
-            [firmware_python, str(ROOT / 'tests/firmware_quickapp_icon.py')])
-        if any(target.startswith('xiaomi-band-11-') for target in targets):
+        if firmware_targets:
+            run('Native harness targets .139/.155/.043: firmware_quickapp_icon',
+                [firmware_python, str(ROOT / 'tests/firmware_quickapp_icon.py')])
+        if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155') for target in targets):
             run('Band 11 .139/.155: firmware_font_compatibility',
                 [firmware_python, str(ROOT / 'tests/firmware_font_compatibility.py')])
         run('Installer generation and restricted Lua protocol',
             [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
         target_args = [arg for target in targets for arg in ('--target', target)]
-        run('Watchface payload and Supervisor trust-key verification', [
+        run('Watchface payload and CMI2 verification', [
             sys.executable, str(canopus / 'scripts/build_module_installer_prod.py'),
-            '--product', 'resource-hook', *target_args, '--payload-dir', str(stage / 'payload'),
+            '--product', 'resource-hook', '--module-id', 'corona',
+            *target_args, '--payload-dir', str(stage / 'payload'),
             '--assets-dir', str(ROOT / 'examples'), '--output-dir', str(stage / 'watchface')])
         for manifest_path in (stage / 'watchface').glob('*/build/manifest.json'):
             manifest = json.loads(manifest_path.read_text())
@@ -122,7 +125,9 @@ def main():
             manifest.update(WATCHFACE['background_metadata'](device_targets, diagnostics))
             manifest.update({
                 'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
-                'font_reload_device_status': 'USER_REPORTED_PASS',
+                'font_reload_device_status': ('NOT_PROBED'
+                    if 'xiaomi-band-11-4.100.177' in device_targets else 'USER_REPORTED_PASS'),
+                'receipt_format_version': 2,
                 'hardware_status': 'NOT_PROBED', 'gpu_recovery': 'UNSUPPORTED',
                 'framework_restart_safety': 'UNSUPPORTED',
             })
@@ -136,11 +141,11 @@ def main():
         (stage / 'README.md').write_text(
             '# Resource Hook 0.3.0 integration delivery\n\n'
             f'Targets: {", ".join(targets)}. New artifact physical device: NOT_PROBED.\n\n'
-            'Font reload: USER_REPORTED_PASS on all supported targets (user report). '
+            'Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
             'Transactional font reload is included by default; GPU recovery and framework '
             'restart safety remain unsupported.\n\n'
             '- Read INSTALL.md before installing or enabling.\n'
-            '- payload/: signed ELF/CMI1, example mapping and verifier.\n'
+            '- payload/: ELF/CMI2, Canopus package, example mapping and verifier.\n'
             '- watchface/: installer Lua/resources; ZIP is input to a watchface packer, not a vendor watchface file.\n'
             '- source/: complete module sources; see source/README.md for build prerequisites.\n'
             '- evidence/: firmware lifecycle evidence and limitations.\n'
@@ -164,14 +169,20 @@ def main():
             'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',
             'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
-            'font_reload_device_status': 'USER_REPORTED_PASS',
+            'font_reload_device_status': ('NOT_PROBED'
+                if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
+            'receipt_format_version': 2,
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
             'native_firmware_suites': {
                 target: [name for name, _ in firmware_test_commands(target, firmware_python)]
                 for target in targets},
-            'cross_target_suites': ['firmware_quickapp_icon'] + (
+            'native_firmware_suites_unavailable': {
+                target: 'No exact-target firmware harness; not run'
+                for target in targets if not firmware_test_commands(target, firmware_python)},
+            'cross_target_suites': (['firmware_quickapp_icon'] if firmware_targets else []) + (
                 ['firmware_font_compatibility']
-                if any(target.startswith('xiaomi-band-11-') for target in targets) else []),
+                if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155')
+                       for target in targets) else []),
             'automatic_miwear_restart': False, 'complete_cache_refresh': False,
         }, indent=2) + '\n')
         files = sorted(p for p in stage.rglob('*') if p.is_file())
@@ -191,9 +202,9 @@ def main():
         if output.exists() or output.is_symlink():
             raise RuntimeError('output appeared during build; refusing to overwrite')
         stage.rename(output)
-    print(f'Signed release bundle (new artifacts NOT_PROBED): {output}')
+    print(f'Release bundle (new artifacts NOT_PROBED): {output}')
     print(f'Archive: {output / archive.name}')
-    print('Font reload: USER_REPORTED_PASS on supported targets; new artifact: NOT_PROBED.')
+    print('Font reload: legacy user reports; .177 and new artifacts NOT_PROBED.')
     print('GPU recovery/restart safety unsupported; no device was modified.')
 
 
