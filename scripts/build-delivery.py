@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import runpy
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,9 +15,9 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = 'xiaomi-band-11-4.100.139'
+TARGET = 'xiaomi-band-11-4.100.155'
 TARGETS = runpy.run_path(str(ROOT / 'scripts/verify-payload.py'))['TARGETS']
-WATCHFACE = runpy.run_path(str(ROOT / 'scripts/build-watchface.py'))
+OPTIONS = runpy.run_path(str(ROOT / 'scripts/build_options.py'))
 
 
 def firmware_test_commands(target, python):
@@ -46,11 +47,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='new delivery directory; existing paths are refused')
     parser.add_argument('--target', choices=TARGETS, action='append',
-                        help='target to include; repeat for a multi-device bundle (default: .139)')
+                        help='target to include; repeat for a multi-target package (default: .155)')
+    parser.add_argument('--firmware-tests', action='store_true',
+                        help='also run exact-target firmware harnesses (requires firmware and dependencies)')
     args = parser.parse_args()
     targets = args.target or [TARGET]
     try:
-        diagnostics = WATCHFACE['build_options'](targets, os.environ)
+        diagnostics = OPTIONS['build_options'](targets, os.environ)
     except ValueError as error:
         parser.error(str(error))
     module_manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
@@ -62,13 +65,16 @@ def main():
     if output.exists() or output.is_symlink():
         parser.error('output already exists; choose a new directory')
     canopus = Path(os.environ.get('CANOPUS_ROOT') or ROOT.parent / 'Canopus-Private').resolve()
-    firmware_targets = [target for target in targets if firmware_test_commands(target, 'python')]
+    firmware_targets = ([target for target in targets if firmware_test_commands(target, 'python')]
+                        if args.firmware_tests else [])
     firmware_python = os.environ.get('FIRMWARE_PYTHON', str(canopus / 'build/band11-tests/bin/python'))
     if firmware_targets and not shutil.which(firmware_python):
         parser.error('set FIRMWARE_PYTHON to a Python with the Canopus firmware-test dependencies')
-    lua = os.environ.get('CANOPUS_TEST_LUA', 'lua')
-    if not shutil.which(lua):
-        parser.error('Lua is required; set CANOPUS_TEST_LUA')
+    cli = os.environ.get('CANOPUS_CLI')
+    if not cli:
+        cli = str(canopus / 'target/debug/canopus')
+        if not Path(cli).is_file():
+            cli = str(ROOT / 'build/canopus-cli/debug/canopus')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=output.name + '.staging-', dir=output.parent) as temp:
         stage = Path(temp)
@@ -88,7 +94,7 @@ def main():
 
         for target in targets:
             payload = stage / 'payload' / target
-            env = WATCHFACE['target_build_environment'](target,
+            env = OPTIONS['target_build_environment'](target,
                 dict(os.environ, CANOPUS_ROOT=str(canopus)))
             env['RESOURCE_HOOK_TARGET'] = target
             env['RESOURCE_HOOK_PAYLOAD'] = str(payload)
@@ -103,35 +109,35 @@ def main():
             local_ap = ROOT / 'build/firmware-analysis' / f'vela_ap_{target.rsplit("-", 1)[1]}.bin'
             if not native_env.get('RESOURCE_HOOK_FIRMWARE') and local_ap.is_file():
                 native_env['RESOURCE_HOOK_FIRMWARE'] = str(local_ap)
-            for name, command in firmware_test_commands(target, firmware_python):
-                run(f'{target}: {name}', command, native_env)
+            if args.firmware_tests:
+                for name, command in firmware_test_commands(target, firmware_python):
+                    run(f'{target}: {name}', command, native_env)
         if firmware_targets:
             run('Native harness targets .139/.155/.043: firmware_quickapp_icon',
                 [firmware_python, str(ROOT / 'tests/firmware_quickapp_icon.py')])
-        if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155') for target in targets):
+        if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155') for target in firmware_targets):
             run('Band 11 .139/.155: firmware_font_compatibility',
                 [firmware_python, str(ROOT / 'tests/firmware_font_compatibility.py')])
-        run('Installer generation and restricted Lua protocol',
-            [sys.executable, str(canopus / 'scripts/tests/test_module_installer_prod.py')])
-        target_args = [arg for target in targets for arg in ('--target', target)]
-        run('Watchface payload and CMI2 verification', [
-            sys.executable, str(canopus / 'scripts/build_module_installer_prod.py'),
-            '--product', 'resource-hook', '--module-id', 'corona',
-            *target_args, '--payload-dir', str(stage / 'payload'),
-            '--assets-dir', str(ROOT / 'examples'), '--output-dir', str(stage / 'watchface')])
-        for manifest_path in (stage / 'watchface').glob('*/build/manifest.json'):
-            manifest = json.loads(manifest_path.read_text())
-            device_targets = [item['id'] for item in manifest['targets'].values()]
-            manifest.update(WATCHFACE['background_metadata'](device_targets, diagnostics))
-            manifest.update({
-                'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
-                'font_reload_device_status': ('NOT_PROBED'
-                    if 'xiaomi-band-11-4.100.177' in device_targets else 'USER_REPORTED_PASS'),
-                'receipt_format_version': 2,
-                'hardware_status': 'NOT_PROBED', 'gpu_recovery': 'UNSUPPORTED',
-                'framework_restart_safety': 'UNSUPPORTED',
-            })
-            manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
+        # The canonical package is the installable deliverable. Module watchfaces
+        # are a legacy transport; Supervisor bootstrap is managed separately.
+        package_name = f'{project_id}-{module_version}.canopus'
+        with tempfile.TemporaryDirectory(prefix='canopus-project-', dir=stage) as temporary:
+            project = Path(temporary)
+            selected, count = re.subn(r'(?ms)^\[targets\][^\n]*\n.*?(?=^\[|\Z)',
+                '[targets]\ninclude = ' + json.dumps(targets) + '\n',
+                (ROOT / 'Canopus.toml').read_text())
+            if count != 1:
+                raise RuntimeError('expected one [targets] table in Canopus.toml')
+            manifest_path = project / 'Canopus.toml'
+            manifest_path.write_text(selected)
+            for target in targets:
+                artifact = project / 'build' / target / f'{project_id}.elf'
+                artifact.parent.mkdir(parents=True)
+                shutil.copyfile(stage / 'payload' / target / 'resource-hook.elf', artifact)
+            run('Native Canopus package', [cli, 'package', '--manifest', str(manifest_path),
+                                          '--output', str(stage / package_name)])
+            run('Native package structure and hashes',
+                [cli, 'package', 'verify', str(stage / package_name)])
         source = stage / 'source'
         source.mkdir()
         for name in ('src', 'include', 'scripts', 'tests', 'tools', 'docs', 'examples', 'targets'):
@@ -145,8 +151,10 @@ def main():
             'Transactional font reload is included by default; GPU recovery and framework '
             'restart safety remain unsupported.\n\n'
             '- Read INSTALL.md before installing or enabling.\n'
-            '- payload/: ELF/CMI2, Canopus package, example mapping and verifier.\n'
-            '- watchface/: installer Lua/resources; ZIP is input to a watchface packer, not a vendor watchface file.\n'
+            f'- {package_name}: install through AstroBox Canopus using native L2/CPC2.\n'
+            '- payload/: per-target ELF/CMI2, Canopus package, example mapping and verifier.\n'
+            '- Supervisor bootstrap is separate from module installation.\n'
+            '- Theme resources and the Corona Manager are installed separately; the native package contains only the module.\n'
             '- source/: complete module sources; see source/README.md for build prerequisites.\n'
             '- evidence/: firmware lifecycle evidence and limitations.\n'
             '- validation.json and validation.log: checks run for this delivery.\n\n'
@@ -162,7 +170,7 @@ def main():
                 if item.is_file() and item.suffix in ('.json', '.md'):
                     shutil.copyfile(item, destination / item.name)
         (stage / 'validation.json').write_text(json.dumps({
-            **WATCHFACE['background_metadata'](targets, diagnostics),
+            **OPTIONS['background_metadata'](targets, diagnostics),
             'module': 'corona', 'version': module_version,
             'project_id': project_id,
             **({'target': targets[0]} if len(targets) == 1 else {}),
@@ -172,17 +180,20 @@ def main():
             'font_reload_device_status': ('NOT_PROBED'
                 if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
             'receipt_format_version': 2,
+            'delivery_format': 'canopus', 'package': package_name,
+            'transport': 'wearpacket-l2-cpc2',
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
             'native_firmware_suites': {
                 target: [name for name, _ in firmware_test_commands(target, firmware_python)]
-                for target in targets},
-            'native_firmware_suites_unavailable': {
-                target: 'No exact-target firmware harness; not run'
-                for target in targets if not firmware_test_commands(target, firmware_python)},
+                for target in firmware_targets},
+            'native_firmware_suites_not_run': {
+                target: ('No exact-target firmware harness' if not firmware_test_commands(target, firmware_python)
+                         else 'Not requested; use --firmware-tests')
+                for target in targets if target not in firmware_targets},
             'cross_target_suites': (['firmware_quickapp_icon'] if firmware_targets else []) + (
                 ['firmware_font_compatibility']
                 if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155')
-                       for target in targets) else []),
+                       for target in firmware_targets) else []),
             'automatic_miwear_restart': False, 'complete_cache_refresh': False,
         }, indent=2) + '\n')
         files = sorted(p for p in stage.rglob('*') if p.is_file())
@@ -203,6 +214,7 @@ def main():
             raise RuntimeError('output appeared during build; refusing to overwrite')
         stage.rename(output)
     print(f'Release bundle (new artifacts NOT_PROBED): {output}')
+    print(f'Installable module: {output / package_name}')
     print(f'Archive: {output / archive.name}')
     print('Font reload: legacy user reports; .177 and new artifacts NOT_PROBED.')
     print('GPU recovery/restart safety unsupported; no device was modified.')

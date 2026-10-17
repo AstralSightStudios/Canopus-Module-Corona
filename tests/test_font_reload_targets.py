@@ -1,8 +1,9 @@
-"""Default font target contracts and installer packaging consistency.
+"""Default font target contracts and legacy watchface packaging consistency.
 
 Preprocess the real source against the independent historical Band11 address
-oracle. Installer marker tests check routing/byte fidelity only, not ELF or
-signature validity. No firmware binaries or native emulation are needed here.
+oracle. Legacy installer marker tests check routing/byte fidelity only, not ELF
+or CMI2 validity. Canonical .canopus delivery is tested in test_build_delivery.py.
+No firmware binaries or native emulation are needed here.
 """
 import json
 import os
@@ -118,7 +119,8 @@ class FontTargetContract(unittest.TestCase):
                 self.assertNotIn('resource-hook-0.3.0-font-exp', source)
 
 
-class InstallerContract(unittest.TestCase):
+class LegacyInstallerContract(unittest.TestCase):
+    """Historical module watchfaces are not the canonical AstroBox delivery."""
     def test_defaults_stay_dual_band11(self):
         self.assertEqual(INSTALLER['DEFAULT_TARGETS'], list(TARGET_IDS[:2]))
         self.assertEqual(INSTALLER['TARGETS'], list(TARGET_IDS) + ['xiaomi-band-11-4.100.177'])

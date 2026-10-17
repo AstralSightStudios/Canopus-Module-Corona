@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build normal Resource Hook installers using unsigned Canopus CMI2 receipts."""
+"""Legacy watchface bundles; use build-delivery.py for native .canopus distribution."""
 import argparse
 import hashlib
 import json
