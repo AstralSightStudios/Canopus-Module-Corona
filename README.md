@@ -124,8 +124,14 @@ GPU 故障恢复与帧时间仍未验证，详见
 
 ### 环境依赖
 
-- 相邻 `../Canopus` 仓库（需先编译 `cargo build -p canopus-cli`）
-- Clang / LLVM (支持 ARM target), `ld.lld`, Python 3.11+, OpenSSL (带 Ed25519 支持)
+- 相邻 `../Canopus-Private` 新版仓库（CMI2 / CPC2；先编译 `cargo build -p canopus-cli`）
+- Clang / LLVM（支持 ARM target）、`ld.lld`、Python 3.11+
+
+框架模块 ID 为 `corona`，快应用包名及主题目录仍为 `ng.lst.corona`。
+`Canopus.toml` 声明四个精确 target；`scripts/build.sh` 通过新 CLI 构建并验证，
+用 `scripts/canopus-cc.py` 注入各固件的编译宏，并用 `scripts/canopus-ld.sh`
+合并 ELF sections，以满足 Band11 loader 的 section 数量限制。通用服务替换留待后续迁移，
+这一阶段保留现有原生资源适配与控制协议。
 
 ### 常用命令
 
@@ -134,15 +140,33 @@ GPU 故障恢复与帧时间仍未验证，详见
 sh scripts/build.sh xiaomi-band-11-4.100.155
 sh scripts/build.sh xiaomi-band-10-pro-3.101.043
 
-# Signed normal installer (font reload is included by default)
+# Build the unsigned CMI2 installer (font reload is included by default)
 python3 scripts/build-watchface.py --target xiaomi-band-10-pro-3.101.043
 
 # 2. 运行宿主单测 (包含紧凑算法差分与边界测试)
 python3 tests/test_delivery.py
 
-# 3. 完整签名打包交付 (产物生成到 dist 目录)
+# 3. 完整打包交付（CMI2，无需签名密钥；产物生成到 dist 目录）
 python3 scripts/build-delivery.py dist/0.3.0-155 --target xiaomi-band-11-4.100.155
 ```
+
+构建全部 target 后，可用新 CLI 生成统一模块包：
+
+```sh
+for target in xiaomi-band-11-4.100.139 xiaomi-band-11-4.100.155 \
+              xiaomi-band-11-4.100.177 xiaomi-band-10-pro-3.101.043; do
+  sh scripts/build.sh "$target" || exit 1
+done
+CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
+```
+
+输出为 `dist/corona-0.3.0.canopus`，包含每个 target 的 ELF 与 CMI2 回执。
+旧 Supervisor 需要按新版框架流程重装；安装及升级语义见 [安装说明](docs/INSTALL.md)。
+
+当前新框架兼容验证：Band11 `.139/.155/.177` 已通过新 CLI 编译与 ELF 校验；
+P67 `.043` 的现有 `0x0c588d59`（电池采样图片创建）和 `0x0c5883f9`（控制中心样式）
+尚未进入框架 target 白名单，构建会在校验阶段失败。补齐精确 target 的证据和审批前，
+不能生成可交付的 `.043` 包。此次兼容构建尚未实机验证。
 
 ---
 

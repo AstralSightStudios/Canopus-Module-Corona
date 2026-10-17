@@ -1,8 +1,10 @@
 # Resource Hook 安装与验收
 
 适用交付：Canopus-Module-Resource-Hook **0.3.0**，支持 Xiaomi Band 11
-**4.100.139 / 4.100.155** 与 Xiaomi Band 10 Pro **3.101.043**。各固件使用独立
-ELF 和收据，不能混用。这是 ELF + CMI1 交付，不是 canonical `.canopus` 压缩包。
+**4.100.139 / 4.100.155 / 4.100.177** 与 Xiaomi Band 10 Pro **3.101.043**。各固件使用独立
+ELF 和收据，不能混用。新框架使用 `.canopus` 包及无签名 CMI2 回执；安装器从包中提取
+精确 target 的 ELF 和回执。当前新版框架下 `.043` 仍被两项既有地址的 target 白名单
+缺口拦截，尚不能生成通过校验的交付；详情见 [构建状态](../README.md#常用命令)。
 用户已反馈三个目标的正常字体重载实机验收通过（**USER_REPORTED_PASS**），字体事务
 现已默认启用；该反馈不自动覆盖 GPU 故障、框架重启或所有资源 owner，也不代表新生成
 的每份交付产物均重新做过实机测试。详见[字体重载说明](FONT_RELOAD.md)。
@@ -32,18 +34,18 @@ ELF 和收据，不能混用。这是 ELF + CMI1 交付，不是 canonical `.can
 - AP 固件（OTA 中的 `vela_ap.bin`，不是整个 OTA ZIP）SHA-256 必须匹配所选目标：
   - `.139`：`31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74`
   - `.155`：`ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f`
+  - `.177`：`ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`
   - `10 Pro .043`：`519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec`
-- 已部署兼容 Canopus ABI **1.2**、CMI1 的 Supervisor；其可信签名公钥
-  必须与本 payload 的签名者一致。不要为安装此模块关闭签名或固件校验。
+- 已重新部署兼容 Canopus ABI **1.2**、CMI2 和 CPC2 的新版 Supervisor。
+  新框架拒绝旧 registry / inbox 格式；先备份主题配置并按框架流程重装 Supervisor。
 - 操作方必须具备文件传输、Manager 控制及故障后的设备重启/恢复手段。
 - 模块激活必须由已串行化的 UI 所有者流程执行。短临界区只保护回调发布，
   不提供 UI teardown、在途调用排空或缓存重建协议。
 
-先用**独立可信来源**的 Supervisor 签名公钥验证：
+安装前验证目标固件、模块身份及文件哈希：
 
 ```sh
-python3 verify-payload.py . --target xiaomi-band-11-4.100.155 \
-  --public-key /path/to/trusted-supervisor-public.pem
+python3 verify-payload.py . --target xiaomi-band-11-4.100.155
 shasum -a 256 -c SHA256SUMS
 ```
 
@@ -51,9 +53,8 @@ shasum -a 256 -c SHA256SUMS
 不会从不可信收据自动猜测目标；`.155` 和 `10 Pro .043` 必须显式指定。固件升级前先禁用旧模块并完整
 重启，再按新固件重新部署匹配的 Supervisor 和模块，不要只给旧 ELF 换收据。
 
-`signer-public.pem` 是供比对的公钥，不是信任根。单独使用包内公钥只能检查
-自洽性，不能确认来源。SHA256SUMS 检查传输损坏；ELF 的真实性由 CMI1
-签名验证。说明文件和配置样例没有独立签名。私钥不在交付包中。
+CMI2 校验模块 ID、版本、生命周期、精确 target、固件 SHA-256 以及 ELF 大小和 SHA-256。
+它不包含签名；哈希用于检查内容绑定和传输完整性，不证明发布者身份。
 
 ## 配置和启用
 
@@ -68,16 +69,16 @@ shasum -a 256 -c SHA256SUMS
 3. 检查 `mappings.tsv.example`，按实际资源源路径修改，然后保存为
    `/data/quickapp/files/ng.lst.corona/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
    不意味着固件的所有字体和图片都经过这个目录。
-4. 使用兼容 Manager 的已验签安装流程导入 ELF 和 receipt；对应的 inbox
-   文件名为 `corona.ko` 和 `corona.cmi`，目录是
-   `/data/canopus/inbox/`。**仅复制文件不等于完成安装**，还必须执行 Manager
-   的 install 操作。不要直接编辑 registry.bin，也不要直接调用 ELF。
+4. 使用新版框架的 `.canopus` 安装流程，或导入匹配的 ELF 和 receipt。
+   自定义安装器应写 `/data/canopus/inbox/<token>.ko.next` 和 `<token>.cmi.next`，
+   然后提交 CPC2 INSTALL。**仅复制文件不等于完成安装**；不要直接编辑 registry.bin
+   或直接调用 ELF。升级返回 `REBOOT_REQUIRED(8)` 也表示成功，重启后生效。
 5. 在 Manager 的模块列表打开 `corona` 详情，点击“启用”并确认。
    “启用”只保存下次启动的启用意图，**不**立即安装 Hook；“已启用”
    不能作为已经生效的证明。
 6. 想本次运行就生效，在同一详情页点击**“立即激活”**并确认：它会当场加载并
-   激活模块，安装重定向、执行目标支持的资源适配器并请求一次整屏刷新。安全模式、未签名
-   模块和仅重启类模块不提供该入口；已常驻的模块也不再显示（不能重复激活）。
+   激活模块，安装重定向、执行目标支持的资源适配器并请求一次整屏刷新。安全模式和
+   仅重启类模块不提供该入口；已常驻的模块也不再显示（不能重复激活）。
    若不使用“立即激活”，则按第 7 步重启。
 7. 若走重启路径：按框架的已验证启动流程完整重启设备，重新载入 Canopus
    Supervisor，然后进入 Manager，让 UI 上下文执行启用模块的恢复。不能只重启
@@ -293,15 +294,17 @@ stop/deactivate 在安装后返回 SDK 的 `CANOPUS_RESULT_REBOOT_REQUIRED`。
 - `scripts/restart_miwear.sh` 故意退出 78；不要替换成 kill + sleep + start。
 - 旧模块运行时 ID（如 `manager_resource_hook` 或 `resource_hook`）与新 ID `corona` 不同。
   先禁用旧模块并完整重启，确认它不再恢复后再安装新模块；不能同时启用两者。
-- 项目/Manager 包标识与 registration、receipt、registry 的运行时模块 ID 统一为 `corona`（包名为 `ng.lst.corona`）。
-- semver 为 0.3.0，CMI1 模块整数版本为 3，CMI1 格式版本仍为 1。
-  当前 Supervisor 不保证防降级，升级策略应由发布/安装流程另行控制。
+- 框架 module ID、registration、receipt、registry 统一为 `corona`；快应用包名与主题目录
+  仍使用 `ng.lst.corona`。
+- semver 为 0.3.0，`version_code` 为 3，CMI2 格式版本为 2（176 字节）。
+  后续升级需增加 `version_code`；同版本返回 `STAGE_DUPLICATE(-105)`，
+  低版本返回 `STAGE_DOWNGRADE(-109)`，更高版本安装成功后重启生效。
 
 ## 实机验收门禁
 
 以下必须在目标设备上逐项留下记录后，才可称为设备可用版本：
 
-- exact firmware 与签名 identity guard；真实 ELF load 和 /dev/canopus 注册。
+- exact firmware 与模块目标身份校验；真实 ELF load 和 /dev/canopus 注册。
 - 真实 install、enable、query、disable 和完整设备 reboot/recovery。
 - UI 所有者上下文，以及 Hook 安装与首次资源读取的先后顺序。
 - 正常/缺失/错误格式的主题资源；字体及图片分别进行显示验证。
