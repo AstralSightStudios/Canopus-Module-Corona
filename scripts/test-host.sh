@@ -46,9 +46,11 @@ CC="$CC" python3 "$ROOT/tests/test_p67_battery.py"
 # variant separately exercises the existing bounded diagnostic writer.
 "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
     -DRH_TARGET_1043=1 \
-    -DRH_P67_BLUR_DIAGNOSTICS=1 -I"$ROOT/include" -I"$SDK/sdk/c" \
+    -DRH_P67_BLUR_DIAGNOSTICS=1 -DCANOPUS_HOST=1 \
+    -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \
     "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
     "$ROOT/src/launcher_background.c" "$SDK/runtime/control/canopus_control.c" \
+    "$SDK/runtime/hook/canopus_hook.c" \
     "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_diagnostics"
 "$ROOT/build/test_module_1043_diagnostics" --blur-diagnostics
 # Compile the actual shared transaction for each exact address selection.
@@ -73,14 +75,17 @@ for target in 139 155 177 1043; do
     "$ROOT/build/test_quickapp_${target}"
     printf 'Host target .%s: default font reload\n' "$target"
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-        $TARGET_DEFINE -I"$ROOT/include" -I"$SDK/sdk/c" \
+        $TARGET_DEFINE -DCANOPUS_HOST=1 \
+        -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \
         "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
         "$ROOT/src/launcher_background.c" \
-        "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
+        "$SDK/runtime/control/canopus_control.c" "$SDK/runtime/hook/canopus_hook.c" \
+        "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
     "$ROOT/build/test_module_${target}" --time-services
     "$ROOT/build/test_module_${target}" --time-activation-failure 50
     "$ROOT/build/test_module_${target}" --time-activation-failure 1000
+    "$ROOT/build/test_module_${target}" --hook-services
     "$ROOT/build/test_module_${target}" --launcher-background
     "$ROOT/build/test_module_${target}" --font-reload
     "$ROOT/build/test_module_${target}"

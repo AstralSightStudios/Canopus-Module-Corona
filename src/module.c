@@ -50,11 +50,16 @@ static int32_t font_result;
 static uint32_t font_last_changed;
 static const struct canopus_context_v1 *module_context;
 static int32_t refresh_timer = -1, watch_timer = -1;
+static int32_t open_hook = -1;
+static rh_open_fn *open_hook_slot;
 
 static int bind_context(const struct canopus_context_v1 *ctx) {
     if (!canopus_services_has(ctx, CANOPUS_SVC_TIME, 1) || !ctx->time ||
         !ctx->time->timer_create || !ctx->time->timer_start ||
         !ctx->time->timer_destroy) return CANOPUS_SVC_ERR_UNSUPPORTED;
+    if (!canopus_services_has(ctx, CANOPUS_SVC_HOOK, 1) || !ctx->hook ||
+        !ctx->hook->install || !ctx->hook->uninstall ||
+        !ctx->hook->is_hooked) return CANOPUS_SVC_ERR_UNSUPPORTED;
     if (module_context && module_context != ctx) return CANOPUS_SVC_ERR_STATE;
     module_context = ctx;
     return 0;
@@ -1044,6 +1049,40 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     startup_record("prepare.end", 0, 0, S.count);
     return 0;
 }
+/* Caller holds the publication lock. Only the known original or our own
+ * callback may occupy the slot; never detach another module's hook. */
+static int install_open_hook(void *driver, rh_open_fn *slot, rh_open_fn expected) {
+    const struct canopus_hook_obj *hook = module_context->hook;
+    uintptr_t original = 0;
+    int32_t id;
+    if (S.installed && (S.driver != driver || S.original != expected)) return -1;
+    if (*slot == rh_wrapper)
+        return S.installed && open_hook >= 0 && open_hook_slot == slot &&
+               hook->is_hooked(module_context, (uintptr_t)slot) ? 0 : -1;
+    if (open_hook >= 0) {
+        if (open_hook_slot != slot) return -1;
+        /* A UI reset may restore the native callback without updating the
+         * service record. Supervisor cleanup may instead have removed both. */
+        if (hook->is_hooked(module_context, (uintptr_t)slot) &&
+            hook->uninstall(module_context, open_hook) < 0) return -1;
+        open_hook = -1;
+    }
+    /* Publish the wrapper's native calling contract before the service writes
+     * its pointer. The short IRQ lock covers both state and slot publication. */
+    S.driver = driver;
+    S.original = expected;
+    id = hook->install(module_context, (uintptr_t)slot, (uintptr_t)rh_wrapper,
+                       &original, CANOPUS_HOOK_POINTER);
+    if (id < 0) return -1;
+    if (original != (uintptr_t)expected) {
+        (void)hook->uninstall(module_context, id);
+        return -1;
+    }
+    open_hook = id;
+    open_hook_slot = slot;
+    S.installed = 1;
+    return 0;
+}
 /* Rebinding requires a caller-owned UI transaction. Installing this callback
  * does not restart miwear or tear down font wrappers already held by live
  * pages. Affected cached file sources and verified owners adopt the immutable
@@ -1079,8 +1118,8 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     else if (!slot || (observed != expected && *slot != rh_wrapper)) rc = -2009;
     else {
         font_restart = S.installed && *slot != rh_wrapper;
-        if (rh_reinstall_posix(&S, rh_platform_driver(), slot,
-                              rh_platform_original(), rh_wrapper)) rc = -2010;
+        if (install_open_hook(rh_platform_driver(), slot, rh_platform_original()))
+            rc = -2010;
     }
     rh_platform_unlock(irq);
     startup_record("driver.valid", valid, 0, (uintptr_t)slot);

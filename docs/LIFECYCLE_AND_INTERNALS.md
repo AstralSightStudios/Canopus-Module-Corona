@@ -28,6 +28,7 @@ This document details the internal lifecycle constraints, memory layout, benchma
 - **Watchface loader:** Not hooked. Page reconstruction is not used as a workaround. Random RAM/ROM resource replacement is not supported.
 - **Animation derived owners:** Animations are not stopped globally. Derived animation classes, callback frames, canvas/snapshot buffers, and off-tree widgets require dedicated reloading protocols.
 - **Process restarts:** `miwear` is not restarted automatically; `restart_miwear.sh` deliberately exits with code 78. Stopping or deactivating the module requires a clean device reboot.
+- **Open hook:** The HOOK service installs `CANOPUS_HOOK_POINTER` on the exact target's LVGL POSIX open slot. Driver, original callback and slot checks remain under the publication lock. Repeated activation reuses the owned hook; a reset slot retires its old service record before reinstalling. Foreign callbacks or hook ownership conflicts are rejected. This does not make retained fonts, images or callbacks hot-unloadable.
 
 ---
 

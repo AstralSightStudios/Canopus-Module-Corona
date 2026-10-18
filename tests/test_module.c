@@ -6,6 +6,7 @@
 #include "resource_hook_calendar_runtime.h"
 #include "canopus_abi.h"
 #include "canopus_services.h"
+#include "canopus_hook.h"
 #include "canopus_module_registration.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -65,14 +66,23 @@ static int32_t timer_destroy(const struct canopus_context_v1 *, int32_t);
 static struct canopus_time_obj time_services = {
     .timer_create = timer_create, .timer_start = timer_start, .timer_destroy = timer_destroy,
 };
+static int32_t hook_install(const struct canopus_context_v1 *, uintptr_t, uintptr_t,
+                            uintptr_t *, canopus_hook_type_t);
+static int32_t hook_uninstall(const struct canopus_context_v1 *, int32_t);
+static int hook_is_hooked(const struct canopus_context_v1 *, uintptr_t);
+static const struct canopus_hook_obj hook_services = {
+    .install = hook_install, .uninstall = hook_uninstall, .is_hooked = hook_is_hooked,
+};
+static unsigned hooks_installed, hooks_uninstalled;
+static int fail_hook_install, fail_hook_uninstall;
 static struct canopus_services_v1 services = {
     .struct_size = sizeof(struct canopus_services_v1),
-    .group_version = {[CANOPUS_SVC_TIME] = 1},
+    .group_version = {[CANOPUS_SVC_TIME] = 1, [CANOPUS_SVC_HOOK] = 1},
 };
 static struct canopus_context_v1 test_context = {
     .struct_size = sizeof(struct canopus_context_v1),
     .abi = (CANOPUS_ABI_MAJOR << 16) | CANOPUS_ABI_MINOR,
-    .services = &services, .time = &time_services,
+    .services = &services, .time = &time_services, .hook = &hook_services,
 };
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
@@ -253,6 +263,28 @@ static int backend(void *d, const char *p, int mode) {
 }
 static int other(void *d, const char *p, int mode) { (void)d; (void)p; (void)mode; return 0; }
 static rh_open_fn slot = backend;
+static int32_t hook_install(const struct canopus_context_v1 *ctx, uintptr_t target,
+                            uintptr_t wrapper, uintptr_t *original, canopus_hook_type_t type) {
+    int32_t id;
+    assert(ctx == &test_context && locked && target == (uintptr_t)&slot);
+    assert(type == CANOPUS_HOOK_POINTER);
+    if (fail_hook_install) return CANOPUS_SVC_ERR_NOMEM;
+    id = canopus_hook_install(ctx->slot, target, wrapper, original, type);
+    if (id >= 0) hooks_installed++;
+    return id;
+}
+static int32_t hook_uninstall(const struct canopus_context_v1 *ctx, int32_t id) {
+    int32_t rc;
+    assert(ctx == &test_context && locked);
+    if (fail_hook_uninstall) return CANOPUS_SVC_ERR_IO;
+    rc = canopus_hook_uninstall(ctx->slot, id);
+    if (!rc) hooks_uninstalled++;
+    return rc;
+}
+static int hook_is_hooked(const struct canopus_context_v1 *ctx, uintptr_t target) {
+    assert(ctx == &test_context && locked && target == (uintptr_t)&slot);
+    return canopus_hook_is_hooked(target);
+}
 int rh_platform_open(const char *path, int mode) {
     assert(!locked);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
@@ -2150,6 +2182,8 @@ static int test_time_activation_failure(const char *interval) {
     /* Initial activation failure makes the Supervisor clear its timer table.
      * A subsequent caller must not treat any old index as a live service ID. */
     memset(mock_timers, 0, sizeof(mock_timers));
+    canopus_hook_release_slot(test_context.slot);
+    assert(slot == backend);
     fail_timer_interval = 0;
     assert(d->activate(&test_context) == 0);
     assert(active_timers(50u) == 1 && active_timers(1000u) == 1);
@@ -2160,9 +2194,73 @@ static int test_time_activation_failure(const char *interval) {
     puts("partial timer scheduling rolls back IDs before Supervisor cleanup and retry");
     return 0;
 }
+static int test_hook_services(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    uintptr_t foreign_slots[CANOPUS_HOOK_MAX_SLOTS], original;
+    unsigned before, i;
+    int32_t foreign;
+    services.group_version[CANOPUS_SVC_HOOK] = 0;
+    assert(d->activate(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_HOOK] = 1;
+    test_context.hook = NULL;
+    assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    test_context.hook = &hook_services;
+    assert(!config_opens && !hooks_installed && slot == backend);
+
+    fail_hook_install = 1;
+    assert(d->activate(&test_context) == -2010 && slot == backend);
+    assert(!timers_created && !canopus_hook_is_hooked((uintptr_t)&slot));
+    fail_hook_install = 0;
+    /* A foreign hook can leave the native pointer unchanged. Its ownership
+     * still prevents our install, and must not be removed on failure. */
+    foreign = canopus_hook_install(1u, (uintptr_t)&slot, (uintptr_t)backend,
+                                   &original, CANOPUS_HOOK_POINTER);
+    assert(foreign == 0 && original == (uintptr_t)backend);
+    assert(d->activate(&test_context) == -2010 && slot == backend);
+    assert(canopus_hook_is_active(foreign) && !hooks_uninstalled);
+    assert(canopus_hook_uninstall(1u, foreign) == 0);
+    for (i = 0; i < CANOPUS_HOOK_MAX_SLOTS; i++) {
+        foreign_slots[i] = (uintptr_t)backend;
+        assert(canopus_hook_install(1u, (uintptr_t)&foreign_slots[i], (uintptr_t)other,
+                                   &original, CANOPUS_HOOK_POINTER) == (int32_t)i);
+    }
+    assert(d->activate(&test_context) == -2010 && slot == backend);
+    assert(!hooks_installed && !hooks_uninstalled && !timers_created);
+    canopus_hook_release_slot(1u);
+
+    assert(d->activate(&test_context) == 0 && slot != backend);
+    assert(canopus_hook_is_active(0) && hooks_installed == 1);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    before = hooks_installed;
+    for (i = 0; i < 40u; i++) assert(d->activate(&test_context) == 0);
+    assert(hooks_installed == before && !hooks_uninstalled);
+
+    slot = other;
+    assert(d->activate(&test_context) == -2009 && slot == other);
+    assert(hooks_installed == before && !hooks_uninstalled);
+    slot = backend; /* Firmware reset the slot, while the record remains live. */
+    fail_hook_uninstall = 1;
+    assert(d->activate(&test_context) == -2010 && slot == backend);
+    assert(hooks_installed == before && canopus_hook_is_active(0));
+    fail_hook_uninstall = 0;
+    assert(d->activate(&test_context) == 0 && slot != backend);
+    assert(hooks_installed == before + 1 && hooks_uninstalled == 1 && font_disabled);
+
+    canopus_hook_release_slot(test_context.slot); /* Supervisor removed its record too. */
+    assert(slot == backend && !canopus_hook_is_hooked((uintptr_t)&slot));
+    assert(d->activate(&test_context) == 0 && slot != backend);
+    assert(hooks_installed == before + 2 && hooks_uninstalled == 1);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    assert(d->stop(&test_context) == CANOPUS_RESULT_REBOOT_REQUIRED);
+    assert(slot != backend && hooks_uninstalled == 1 && !locked);
+    puts("hook services: ID zero, conflict, capacity, reset/release recovery and residency passed");
+    return 0;
+}
 int main(int argc, char **argv) {
+    canopus_hook_engine_init();
     if (argc == 3 && !strcmp(argv[1], "--time-activation-failure"))
         return test_time_activation_failure(argv[2]);
+    if (argc == 2 && !strcmp(argv[1], "--hook-services")) return test_hook_services();
     if (argc == 2 && !strcmp(argv[1], "--time-services")) return test_time_services();
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
