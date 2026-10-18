@@ -169,10 +169,11 @@ CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
 输出为 `dist/corona-0.3.0.canopus`，包含每个 target 的 ELF 与 CMI2 回执。
 旧 Supervisor 需要按新版框架流程重装；安装及升级语义见 [安装说明](docs/INSTALL.md)。
 
-当前新框架兼容验证：Band11 `.139/.155/.177` 已通过新 CLI 编译与 ELF 校验；
-P67 `.043` 的现有 `0x0c588d59`（电池采样图片创建）和 `0x0c5883f9`（控制中心样式）
-尚未进入框架 target 白名单，构建会在校验阶段失败。补齐精确 target 的证据和审批前，
-不能生成可交付的 `.043` 包。此次兼容构建尚未实机验证。
+当前新框架兼容验证：四个目标 `.043/.139/.155/.177` 均已通过新 CLI 编译与 ELF 校验，
+四目标统一 `.canopus` 包已通过 CLI 校验；`.043` 原生完整交付也已通过宿主与产物测试。
+`.043` 需要包含 Canopus 提交 `219fcb9` 的 target pack（revision 8），其中补齐了图片创建与
+控制中心样式的两项精确 XIP 跳板身份。它们仍为 `restricted / STATIC_RECOVERED / PENDING`，
+没有提升实机能力状态。此次兼容构建尚未实机验证。
 
 ---
 
