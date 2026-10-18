@@ -78,6 +78,9 @@ for target in 139 155 177 1043; do
         "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
+    "$ROOT/build/test_module_${target}" --time-services
+    "$ROOT/build/test_module_${target}" --time-activation-failure 50
+    "$ROOT/build/test_module_${target}" --time-activation-failure 1000
     "$ROOT/build/test_module_${target}" --launcher-background
     "$ROOT/build/test_module_${target}" --font-reload
     "$ROOT/build/test_module_${target}"

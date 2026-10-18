@@ -1,4 +1,5 @@
 #include "canopus_abi.h"
+#include "canopus_services.h"
 #include "canopus_module_registration.h"
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
@@ -47,7 +48,32 @@ static uint32_t fonts_retargeted;
 /* 1 = pending/busy, 0 = completed, negative = rejected/failed. */
 static int32_t font_result;
 static uint32_t font_last_changed;
-static void *refresh_timer, *watch_timer;
+static const struct canopus_context_v1 *module_context;
+static int32_t refresh_timer = -1, watch_timer = -1;
+
+static int bind_context(const struct canopus_context_v1 *ctx) {
+    if (!canopus_services_has(ctx, CANOPUS_SVC_TIME, 1) || !ctx->time ||
+        !ctx->time->timer_create || !ctx->time->timer_start ||
+        !ctx->time->timer_destroy) return CANOPUS_SVC_ERR_UNSUPPORTED;
+    if (module_context && module_context != ctx) return CANOPUS_SVC_ERR_STATE;
+    module_context = ctx;
+    return 0;
+}
+static int32_t create_timer(uint32_t interval, canopus_timer_callback_t callback) {
+    int32_t id = module_context->time->timer_create(module_context, interval, 1,
+                                                   callback, 0);
+    int32_t rc;
+    if (id < 0) return id;
+    rc = module_context->time->timer_start(module_context, id);
+    if (rc < 0) {
+        (void)module_context->time->timer_destroy(module_context, id);
+        return rc;
+    }
+    return id;
+}
+static void delete_timer(int32_t id) {
+    (void)module_context->time->timer_destroy(module_context, id);
+}
 static struct rh_snapshot *active_snapshot, *refresh_previous_snapshot;
 /* Semantic declarations survive absent packages and app upgrades. Only the
  * materialized file snapshot is visible to the open hook. */
@@ -305,7 +331,7 @@ static void poll_blur_diagnostics(void) {
 /* One request, coalesced across activations. The temporary UI timer retries only
  * until the selected target's verified retirement/owner stages and dirty-area
  * request complete; a failed adapter never counts as a completed retirement. */
-static void refresh_step(void *timer, unsigned ui_owner) {
+static void refresh_step(unsigned ui_owner) {
     struct rh_mapping_view current, previous;
     struct rh_snapshot *current_pin, *previous_pin, *previous_owner = 0;
     const struct rh_mapping_view *old;
@@ -371,19 +397,18 @@ static void refresh_step(void *timer, unsigned ui_owner) {
         images_done = 1;
     if (cache_dropped && images_done && fonts_done && calendar_done &&
         rh_platform_request_full_redraw() == 0) {
-        void *done;
+        int32_t done;
         irq = rh_platform_lock();
         done = refresh_timer;
         if (redraws != UINT32_MAX) redraws++;
         refresh_pending = 0;
-        refresh_timer = 0;
+        refresh_timer = -1;
         previous_owner = refresh_previous_snapshot;
         refresh_previous_snapshot = 0;
         rh_platform_unlock(irq);
-        /* A watch/manual retry may complete while an old UI timer handle is
-         * stale after restart. Delete only the callback's own live timer; any
-         * other still-live timer self-deletes when its wrapper next runs. */
-        if (done && timer == done) rh_platform_timer_delete(done);
+        /* Service timers belong to the module, not a native UI object. Retire
+         * the retry even when the watcher completes this transaction. */
+        if (done >= 0) delete_timer(done);
     }
 done:
     snapshot_release(previous_owner);
@@ -393,21 +418,21 @@ done:
     refreshing = 0;
     rh_platform_unlock(irq);
 }
-static void refresh_timer_step(void *timer) {
-    if (timer != refresh_timer) {
-        if (timer) rh_platform_timer_delete(timer);
-        return;
-    }
+static void refresh_timer_step(const struct canopus_context_v1 *ctx,
+                               int32_t timer, void *user_data) {
+    (void)ctx;
+    (void)user_data;
+    if (timer != refresh_timer) return;
     /* Reentrant firmware I/O must not run a second publisher or mutate the
      * response buffer while the watcher/result writer owns its transaction. */
     if (control_busy || result_busy) return;
-    refresh_step(timer, 1u);
+    refresh_step(1u);
     publish_current_result();
 }
 static int ensure_refresh_timer(void) {
-    if (refresh_pending && !refresh_timer)
-        refresh_timer = rh_platform_timer_create(50u, refresh_timer_step);
-    return refresh_pending && !refresh_timer ? -2011 : 0;
+    if (refresh_pending && refresh_timer < 0)
+        refresh_timer = create_timer(50u, refresh_timer_step);
+    return refresh_pending && refresh_timer < 0 ? -2011 : 0;
 }
 static int request_refresh(void) {
     uint32_t irq = rh_platform_lock();
@@ -420,7 +445,7 @@ static int request_refresh(void) {
         refresh_pending = 1;
     }
     rh_platform_unlock(irq);
-    refresh_step(0, 0u);
+    refresh_step(0u);
     /* The redirect remains resident on allocation failure; do not report a
      * completed activation. A subsequent activate can retry scheduling. */
     return ensure_refresh_timer();
@@ -865,7 +890,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     rh_platform_unlock(irq);
     if (revision) remember_reload_signal(signal, signal_size);
     if (refresh_pending) {
-        refresh_step(0, 1u);
+        refresh_step(1u);
         (void)ensure_refresh_timer();
     }
     publish_current_result();
@@ -880,15 +905,15 @@ done:
     snapshot_release(declarations);
     snapshot_release(captured);
 }
-static void watch_step(void *timer) {
+static void watch_step(const struct canopus_context_v1 *ctx,
+                       int32_t timer, void *user_data) {
     char signal[RH_CONTROL_REQUEST_MAX];
     uint32_t signal_size = 0, irq;
     unsigned kind = 0, new_status = 0;
     int rc;
-    if (timer != watch_timer) {
-        if (timer) rh_platform_timer_delete(timer);
-        return;
-    }
+    (void)ctx;
+    (void)user_data;
+    if (timer != watch_timer) return;
     /* Reserve request observation as well as config I/O against nested timers.
      * Read status before the pending-refresh branch, without reading mappings. */
     irq = rh_platform_lock();
@@ -920,7 +945,7 @@ static void watch_step(void *timer) {
     flush_result();
     if (kind == RH_REQUEST_STATUS) publish_status_result();
     if (refresh_pending && !new_status) {
-        refresh_step(0, 1u);
+        refresh_step(1u);
         (void)ensure_refresh_timer();
         publish_current_result();
     } else if (!new_status) {
@@ -953,16 +978,16 @@ static void watch_step(void *timer) {
     rh_platform_unlock(irq);
 }
 static int schedule_watch_timer(void) {
-    void *next = rh_platform_timer_create(RH_RELOAD_POLL_MS, watch_step);
-    if (!next) return -2012;
-    watch_timer = next;
-    return 0;
+    if (watch_timer >= 0) return 0;
+    watch_timer = create_timer(RH_RELOAD_POLL_MS, watch_step);
+    return watch_timer < 0 ? -2012 : 0;
 }
 static int32_t prepare(const struct canopus_context_v1 *c) {
     struct rh_snapshot *candidate = 0, *previous, *declarations = 0, *old_declarations;
     uint32_t irq;
     int fd, rc = 0, error;
-    (void)c;
+    rc = bind_context(c);
+    if (rc) return rc;
     startup_record("prepare.begin", 0, 0, (uintptr_t)S.installed);
     if (S.installed) {
         startup_record("prepare.end", -2004, 0, S.count);
@@ -1029,6 +1054,8 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     int rc = 0, valid;
     uintptr_t observed = 0, expected;
     unsigned font_restart = 0;
+    rc = bind_context(c);
+    if (rc) return rc;
     /* Keep a complete activation together, including the final return code. */
     if (startup_log_used > RH_STARTUP_LOG_BYTES - 1536u) startup_log_used = 0;
     startup_record("activate.begin", 0, 0, (uintptr_t)configured);
@@ -1077,6 +1104,14 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     /* request_refresh initializes the new transaction status; the observed
      * restart must remain visible until the timer reaches the disabled adapter. */
     if (font_restart) font_result = -2014;
+    if (rc) {
+        /* Initial activation failures make the Supervisor reclaim services.
+         * Clear our IDs before returning, including partial scheduling success;
+         * a UI rebind failure must also leave no stale retry/watcher handles. */
+        if (refresh_timer >= 0) delete_timer(refresh_timer);
+        if (watch_timer >= 0) delete_timer(watch_timer);
+        refresh_timer = watch_timer = -1;
+    }
     startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
     return rc;
 }

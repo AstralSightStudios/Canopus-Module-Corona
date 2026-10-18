@@ -73,6 +73,4 @@ int rh_platform_request_full_redraw(void);
  * bypass them. */
 int rh_platform_font_path_get(uint32_t index, char *name, char *path);
 int rh_platform_font_retarget(uint32_t index, const char *path);
-void *rh_platform_timer_create(uint32_t interval_ms, void (*callback)(void *));
-void rh_platform_timer_delete(void *);
 #endif

@@ -1101,11 +1101,3 @@ int rh_platform_font_retarget(uint32_t index, const char *path) {
     return same_string(resolved, path) ? 0 : -1;
 #endif
 }
-void *rh_platform_timer_create(uint32_t interval_ms, void (*callback)(void *)) {
-    if (!interval_ms || !callback) return 0;
-    return ((void *(*)(void (*)(void *), uint32_t, void *))(uintptr_t)RH_FW_TIMER_CREATE)
-        (callback, interval_ms, 0);
-}
-void rh_platform_timer_delete(void *timer) {
-    ((void (*)(void *))(uintptr_t)RH_FW_TIMER_DELETE)(timer);
-}

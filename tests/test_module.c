@@ -5,6 +5,7 @@
 #include "resource_hook_background.h"
 #include "resource_hook_calendar_runtime.h"
 #include "canopus_abi.h"
+#include "canopus_services.h"
 #include "canopus_module_registration.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -42,15 +43,37 @@ static int blur_capture_result = -7;
 static int registration_fd = 10;
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
-static int fail_timer, reject_redraw, reject_metadata, unsupported;
+static int fail_timer, fail_timer_start, reject_redraw, reject_metadata, unsupported;
+static uint32_t fail_timer_interval;
 static unsigned metadata_refreshes;
 static int open_errno = 5;
 static int fail_open, fail_alloc, fail_read, driver_valid = 1, image_cache_ready = 1,
            redraw_ready = 1, locked;
 static int driver;
 static const char *backend_expected = (RH_THEME_ROOT "current/icon.bin") + 1;
-struct mock_timer { uint32_t interval; void (*callback)(void *); int active; };
-static struct mock_timer mock_timers[64];
+struct mock_timer {
+    uint32_t interval;
+    canopus_timer_callback_t callback;
+    void *user_data;
+    int allocated, active;
+};
+static struct mock_timer mock_timers[16];
+static int32_t timer_create(const struct canopus_context_v1 *, uint32_t, int,
+                            canopus_timer_callback_t, void *);
+static int32_t timer_start(const struct canopus_context_v1 *, int32_t);
+static int32_t timer_destroy(const struct canopus_context_v1 *, int32_t);
+static struct canopus_time_obj time_services = {
+    .timer_create = timer_create, .timer_start = timer_start, .timer_destroy = timer_destroy,
+};
+static struct canopus_services_v1 services = {
+    .struct_size = sizeof(struct canopus_services_v1),
+    .group_version = {[CANOPUS_SVC_TIME] = 1},
+};
+static struct canopus_context_v1 test_context = {
+    .struct_size = sizeof(struct canopus_context_v1),
+    .abi = (CANOPUS_ABI_MAJOR << 16) | CANOPUS_ABI_MINOR,
+    .services = &services, .time = &time_services,
+};
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
@@ -93,7 +116,7 @@ int rh_calendar_poll(void) {
     if (calendar_reenter_poll) {
         unsigned before = image_drops;
         calendar_reenter_poll = 0;
-        assert(canopus_module_descriptor.activate(NULL) == 0);
+        assert(canopus_module_descriptor.activate(&test_context) == 0);
         assert(image_drops == before);
     }
     return 0;
@@ -321,7 +344,7 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     }
     if (fd == 13 && activate_during_read) {
         activate_during_read = 0;
-        assert(canopus_module_descriptor.activate(NULL) == 0);
+        assert(canopus_module_descriptor.activate(&test_context) == 0);
     }
     if (fd == 11) { data = input; cursor = &position; }
     else if (fd == 12) { data = control_signal; cursor = &signal_position; }
@@ -481,27 +504,37 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
     return 0;
 }
 int rh_platform_redraw_ready(void) { assert(!locked); return redraw_ready; }
-void *rh_platform_timer_create(uint32_t interval, void (*cb)(void *)) {
+static int32_t timer_create(const struct canopus_context_v1 *ctx, uint32_t interval,
+                            int periodic, canopus_timer_callback_t cb, void *user_data) {
     unsigned i;
-    assert(!locked && interval && cb);
-    if (fail_timer) return NULL;
+    assert(ctx == &test_context && !locked && interval && periodic == 1 && cb);
+    if (fail_timer || interval == fail_timer_interval) return CANOPUS_SVC_ERR_NOMEM;
     for (i = 0; i < sizeof(mock_timers) / sizeof(mock_timers[0]); i++) {
-        if (!mock_timers[i].active) {
+        if (!mock_timers[i].allocated) {
             mock_timers[i].interval = interval;
             mock_timers[i].callback = cb;
-            mock_timers[i].active = 1;
-            if (interval == 1000u) watcher_scheduled = 1;
+            mock_timers[i].user_data = user_data;
+            mock_timers[i].allocated = 1;
             timers_created++;
-            return &mock_timers[i];
+            return (int32_t)i;
         }
     }
-    return NULL;
+    return CANOPUS_SVC_ERR_NOMEM;
 }
-void rh_platform_timer_delete(void *timer) {
-    struct mock_timer *mock = timer;
-    assert(!locked && mock && mock->active);
-    mock->active = 0;
+static int32_t timer_start(const struct canopus_context_v1 *ctx, int32_t id) {
+    assert(ctx == &test_context && !locked && id >= 0 && id < 16);
+    assert(mock_timers[id].allocated && !mock_timers[id].active);
+    if (fail_timer_start) return CANOPUS_SVC_ERR_UNSUPPORTED;
+    mock_timers[id].active = 1;
+    if (mock_timers[id].interval == 1000u) watcher_scheduled = 1;
+    return 0;
+}
+static int32_t timer_destroy(const struct canopus_context_v1 *ctx, int32_t id) {
+    assert(ctx == &test_context && !locked && id >= 0 && id < 16);
+    assert(mock_timers[id].allocated);
+    memset(&mock_timers[id], 0, sizeof(mock_timers[id]));
     timers_deleted++;
+    return 0;
 }
 static void fire_timers(uint32_t interval) {
     unsigned i;
@@ -510,7 +543,7 @@ static void fire_timers(uint32_t interval) {
         if (timer->active && timer->interval == interval) {
             unsigned previous_ui_timer = in_ui_timer;
             in_ui_timer = 1;
-            timer->callback(timer);
+            timer->callback(&test_context, (int32_t)i, timer->user_data);
             in_ui_timer = previous_ui_timer;
         }
     }
@@ -603,7 +636,7 @@ static int test_control_status(const char *startup) {
     else if (!strcmp(startup, "comments")) input = "# no active themes\n";
     else assert(count);
     assert(!active_timers(1000u) && !result_writes);
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     fail_open = 0;
     font_rc = -2090; /* A font-refresh rejection is not a config error. */
     fire_timers(50u);
@@ -730,7 +763,7 @@ static int test_launcher_background(void) {
     unsigned drops, metadata, fonts, draws;
     background_config = "version=1\nmode=image\nimage=themes/current/start.bin\n";
     control_config = config;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(active_timers(1000u) == 1u && !background_opens && !background_commits);
     fire_timers(50u);
     fire_timers(1000u); /* Startup config is applied by the existing UI watcher. */
@@ -871,7 +904,7 @@ static int test_control_reload_status(void) {
         "resource-hook-reload-v2\tng.lst.corona\t\200\n"
     };
     const int pending_result = 1;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     fire_timers(50u);
     control_config = config;
     opens = control_opens; allocs = allocations; writes = result_writes;
@@ -1023,7 +1056,7 @@ static int test_control_quickapp_status(void) {
     quickapp_mode = 1; quickapp_result = 1;
     input = "/resource/\tthemes/current/\n"
             QUICKAPP_KEY "\tthemes/current/icon.bin\n";
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     fire_timers(50u); fire_timers(1000u); fire_timers(50u);
     query_status("resource-hook-status-v1\tng.lst.corona\tquickapp-initial\n", 0, 2, 0);
     control_signal = "resource-hook-reload-v1\tng.lst.corona\tbad-quickapp-config\n";
@@ -1090,7 +1123,7 @@ static int test_startup_diagnostics(void) {
     /* Diagnostic opens must not replace the errno belonging to config.open. */
     fail_open = 1; open_errno = 13; clobber_startup_errno = 1;
     driver_valid = 0; /* Config failure is soft; the driver check still fails. */
-    assert(d->activate(NULL) == -2008 && slot == backend);
+    assert(d->activate(&test_context) == -2008 && slot == backend);
     assert(strstr(startup_record, "config.open rc=-1 errno=13"));
     assert(strstr(startup_record, "config.fallback rc=-2005 errno=13"));
     assert(strstr(startup_record, "prepare.end rc=0"));
@@ -1099,33 +1132,33 @@ static int test_startup_diagnostics(void) {
 
     /* Log open/write failures are best-effort, never a new lifecycle failure. */
     fail_startup_open = 1; open_errno = RH_ENOENT;
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     before = startup_writes;
     driver_valid = 0;
-    assert(d->activate(NULL) == -2008 && startup_writes == before);
+    assert(d->activate(&test_context) == -2008 && startup_writes == before);
     fail_startup_open = 0;
     for (i = 1; i <= 3; i++) {
         fail_startup_write = (int)i;
-        assert(d->activate(NULL) == -2008 && !locked && slot == backend);
+        assert(d->activate(&test_context) == -2008 && !locked && slot == backend);
     }
     fail_startup_write = 0;
-    assert(d->activate(NULL) == -2008);
+    assert(d->activate(&test_context) == -2008);
     assert(strstr(startup_record, "driver.valid rc=0"));
     assert(strstr(startup_record, "hook.end rc=-2008"));
     driver_valid = 1; slot = other;
-    assert(d->activate(NULL) == -2009);
+    assert(d->activate(&test_context) == -2009);
     assert(strstr(startup_record, "slot.expected rc=0"));
     assert(strstr(startup_record, "slot.observed rc=0"));
     assert(strstr(startup_record, "hook.end rc=-2009"));
     slot = backend; fail_timer = 1;
-    assert(d->activate(NULL) == -2012);
+    assert(d->activate(&test_context) == -2012);
     assert(strstr(startup_record, "watch.end rc=-2012"));
     fail_timer = 0;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(strstr(startup_record, "activate.end rc=0"));
     assert(slot != backend && active_timers(1000u) == 1);
     for (i = 0; i < 40; i++) {
-        assert(d->activate(NULL) == 0);
+        assert(d->activate(&test_context) == 0);
         assert(startup_position <= 2048u && startup_record[startup_position] == 0);
         assert(!strncmp(startup_record, "RHSTART1", 8));
         assert(strstr(startup_record, "activate.end rc=0"));
@@ -1137,7 +1170,7 @@ static int test_startup_diagnostics(void) {
 static int test_calendar_initial_invalid(void) {
     calendar_start_rc = -2153;
     calendar_force_pending = 1; /* Real engine has no active configuration yet. */
-    assert(canopus_module_descriptor.activate(NULL) == 0);
+    assert(canopus_module_descriptor.activate(&test_context) == 0);
     fire_timers(1000u);
     assert(metadata_refreshes && redraws && !calendar_calls);
     query_status("resource-hook-status-v1\tng.lst.corona\tcalendar-initial-invalid\n", -2153, 1, 0);
@@ -1151,7 +1184,7 @@ static int test_calendar_initial_invalid(void) {
 static int test_calendar_coordinator_guards(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned polls;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     fire_timers(50u); fire_timers(1000u);
     polls = calendar_poll_calls;
     calendar_stage_rc = -2153;
@@ -1184,7 +1217,7 @@ static int test_calendar_coordinator_guards(void) {
 static int test_calendar_alpha_hook(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     calendar_hook_mode = 1;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(slot(&driver, &RH_CALENDAR_OUTPUT_PATH[1], 2) == 7);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     /* Even a stub offering a legacy bank must not redirect P67 POSIX reads. */
@@ -1219,7 +1252,7 @@ static int test_calendar_integration(void) {
     calendar_mode = 1;
     input = "/resource/calendar/background.bin\tthemes/calendar/background.bin\n";
     calendar_rc = -1;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(!calendar_calls && !metadata_refreshes && !redraws);
     assert(active_timers(50u) == 1);
 
@@ -1254,7 +1287,7 @@ static int test_calendar_integration(void) {
 
     /* Reactivation creates a fresh calendar stage, still deferred to UI. */
     calls = calendar_calls;
-    assert(d->activate(NULL) == 0 && calendar_calls == calls);
+    assert(d->activate(&test_context) == 0 && calendar_calls == calls);
     fire_timers(50u);
     assert(calendar_calls == calls + 1);
     fire_timers(1000u); /* Delete the superseded watcher. */
@@ -1302,7 +1335,7 @@ static int test_empty_startup_then_theme_reload(void) {
 
     fail_open = 1;
     open_errno = RH_ENOENT;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(slot != backend && active_timers(1000u) == 1 && !active_timers(50u));
     assert(!image_drops && !metadata_refreshes && !redraws && !retargets);
     backend_expected = "resource/icon.bin";
@@ -1363,7 +1396,7 @@ static int test_startup_fallback_then_reload(const char *fault) {
             input = oversized;
         }
     }
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(strstr(startup_record, fallback));
     assert(strstr(startup_record, "prepare.end rc=0"));
     assert(strstr(startup_record, "activate.end rc=0"));
@@ -1426,13 +1459,13 @@ static int test_font_integration(void) {
     assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
     font_status(0, 0, 0);
     font_rc = 1;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     assert(!font_calls && !retargets && !redraws && active_timers(50u) == 1);
     font_status(1, 1, 0);
     fire_timers(50u);
     assert(font_calls == 1 && !redraws);
     before = font_calls;
-    assert(d->activate(NULL) == 0 && font_calls == before);
+    assert(d->activate(&test_context) == 0 && font_calls == before);
     font_rc = 0; font_changes = 3;
     fire_timers(50u);
     assert(redraws == 1 && !active_timers(50u));
@@ -1493,7 +1526,7 @@ static int test_font_integration(void) {
     font_status(0, 0, 6);
 
     slot = backend; /* UI restart loses the old callback slot. */
-    assert(d->activate(NULL) == 0 && font_disabled == 1);
+    assert(d->activate(&test_context) == 0 && font_disabled == 1);
     font_status(-2014, 1, 6);
     fire_timers(50u);
     font_status(-2099, 0, 6);
@@ -1567,7 +1600,7 @@ static int test_compact_snapshots(void) {
     unsigned char status[48];
     unsigned before, resident;
     uint32_t bytes;
-    assert(d->activate(NULL) == 0);
+    assert(d->activate(&test_context) == 0);
     fire_timers(50u);
     assert(persistent_allocs == 1 && live_bytes < 256u);
 
@@ -1681,9 +1714,9 @@ static int test_quickapp_integration(void) {
     input = declarations;
     /* Preparation stores declarations separately and projects normal rules,
      * without consulting launcher state on the non-UI startup path. */
-    assert(!d->prepare(NULL) && slot == backend && !quickapp_lookups);
+    assert(!d->prepare(&test_context) && slot == backend && !quickapp_lookups);
     quickapp_count(1);
-    assert(!d->activate(NULL) && !quickapp_lookups);
+    assert(!d->activate(&test_context) && !quickapp_lookups);
     fire_timers(50u);
     assert(!quickapp_lookups && active_timers(1000u) == 1);
     quickapp_open("resource/icon.bin", (RH_THEME_ROOT "base/icon.bin") + 1);
@@ -1845,7 +1878,7 @@ static int test_blur_diagnostic_writer(void) {
     char saved_startup[sizeof(startup_record)];
     background_config = "version=1\nmode=image\nimage=themes/current/start.bin\n";
     control_config = config;
-    assert(canopus_module_descriptor.activate(NULL) == 0);
+    assert(canopus_module_descriptor.activate(&test_context) == 0);
     memcpy(saved_startup, startup_record, sizeof(saved_startup));
     assert(!blur_opens && !blur_gets);
     fire_timers(50u);
@@ -2063,7 +2096,74 @@ static int test_blur_diagnostic_writer(void) {
     return 0;
 }
 #endif
+static int test_time_services(void) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned before, i;
+    assert(d->prepare(NULL) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    assert(d->activate(NULL) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_TIME] = 0;
+    assert(d->activate(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_TIME] = 1;
+    test_context.time = NULL;
+    assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    test_context.time = &time_services;
+    assert(!config_opens && !timers_created && slot == backend);
+
+    input = "";
+    fail_timer = 1;
+    assert(d->activate(&test_context) == -2012);
+    assert(!timers_created && !active_timers(1000u));
+    fail_timer = 0;
+    fail_timer_start = 1;
+    assert(d->activate(&test_context) == -2012);
+    assert(timers_created == 1 && timers_deleted == 1 && !mock_timers[0].allocated);
+    fail_timer_start = 0;
+    assert(d->activate(&test_context) == 0);
+    assert(mock_timers[0].active && mock_timers[0].interval == 1000u);
+    before = timers_created;
+    for (i = 0; i < 40u; i++) assert(d->activate(&test_context) == 0);
+    assert(timers_created == before && active_timers(1000u) == 1);
+
+    redraw_ready = 0;
+    control_config = config;
+    control_signal = "resource-hook-reload-v1\tng.lst.corona\ttime-services\n";
+    fail_timer_start = 1;
+    fire_timers(1000u);
+    assert(!active_timers(50u) && timers_created == timers_deleted + 1);
+    fail_timer_start = 0;
+    fire_timers(1000u);
+    assert(active_timers(50u) == 1);
+    redraw_ready = 1;
+    fire_timers(50u);
+    assert(!active_timers(50u) && timers_created == timers_deleted + 1);
+    assert(active_timers(1000u) == 1 && slot != backend && !locked);
+    puts("time services: missing capability, ID zero, start rollback, reuse and retry cleanup passed");
+    return 0;
+}
+static int test_time_activation_failure(const char *interval) {
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    fail_timer_interval = (uint32_t)strtoul(interval, NULL, 10);
+    assert(fail_timer_interval == 50u || fail_timer_interval == 1000u);
+    assert(d->activate(&test_context) == (fail_timer_interval == 50u ? -2011 : -2012));
+    assert(timers_created == 1 && timers_deleted == 1);
+    assert(!active_timers(50u) && !active_timers(1000u));
+    /* Initial activation failure makes the Supervisor clear its timer table.
+     * A subsequent caller must not treat any old index as a live service ID. */
+    memset(mock_timers, 0, sizeof(mock_timers));
+    fail_timer_interval = 0;
+    assert(d->activate(&test_context) == 0);
+    assert(active_timers(50u) == 1 && active_timers(1000u) == 1);
+    fire_timers(50u);
+    assert(!active_timers(50u) && active_timers(1000u) == 1);
+    fire_timers(1000u);
+    assert(timers_created == timers_deleted + 1 && !locked);
+    puts("partial timer scheduling rolls back IDs before Supervisor cleanup and retry");
+    return 0;
+}
 int main(int argc, char **argv) {
+    if (argc == 3 && !strcmp(argv[1], "--time-activation-failure"))
+        return test_time_activation_failure(argv[2]);
+    if (argc == 2 && !strcmp(argv[1], "--time-services")) return test_time_services();
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (argc == 2 && !strcmp(argv[1], "--blur-diagnostics"))
@@ -2156,15 +2256,15 @@ int main(int argc, char **argv) {
 
     fail_open = 1;
     before = closes;
-    assert(d->prepare(NULL) == 0 && slot == backend && closes == before);
+    assert(d->prepare(&test_context) == 0 && slot == backend && closes == before);
     assert(strstr(startup_record, "config.fallback rc=-2005"));
     open_errno = 13;  /* EACCES degrades to a resident pass-through. */
-    assert(d->prepare(NULL) == 0 && slot == backend);
+    assert(d->prepare(&test_context) == 0 && slot == backend);
     open_errno = 0;  /* Unknown config failure is also nonfatal. */
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     open_errno = RH_ENOENT;
     driver_valid = 0;
-    assert(d->prepare(NULL) == 0);  /* Missing mappings prepare an empty snapshot. */
+    assert(d->prepare(&test_context) == 0);  /* Missing mappings prepare an empty snapshot. */
     assert(slot == backend && allocations == frees + persistent_allocs &&
            persistent_allocs == 0 && !image_drops && !metadata_refreshes && !redraws &&
            !retargets && !timers_created && !active_timers(50u) && !active_timers(1000u));
@@ -2174,71 +2274,71 @@ int main(int argc, char **argv) {
 
     driver_valid = 1;
     fail_open = 0; fail_alloc = 1;
-    assert(d->prepare(NULL) == 0 && slot == backend && closes == before + 1);
+    assert(d->prepare(&test_context) == 0 && slot == backend && closes == before + 1);
     assert(strstr(startup_record, "config.fallback rc=-2006"));
     fail_alloc = 0; fail_read = 1;
-    assert(d->prepare(NULL) == 0 && allocations == frees && !persistent_allocs);
+    assert(d->prepare(&test_context) == 0 && allocations == frees && !persistent_allocs);
     assert(strstr(startup_record, "config.fallback rc=-2007"));
     fail_read = 0; input = "/resource/\t/outside/\n";
-    assert(d->prepare(NULL) == 0 && slot == backend && allocations == frees);
+    assert(d->prepare(&test_context) == 0 && slot == backend && allocations == frees);
     assert(strstr(startup_record, "config.fallback rc=-2007"));
     input = "# empty\n";
     driver_valid = 0;
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     input = "";
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     assert(slot == backend && allocations == frees + persistent_allocs &&
            !image_drops && !metadata_refreshes && !redraws && !timers_created);
     driver_valid = 1;
     input = config;
     /* A failed re-prepare preserves the previously prepared good snapshot. */
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     fail_open = 1; open_errno = 13;
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w) && u32(status + 8) == 0 && u32(status + 12) == 1);
     assert(persistent_allocs == 1 && allocations == frees + persistent_allocs);
     /* Optional absence still explicitly prepares a zero-rule snapshot. */
     open_errno = RH_ENOENT;
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     assert(slot == backend && !timers_created);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w) && u32(status + 8) == 0 && u32(status + 12) == 0);
     fail_open = 0;
     input = config;
-    assert(d->prepare(NULL) == 0);
+    assert(d->prepare(&test_context) == 0);
     driver_valid = 0;
-    assert(d->activate(NULL) == -2008 && slot == backend && !locked);
+    assert(d->activate(&test_context) == -2008 && slot == backend && !locked);
     assert(allocations == frees + persistent_allocs);
     driver_valid = 1; slot = other;
-    assert(d->activate(NULL) == -2009 && slot == other && !locked);
+    assert(d->activate(&test_context) == -2009 && slot == other && !locked);
     slot = NULL;
-    assert(d->activate(NULL) == -2009 && !slot);
+    assert(d->activate(&test_context) == -2009 && !slot);
     slot = backend;
     before = config_opens;
     image_cache_ready = 0;
     redraw_ready = 0;
-    assert(d->activate(NULL) == 0 && slot != backend && !locked);
+    assert(d->activate(&test_context) == 0 && slot != backend && !locked);
     assert(image_drops == 0);  /* no drop while the image caches do not yet exist */
     assert(redraws == 0);      /* and no redraw while no display exists yet */
     image_cache_ready = 1;
     redraw_ready = 1;
     slot = backend;
     fonts_before = font_calls;
-    assert(d->activate(NULL) == 0 && slot != backend && image_drops == 1 && !redraws);
+    assert(d->activate(&test_context) == 0 && slot != backend && image_drops == 1 && !redraws);
     assert(font_calls == fonts_before && font_disabled == 1 && active_timers(50u) == 1);
     font_status(-2014, 1, 0);
     fire_timers(50u);
     assert(redraws == 1 && font_calls == fonts_before + 1 && !active_timers(50u));
     font_status(-2099, 0, 0);
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
-    assert(d->prepare(NULL) == -2004 && config_opens == before);
+    assert(d->prepare(&test_context) == -2004 && config_opens == before);
     fail_open = 1;
-    assert(d->activate(NULL) == 0 && config_opens == before && image_drops == 2 && redraws == 1);
+    assert(d->activate(&test_context) == 0 && config_opens == before && image_drops == 2 && redraws == 1);
     fire_timers(50u);
     assert(redraws == 2 && !active_timers(50u));
     slot = backend;
-    assert(d->activate(NULL) == 0 && slot != backend && config_opens == before);
+    assert(d->activate(&test_context) == 0 && slot != backend && config_opens == before);
     assert(image_drops == 3 && redraws == 2 && active_timers(50u) == 1);
     fire_timers(50u);
     assert(redraws == 3);
@@ -2257,9 +2357,9 @@ int main(int argc, char **argv) {
     assert((int32_t)u32(status + 40) == -2099 && !u32(status + 44));
     /* Busy UI: requests coalesce and the cache isn't touched mid-render. */
     redraw_ready = 0;
-    assert(d->activate(NULL) == 0 && active_timers(50u) == 1);
+    assert(d->activate(&test_context) == 0 && active_timers(50u) == 1);
     before = timers_created;
-    assert(d->activate(NULL) == 0 && timers_created == before + 1);
+    assert(d->activate(&test_context) == 0 && timers_created == before);
     fire_timers(50u);
     assert(image_drops == 3 && redraws == 3);
     redraw_ready = 1;
@@ -2271,12 +2371,12 @@ int main(int argc, char **argv) {
     reject_redraw = 0;
     fire_timers(50u);
     assert(redraws == 4 && !active_timers(50u));
-    fire_timers(1000u);  /* stale watcher timers self-delete after reactivation */
+    fire_timers(1000u);  /* reactivation retains the one service watcher */
     assert(active_timers(1000u) == 1);
     /* Metadata retry does not retire again, rebuild, or prematurely redraw. */
     reject_metadata = 1;
     before = metadata_refreshes;
-    assert(d->activate(NULL) == 0 && active_timers(50u) == 1);
+    assert(d->activate(&test_context) == 0 && active_timers(50u) == 1);
     assert(image_drops == 5 && redraws == 4);
     fire_timers(50u);
     assert(image_drops == 5 && metadata_refreshes == before && rebuilds == 0);
@@ -2286,7 +2386,7 @@ int main(int argc, char **argv) {
     fire_timers(1000u);
     /* Unsupported-target adapters complete a repaint, never claim retirement. */
     unsupported = 1;
-    assert(d->activate(NULL) == 0 && active_timers(50u) == 1);
+    assert(d->activate(&test_context) == 0 && active_timers(50u) == 1);
     assert(image_drops == 5 && redraws == 5 && metadata_refreshes == before + 1);
     fire_timers(50u);
     assert(image_drops == 5 && redraws == 6 && metadata_refreshes == before + 1 &&
@@ -2296,9 +2396,9 @@ int main(int argc, char **argv) {
     /* OOM remains visible, but doesn't remove the resident redirect. */
     redraw_ready = 0;
     fail_timer = 1;
-    assert(d->activate(NULL) == -2011 && slot != backend);
+    assert(d->activate(&test_context) == -2011 && slot != backend);
     fail_timer = 0;
-    assert(d->activate(NULL) == 0 && active_timers(50u) == 1);
+    assert(d->activate(&test_context) == 0 && active_timers(50u) == 1);
     redraw_ready = 1;
     fire_timers(50u);
     assert(redraws == 7 && !active_timers(50u));
@@ -2370,8 +2470,8 @@ int main(int argc, char **argv) {
     assert(image_drops == before + 1);
     assert(!canopus_status_writer_init(&w, status, sizeof(status)));
     assert(!d->query(&w) && u32(status + 12) == 0 && u32(status + 8) == 1);
-    assert(d->activate(NULL) == 0);  /* a zero-rule resident snapshot can rebind */
-    fire_timers(1000u);  /* discard the superseded watcher handle */
+    assert(d->activate(&test_context) == 0);  /* a zero-rule resident snapshot can rebind */
+    fire_timers(1000u);  /* the service watcher survives reactivation */
 
     assert(allocations == frees && persistent_allocs == 0 && !live_bytes &&
            active_timers(1000u) == 1 && !locked);

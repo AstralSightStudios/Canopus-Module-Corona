@@ -7,7 +7,9 @@ This document details the internal lifecycle constraints, memory layout, benchma
 ## 1. Lifecycle Boundaries & Safety Constraints
 
 ### UI Owner Serialization
-- All metadata updates, cache invalidations, and owner refreshes must execute on the serialized UI thread within a dedicated LVGL timer callback.
+- All metadata updates, cache invalidations, and owner refreshes must execute on the serialized module/UI thread through `ctx->time` callbacks. The Supervisor supplies the LVGL heartbeat; the module no longer binds native timer addresses.
+- `prepare` and `activate` require the TIME service and bind the module context. Timer IDs are nonnegative (including zero); creation is followed by an explicit start, and a failed start destroys the allocation. Reactivation reuses the watcher, and completing a refresh destroys its retry timer even when the watcher finishes it. Activation errors destroy both timers and reset local IDs before the Supervisor can reclaim their entries.
+- Timer delivery may pause while LVGL is suspended. Canopus does not currently recover its heartbeat after UI reconstruction; service migration does not add restart recovery or background timing guarantees.
 - Theme files must remain immutable throughout the reload transaction; mutating files in-place during refresh is unsupported.
 - Native setter callbacks must not delete their receiver objects or invalidate the source pointer during invocation.
 - The module re-verifies object hierarchy, class, and source before each native invocation. Naked UI object pointers are never cached across UI ticks.
