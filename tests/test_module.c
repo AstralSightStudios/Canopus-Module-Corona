@@ -21,6 +21,7 @@ static struct temp_allocation temp_allocations[4096];
 static uint32_t live_bytes, peak_bytes;
 static unsigned alloc_attempts, fail_alloc_at;
 static int reenter_read, nested_reload, activate_during_read;
+static unsigned in_open_task;
 static int reenter_signal_read, reenter_result_open, reenter_result_write;
 static void fire_timers(uint32_t);
 extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
@@ -81,18 +82,23 @@ static int32_t module_register(const struct canopus_context_v1 *,
 static const struct canopus_fs_obj fs_services = {
     .open = fs_open, .read = fs_read, .write = fs_write, .close = fs_close,
 };
+static void *mem_alloc(const struct canopus_context_v1 *, uint32_t);
+static void mem_free(const struct canopus_context_v1 *, void *);
+static struct canopus_mem_obj mem_services = {
+    .alloc = mem_alloc, .free = mem_free,
+};
 static unsigned hooks_installed, hooks_uninstalled;
 static int fail_hook_install, fail_hook_uninstall;
 static struct canopus_services_v1 services = {
     .struct_size = sizeof(struct canopus_services_v1),
     .group_version = {[CANOPUS_SVC_MODULE] = 1, [CANOPUS_SVC_FS] = 1,
-                      [CANOPUS_SVC_TIME] = 1, [CANOPUS_SVC_HOOK] = 1},
+                      [CANOPUS_SVC_MEM] = 1, [CANOPUS_SVC_TIME] = 1, [CANOPUS_SVC_HOOK] = 1},
     .module_register = module_register,
 };
 static struct canopus_context_v1 test_context = {
     .struct_size = sizeof(struct canopus_context_v1),
     .abi = (CANOPUS_ABI_MAJOR << 16) | CANOPUS_ABI_MINOR,
-    .services = &services, .fs = &fs_services,
+    .services = &services, .fs = &fs_services, .mem = &mem_services,
     .time = &time_services, .hook = &hook_services,
 };
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
@@ -471,8 +477,9 @@ static int32_t module_register(const struct canopus_context_v1 *ctx,
     registrations++;
     return 0;
 }
-void *rh_platform_alloc(uint32_t size) {
+static void *mem_alloc(const struct canopus_context_v1 *ctx, uint32_t size) {
     void *pointer;
+    assert(ctx == &test_context && !in_open_task);
     assert(!locked && size && size <= RH_CONFIG_BYTES + 1u +
            sizeof(struct rh_snapshot) + RH_RULES * sizeof(struct rh_indexed_rule));
     if (++alloc_attempts == fail_alloc_at || fail_alloc) return NULL;
@@ -485,8 +492,9 @@ void *rh_platform_alloc(uint32_t size) {
     if (live_bytes > peak_bytes) peak_bytes = live_bytes;
     return pointer;
 }
-void rh_platform_free(void *p) {
+static void mem_free(const struct canopus_context_v1 *ctx, void *p) {
     unsigned i;
+    assert(ctx == &test_context && !in_open_task);
     assert(!locked && p);
     for (i = 0; i < allocations; i++) if (temp_allocations[i].pointer == p && temp_allocations[i].live) {
         temp_allocations[i].live = 0;
@@ -573,6 +581,7 @@ static int32_t timer_start(const struct canopus_context_v1 *ctx, int32_t id) {
 static int32_t timer_destroy(const struct canopus_context_v1 *ctx, int32_t id) {
     assert(ctx == &test_context && !locked && id >= 0 && id < 16);
     assert(mock_timers[id].allocated);
+    if (mock_timers[id].interval == 1000u) watcher_scheduled = 0;
     memset(&mock_timers[id], 0, sizeof(mock_timers[id]));
     timers_deleted++;
     return 0;
@@ -582,9 +591,11 @@ static void fire_timers(uint32_t interval) {
     for (i = 0; i < sizeof(mock_timers) / sizeof(mock_timers[0]); i++) {
         struct mock_timer *timer = &mock_timers[i];
         if (timer->active && timer->interval == interval) {
-            unsigned previous_ui_timer = in_ui_timer;
+            unsigned previous_ui_timer = in_ui_timer, previous_open_task = in_open_task;
             in_ui_timer = 1;
+            in_open_task = 0;
             timer->callback(&test_context, (int32_t)i, timer->user_data);
+            in_open_task = previous_open_task;
             in_ui_timer = previous_ui_timer;
         }
     }
@@ -1704,8 +1715,13 @@ static int test_compact_snapshots(void) {
     control_config = "/resource/\tthemes/after-open/\n";
     control_signal = "resource-hook-reload-v1\tbackend-pin\n";
     nested_reload = 1;
+    in_open_task = 1;
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
-    assert(!nested_reload && persistent_allocs == resident && frees > before);
+    in_open_task = 0;
+    assert(!nested_reload && persistent_allocs == resident + 1u);
+    /* The hook leaves the dead bank queued; a valid owner callback reclaims it. */
+    fire_timers(1000u);
+    assert(persistent_allocs == resident && frees > before);
     backend_expected = (RH_THEME_ROOT "after-open/icon.bin") + 1;
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
 
@@ -1731,7 +1747,9 @@ static void quickapp_open(const char *path, const char *expected) {
     unsigned before = quickapp_lookups;
     int nested = nested_reload;
     backend_expected = expected;
+    in_open_task = 1;
     assert(slot(&driver, path, 2) == 7);
+    in_open_task = 0;
     if (!nested) assert(quickapp_lookups == before); /* No launcher work inside open. */
 }
 static int test_quickapp_integration(void) {
@@ -1887,7 +1905,9 @@ static int test_quickapp_integration(void) {
     control_signal = "resource-hook-reload-v1\tquickapp-backend-pin\n";
     nested_reload = 1;
     quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "quick/icon.bin") + 1);
-    assert(!nested_reload && persistent_allocs == 2);
+    assert(!nested_reload && persistent_allocs == 3);
+    fire_timers(1000u);
+    assert(persistent_allocs == 2);
     quickapp_open((QUICKAPP_ICON2) + 1, (RH_THEME_ROOT "next/icon.bin") + 1);
 
     control_config = "# remove declarations too\n";
@@ -2127,6 +2147,36 @@ static int test_blur_diagnostic_writer(void) {
     return 0;
 }
 #endif
+static int test_mem_services(void) {
+    struct canopus_context_v1 foreign;
+    struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    assert(rh_platform_alloc(16u) == NULL);
+    rh_platform_free(NULL);
+    assert(rh_platform_bind_mem(NULL) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_MEM] = 0;
+    assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_MEM] = 1;
+    test_context.mem = NULL;
+    assert(d->activate(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    test_context.mem = &mem_services;
+    mem_services.alloc = NULL;
+    assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    mem_services.alloc = mem_alloc;
+    mem_services.free = NULL;
+    assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    mem_services.free = mem_free;
+    assert(!config_opens && !allocations && !timers_created && slot == backend);
+    assert(rh_platform_bind_mem(&test_context) == 0);
+    assert(rh_platform_bind_mem(&test_context) == 0);
+    foreign = test_context;
+    assert(rh_platform_bind_mem(&foreign) == CANOPUS_SVC_ERR_STATE);
+    assert(d->prepare(&test_context) == 0 && persistent_allocs == 1);
+    input = "";
+    assert(d->prepare(&test_context) == 0);
+    assert(!persistent_allocs && allocations == frees);
+    puts("MEM service binding, required callbacks and owner-side release passed");
+    return 0;
+}
 static int test_time_services(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned before, i;
@@ -2179,18 +2229,26 @@ static int test_time_services(void) {
 }
 static int test_time_activation_failure(const char *interval) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
+    unsigned opens;
     fail_timer_interval = (uint32_t)strtoul(interval, NULL, 10);
     assert(fail_timer_interval == 50u || fail_timer_interval == 1000u);
     assert(d->activate(&test_context) == (fail_timer_interval == 50u ? -2011 : -2012));
     assert(timers_created == 1 && timers_deleted == 1);
     assert(!active_timers(50u) && !active_timers(1000u));
-    /* Initial activation failure makes the Supervisor clear its timer table.
-     * A subsequent caller must not treat any old index as a live service ID. */
+    assert(!hooks_installed && slot == backend);
+    /* Supervisor also reclaims MEM on initial failure. No prepared reference
+     * may survive it; retrying this descriptor must read a fresh configuration. */
+    for (unsigned i = 0; i < allocations; i++)
+        if (temp_allocations[i].live) mem_free(&test_context, temp_allocations[i].pointer);
+    assert(!persistent_allocs && allocations == frees);
+    opens = config_opens;
     memset(mock_timers, 0, sizeof(mock_timers));
     canopus_hook_release_slot(test_context.slot);
     assert(slot == backend);
     fail_timer_interval = 0;
     assert(d->activate(&test_context) == 0);
+    assert(config_opens == opens + 1u && persistent_allocs == 1u);
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
     assert(active_timers(50u) == 1 && active_timers(1000u) == 1);
     fire_timers(50u);
     assert(!active_timers(50u) && active_timers(1000u) == 1);
@@ -2214,7 +2272,8 @@ static int test_hook_services(void) {
 
     fail_hook_install = 1;
     assert(d->activate(&test_context) == -2010 && slot == backend);
-    assert(!timers_created && !canopus_hook_is_hooked((uintptr_t)&slot));
+    assert(!active_timers(50u) && !active_timers(1000u) && timers_created == timers_deleted);
+    assert(!canopus_hook_is_hooked((uintptr_t)&slot));
     fail_hook_install = 0;
     /* A foreign hook can leave the native pointer unchanged. Its ownership
      * still prevents our install, and must not be removed on failure. */
@@ -2230,7 +2289,7 @@ static int test_hook_services(void) {
                                    &original, CANOPUS_HOOK_POINTER) == (int32_t)i);
     }
     assert(d->activate(&test_context) == -2010 && slot == backend);
-    assert(!hooks_installed && !hooks_uninstalled && !timers_created);
+    assert(!hooks_installed && !hooks_uninstalled && timers_created == timers_deleted);
     canopus_hook_release_slot(1u);
 
     assert(d->activate(&test_context) == 0 && slot != backend);
@@ -2267,6 +2326,7 @@ int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "--time-activation-failure"))
         return test_time_activation_failure(argv[2]);
     if (argc == 2 && !strcmp(argv[1], "--hook-services")) return test_hook_services();
+    if (argc == 2 && !strcmp(argv[1], "--mem-services")) return test_mem_services();
     if (argc == 2 && !strcmp(argv[1], "--time-services")) return test_time_services();
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
@@ -2419,10 +2479,10 @@ int main(int argc, char **argv) {
     slot = NULL;
     assert(d->activate(&test_context) == -2009 && !slot);
     slot = backend;
-    before = config_opens;
     image_cache_ready = 0;
     redraw_ready = 0;
     assert(d->activate(&test_context) == 0 && slot != backend && !locked);
+    before = config_opens;
     assert(image_drops == 0);  /* no drop while the image caches do not yet exist */
     assert(redraws == 0);      /* and no redraw while no display exists yet */
     image_cache_ready = 1;

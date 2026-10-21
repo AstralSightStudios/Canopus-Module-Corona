@@ -1,6 +1,7 @@
 #include "canopus_abi.h"
 #include "canopus_services.h"
 #include "canopus_module_entry.h"
+#include "canopus_memory.h"
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 #include "resource_hook_quickapp.h"
@@ -33,7 +34,7 @@ __attribute__((used, section(".rh.target")))
 static const char rh_artifact_target[48] = RH_TARGET_ID;
 #endif
 static struct rh_state S;
-static int configured;
+static int configured, activated_once;
 /* Explicit config failures stay latched until a successful publication.
  * Autonomous QuickApp resolution has an independently recoverable error. */
 static int32_t config_error, quickapp_error, calendar_config_error, calendar_error;
@@ -62,6 +63,8 @@ static int bind_context(const struct canopus_context_v1 *ctx) {
         !ctx->hook->install || !ctx->hook->uninstall ||
         !ctx->hook->is_hooked) return CANOPUS_SVC_ERR_UNSUPPORTED;
     if (module_context && module_context != ctx) return CANOPUS_SVC_ERR_STATE;
+    rc = rh_platform_bind_mem(ctx);
+    if (rc < 0) return rc;
     rc = rh_platform_bind_fs(ctx);
     if (rc < 0) return rc;
     module_context = ctx;
@@ -109,17 +112,42 @@ static void snapshot_free(void *cookie, void *pointer) {
     rh_platform_free(pointer);
 }
 static const struct rh_allocator snapshot_allocator = {0, snapshot_alloc, snapshot_free};
-/* Active ownership, refresh ownership and open/adapter pins all use the same
- * reference count. The last release detaches under the IRQ lock and frees only
- * after unlocking; a backend callback may keep an old generation alive. */
-static void snapshot_release(struct rh_snapshot *snapshot) {
+/* Active ownership, refresh ownership and open/adapter pins share a reference
+ * count. A hook's final release only queues the dead snapshot under the IRQ
+ * lock. Its header then stores an intrusive next pointer, preserving the
+ * compact live layout and requiring no allocation in the hook. */
+_Static_assert(sizeof(struct rh_snapshot) >= sizeof(void *), "retirement link fits");
+static struct rh_snapshot *retired_snapshots;
+static void snapshot_unpin(struct rh_snapshot *snapshot, unsigned from_hook) {
     uint32_t irq;
     unsigned release = 0;
     if (!snapshot) return;
     irq = rh_platform_lock();
-    if (snapshot->references && --snapshot->references == 0u) release = 1;
+    if (snapshot->references && --snapshot->references == 0u) {
+        if (from_hook) {
+            canopus_memcpy(snapshot, &retired_snapshots, sizeof(retired_snapshots));
+            retired_snapshots = snapshot;
+        } else release = 1;
+    }
     rh_platform_unlock(irq);
     if (release) rh_free_snapshot(&snapshot_allocator, snapshot);
+}
+static void snapshot_release(struct rh_snapshot *snapshot) {
+    snapshot_unpin(snapshot, 0u);
+}
+/* Only lifecycle/UI owner callbacks drain this list. Detach first so a hook
+ * can retire another generation while the service frees the previous batch. */
+static void collect_snapshots(void) {
+    struct rh_snapshot *snapshot, *next;
+    uint32_t irq = rh_platform_lock();
+    snapshot = retired_snapshots;
+    retired_snapshots = 0;
+    rh_platform_unlock(irq);
+    while (snapshot) {
+        canopus_memcpy(&next, snapshot, sizeof(next));
+        rh_platform_free(snapshot);
+        snapshot = next;
+    }
 }
 
 /* Best-effort, bounded lifecycle diagnostics. No heap, graphics calls or I/O
@@ -431,6 +459,7 @@ static void refresh_timer_step(const struct canopus_context_v1 *ctx,
     (void)ctx;
     (void)user_data;
     if (timer != refresh_timer) return;
+    collect_snapshots();
     /* Reentrant firmware I/O must not run a second publisher or mutate the
      * response buffer while the watcher/result writer owns its transaction. */
     if (control_busy || result_busy) return;
@@ -485,7 +514,7 @@ static int rh_wrapper(void *d, const char *p, int m) {
     }
 #endif
     if (!result || result == -1) result = rh_posix_open_view(&S, &view, d, p, m);
-    snapshot_release(snapshot);
+    snapshot_unpin(snapshot, 1u);
     return result;
 }
 static int config_read(void *cookie, void *out, uint32_t size) {
@@ -922,6 +951,7 @@ static void watch_step(const struct canopus_context_v1 *ctx,
     (void)ctx;
     (void)user_data;
     if (timer != watch_timer) return;
+    collect_snapshots();
     /* Reserve request observation as well as config I/O against nested timers.
      * Read status before the pending-refresh branch, without reading mappings. */
     irq = rh_platform_lock();
@@ -996,6 +1026,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     int fd, rc = 0, error;
     rc = bind_context(c);
     if (rc) return rc;
+    collect_snapshots();
     startup_record("prepare.begin", 0, 0, (uintptr_t)S.installed);
     if (S.installed) {
         startup_record("prepare.end", -2004, 0, S.count);
@@ -1086,6 +1117,32 @@ static int install_open_hook(void *driver, rh_open_fn *slot, rh_open_fn expected
     S.installed = 1;
     return 0;
 }
+/* Before the first successful activation, Supervisor failure cleanup reclaims
+ * all MEM blocks. Forget our prepared state before returning that failure, and
+ * release our references while the owner can still use the bound service. A
+ * resident reactivation keeps its state because Supervisor retains services. */
+static void rollback_initial_activation(void) {
+    struct rh_snapshot *active, *previous, *declarations;
+    uint32_t irq = rh_platform_lock();
+    if (open_hook >= 0 && module_context->hook->is_hooked(
+            module_context, (uintptr_t)open_hook_slot))
+        (void)module_context->hook->uninstall(module_context, open_hook);
+    open_hook = -1;
+    open_hook_slot = 0;
+    active = active_snapshot;
+    previous = refresh_previous_snapshot;
+    declarations = quickapp_declarations;
+    active_snapshot = refresh_previous_snapshot = quickapp_declarations = 0;
+    configured = 0;
+    S.installed = 0;
+    S.count = 0;
+    refresh_pending = cache_dropped = images_done = fonts_done = calendar_done = refreshing = 0;
+    rh_platform_unlock(irq);
+    snapshot_release(active);
+    snapshot_release(previous);
+    snapshot_release(declarations);
+    collect_snapshots();
+}
 /* Rebinding requires a caller-owned UI transaction. Installing this callback
  * does not restart miwear or tear down font wrappers already held by live
  * pages. Affected cached file sources and verified owners adopt the immutable
@@ -1098,6 +1155,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
     unsigned font_restart = 0;
     rc = bind_context(c);
     if (rc) return rc;
+    collect_snapshots();
     /* Keep a complete activation together, including the final return code. */
     if (startup_log_used > RH_STARTUP_LOG_BYTES - 1536u) startup_log_used = 0;
     startup_record("activate.begin", 0, 0, (uintptr_t)configured);
@@ -1107,6 +1165,23 @@ static int32_t activate(const struct canopus_context_v1 *c) {
         if (rc || !configured) {
             startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
             return rc;
+        }
+    }
+    /* Initial failure makes Supervisor reclaim all MEM, including banks pinned
+     * by an in-flight hook. Reserve every fallible timer before publishing the
+     * hook so no timer failure can expose those banks to service cleanup. */
+    if (!activated_once) {
+        int refresh_rc = 0, watch_rc;
+        if ((S.count || refresh_pending) && refresh_timer < 0) {
+            refresh_timer = create_timer(50u, refresh_timer_step);
+            if (refresh_timer < 0) refresh_rc = -2011;
+        }
+        watch_rc = schedule_watch_timer();
+        rc = refresh_rc ? refresh_rc : watch_rc;
+        if (rc) {
+            startup_record("refresh.end", refresh_rc, 0, (uintptr_t)refresh_timer);
+            startup_record("watch.end", watch_rc, 0, (uintptr_t)watch_timer);
+            goto activation_done;
         }
     }
     startup_record("hook.begin", 0, 0, (uintptr_t)active_snapshot);
@@ -1143,6 +1218,7 @@ static int32_t activate(const struct canopus_context_v1 *c) {
         startup_record("watch.end", watch_rc, 0, (uintptr_t)watch_timer);
         rc = refresh_rc ? refresh_rc : watch_rc;
     }
+activation_done:
     /* request_refresh initializes the new transaction status; the observed
      * restart must remain visible until the timer reaches the disabled adapter. */
     if (font_restart) font_result = -2014;
@@ -1154,6 +1230,8 @@ static int32_t activate(const struct canopus_context_v1 *c) {
         if (watch_timer >= 0) delete_timer(watch_timer);
         refresh_timer = watch_timer = -1;
     }
+    if (rc && !activated_once) rollback_initial_activation();
+    if (!rc) activated_once = 1;
     startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
     return rc;
 }

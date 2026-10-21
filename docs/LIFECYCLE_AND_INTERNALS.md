@@ -14,6 +14,12 @@ This document details the internal lifecycle constraints, memory layout, benchma
 - Native setter callbacks must not delete their receiver objects or invalidate the source pointer during invocation.
 - The module re-verifies object hierarchy, class, and source before each native invocation. Naked UI object pointers are never cached across UI ticks.
 
+### Memory Services
+- Module-owned allocations use the bound `ctx->mem` service on the serialized module/UI owner, outside the IRQ lock. Native LVGL/FreeType/draw-buffer objects retain their native allocation and destruction APIs; service pointers must never be handed to native free.
+- A resource Open Hook can hold the final snapshot reference after a concurrent publication. It queues the dead snapshot under the IRQ lock without calling MEM. The next valid UI timer or lifecycle callback detaches that queue and frees it through the service. The dead header stores the queue link; the live 16-byte snapshot layout is unchanged. Collection may wait while UI timers are suspended.
+- Initial activation reserves and starts its fallible timers before publishing the Open Hook, so a timer failure cannot leave an in-flight reader exposed to Supervisor MEM cleanup. Initial failure clears prepared snapshots and hook/timer ownership before that cleanup. A resident reactivation failure retains its mappings because that Supervisor path does not reclaim services.
+- Allocation policy now belongs to the Supervisor. The module no longer calls the Band 11 private temporary allocator or P67 malloc/free addresses. The current service does not preserve the old Band 11 largest-free-block check and 256-byte margin. Its `available()` reports a reference module budget, not firmware free space, and is not used as an allocation gate.
+
 ### File Services and Registration
 - Module-owned file I/O uses the bound `ctx->fs` service for configuration, control requests/responses, font reads, calendar image banks and logs. READ opens an existing file; REPLACE uses Supervisor WRITE. Handles are module-private, including valid handle zero; failures are negative service errors, with `-2` identifying a missing file. The module does not read task errno or maintain native file I/O addresses.
 - The current Supervisor implements replacement as unlink then create with mode `0666`, rather than the previous in-place truncation with `0600`. Replacement is not atomic; complete-write checks and existing retry/publication rules remain necessary.

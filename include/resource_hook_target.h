@@ -99,8 +99,6 @@
 #define RH_FW_UIKIT_MANAGER_OFFSET    28u
 #define RH_FW_MANAGER_PATH_LIST_HEAD_OFFSET 28u
 #define RH_FW_FONT_ADD_PATH           0x0c86037du
-#define RH_FW_MALLOC                  0x0c1f903du
-#define RH_FW_FREE                    0x0c1f8ff9u
 #elif defined(RH_TARGET_155) && RH_TARGET_155
 /* Exact .155 cache and LVGL image-class identities. */
 #define RH_FW_IMAGE_OBJECT_CLASS  0x2ca14ca8u

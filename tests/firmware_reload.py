@@ -38,7 +38,10 @@ STOP = 0x1c73ff00
 
 class Harness(unittest.TestCase):
     sources = tuple(ROOT / 'src' / (name + '.c') for name in
-                    ('platform', 'platform_band11', 'resource_hook'))
+                    ('platform', 'platform_memory', 'platform_fs', 'resource_hook',
+                     'config', 'calendar_icon', 'calendar_config', 'calendar_native',
+                     'launcher_background')) + (
+                        ROOT / 'tests/firmware_memory_service.c',)
     instruction_budget = 2000000
 
     @classmethod
@@ -99,17 +102,10 @@ class Harness(unittest.TestCase):
         self.unlink_noop = False
         self.entries = {}
         self.cache_nodes = {DATA: [], HEADER: []}
-        heap = 0x3c356b40
-        self.word(0x200b2590, heap)
-        self.word(heap + 28, heap + 0x168)
-        self.word(heap + 32, 0x3cfefdf8)
-        def mallinfo():
-            self.u.mem_write(self.reg(0), struct.pack('<7I', 0, 0, 0,
-                0 if self.alloc_fail else 65536, 0, 0, 0))
-            return self.reg(0)
-        self.hook(0xc34f0a0, mallinfo)
-        self.alloc_hook = self.hook(0xc3507e8, lambda: self.mem(self.reg(2)))
-        self.free_hook = self.hook(0xc34cd2c, lambda: 0)
+        self.alloc_hook = self.hook(self.symbols['rh_test_mem_alloc'],
+            lambda: 0 if self.alloc_fail else self.mem(self.reg(1)))
+        self.free_hook = self.hook(self.symbols['rh_test_mem_free'], lambda: 0)
+        self.assertEqual(self.call('rh_test_bind_mem'), 0)
         self.hook(0xc38002c, lambda: self.u.mem_write(self.reg(0), bytes(self.reg(1))) or self.reg(0))
         self.hook(0xc3a4ace, self.lookup)
         self.hook(0xc3a472c, self.unlink)
@@ -621,7 +617,7 @@ class CalendarAdapter(Harness):
 
 class ModuleControl(Harness):
     """Real compact module and exact AP; signed Supervisor loading is bypassed."""
-    sources = Harness.sources + (ROOT / 'src/config.c', ROOT / 'src/module.c',
+    sources = Harness.sources + (ROOT / 'src/module.c',
                                   ROOT / 'src/quickapp_icon.c',
                                   CANOPUS / 'runtime/control/canopus_control.c')
     instruction_budget = 20000000
@@ -643,8 +639,8 @@ class ModuleControl(Harness):
         self.fail_allocation = False
         self.u.hook_del(self.alloc_hook)
         self.u.hook_del(self.free_hook)
-        self.hook(0xc3507e8, self.allocate)
-        self.hook(0xc34cd2c, self.free)
+        self.hook(self.symbols['rh_test_mem_alloc'], self.allocate)
+        self.hook(self.symbols['rh_test_mem_free'], self.free)
         self.hook(0xc342c54, self.opened)
         self.hook(0xc33d784, self.read_file)
         self.hook(0xc33dc4e, self.write_file)
@@ -680,14 +676,14 @@ class ModuleControl(Harness):
     def allocate(self):
         if self.fail_allocation:
             return 0
-        size = self.reg(2)
+        size = self.reg(1)
         address = self.mem(size)
         self.assertLessEqual(self.next_memory, STATE, 'modeled heap overlaps fixtures')
         self.allocations[address] = size
         return address
 
     def free(self):
-        address = self.reg(0)
+        address = self.reg(1)
         self.assertIn(address, self.allocations)
         self.assertNotIn(address, self.freed, 'double free')
         self.freed.append(address)

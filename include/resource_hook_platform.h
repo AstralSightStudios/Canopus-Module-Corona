@@ -17,6 +17,9 @@ int rh_platform_open(const char *, int);
 int rh_platform_read(int, void *, uint32_t);
 int rh_platform_write(int, const void *, uint32_t);
 void rh_platform_close(int);
+/* MEM pointers are module-owned and released only through ctx->mem on the
+ * serialized owner task, outside the IRQ lock; native free must not see them. */
+int rh_platform_bind_mem(const struct canopus_context_v1 *);
 void *rh_platform_alloc(uint32_t);
 void rh_platform_free(void *);
 void *rh_platform_driver(void);

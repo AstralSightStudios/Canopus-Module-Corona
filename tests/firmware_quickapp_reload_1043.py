@@ -1,7 +1,7 @@
 """Bounded .043 QuickApp BIN reload probe; no rendering/device-success claim.
 
 Run: build/firmware-tests/bin/python tests/firmware_quickapp_reload_1043.py
-Compiles production platform/platform_band10pro/resource_hook with RH_TARGET_1043.
+Compiles production platform/platform_memory/resource_hook with RH_TARGET_1043.
 Does not import/extend firmware_support or probe app registry/launcher lookup.
 
 Capstone audit of the fingerprinted AP: drop 0xc1667dc calls class +12 lookup
@@ -71,8 +71,13 @@ class QuickAppReload1043(unittest.TestCase):
         if not sdk.is_dir():
             sdk = ROOT.parent / 'Canopus-Private'
         objects = []
-        for name in ('platform', 'platform_band10pro', 'resource_hook'):
-            obj = Path(cls.tmp.name) / (name + '.o')
+        sources = [ROOT / 'src' / (name + '.c')
+                   for name in ('platform', 'platform_memory', 'platform_fs',
+                                'resource_hook', 'config', 'calendar_icon',
+                                'calendar_config', 'calendar_native', 'launcher_background')]
+        sources.append(ROOT / 'tests/firmware_memory_service.c')
+        for source in sources:
+            obj = Path(cls.tmp.name) / (source.stem + '.o')
             subprocess.run([os.environ.get('CLANG', shutil.which('clang')),
                 '--target=arm-none-eabi', '-mcpu=cortex-m33', '-mthumb',
                 '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin',
@@ -81,7 +86,7 @@ class QuickAppReload1043(unittest.TestCase):
                 '-I' + str(ROOT / 'include'), '-I' + str(sdk / 'sdk/c'),
                 '-I' + str(sdk / 'manager/target/band11'),
                 '-I' + str(sdk / 'targets/xiaomi-band-10-pro-3.101.043/generated'),
-                '-c', str(ROOT / 'src' / (name + '.c')), '-o', str(obj)], check=True)
+                '-c', str(source), '-o', str(obj)], check=True)
             objects.append(str(obj))
         elf = Path(cls.tmp.name) / 'reload.elf'
         subprocess.run([os.environ.get('LD_LLD', shutil.which('ld.lld')),
@@ -118,15 +123,15 @@ class QuickAppReload1043(unittest.TestCase):
         self.leaves[0xc187e48] = lambda: self.freed.append(('entry', self.reg(0))) or 0
         self.snapshot_allocations = set()
         def allocate():
-            addr = self.mem(self.reg(0))
+            addr = self.mem(self.reg(1))
             self.snapshot_allocations.add(addr)
             return addr
         def free_snapshot():
-            self.assertIn(self.reg(0), self.snapshot_allocations, 'owner/source teardown')
-            self.snapshot_allocations.remove(self.reg(0))
+            self.assertIn(self.reg(1), self.snapshot_allocations, 'owner/source teardown')
+            self.snapshot_allocations.remove(self.reg(1))
             return 0
-        self.leaves[0xc1f903c] = allocate
-        self.leaves[0xc1f8ff8] = free_snapshot
+        self.leaves[self.symbols['rh_test_mem_alloc'] & ~1] = allocate
+        self.leaves[self.symbols['rh_test_mem_free'] & ~1] = free_snapshot
         self.leaves[0xc143798] = self.info
         self.leaves[0xc138744] = lambda: self.invalidations.append(self.reg(0)) or 0
         self.leaves[0xc137df8] = lambda: self.sizes.append(self.reg(0)) or 0
@@ -148,6 +153,7 @@ class QuickAppReload1043(unittest.TestCase):
         self.word(self.display + 1028, 0)  # native LL next after payload
         self.word(0x2010318c, self.display)
         self.word(self.display + 692, self.roots)
+        self.assertEqual(self.call('rh_test_bind_mem'), 0)
 
     def reg(self, i):
         return self.u.reg_read(REGS[i])

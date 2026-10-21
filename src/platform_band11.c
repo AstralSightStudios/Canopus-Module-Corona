@@ -4,12 +4,12 @@
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 #error "Band 11 native platform cannot be used for Band 10 Pro"
 #endif
-#include "canopus_band11_memory.h"
-
-void *rh_platform_alloc(uint32_t size) { return b11_temp_alloc(8u, size); }
-void rh_platform_free(void *p) { b11_temp_free(p); }
-uint32_t rh_platform_lock(void) { return b11_irq_lock(); }
+uint32_t rh_platform_lock(void) {
+    uint32_t irq;
+    __asm__ volatile("mrs %0, primask\ncpsid i" : "=r"(irq) :: "memory");
+    return irq;
+}
 void rh_platform_unlock(uint32_t irq) {
-    b11_barrier();
-    b11_irq_unlock(irq);
+    __asm__ volatile("dsb sy\nisb sy" ::: "memory");
+    __asm__ volatile("msr primask, %0" :: "r"(irq) : "memory");
 }

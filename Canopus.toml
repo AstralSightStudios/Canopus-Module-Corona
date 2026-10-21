@@ -15,7 +15,7 @@ sources = [
     "src/font_reload.c", "src/quickapp_icon.c",
     "${CANOPUS_ROOT}/runtime/control/canopus_control.c",
 ]
-include_dirs = ["include", "${CANOPUS_ROOT}/manager/target/band11"]
+include_dirs = ["include"]
 
 [targets]
 include = ["xiaomi-band-11-4.100.177", "xiaomi-band-11-4.100.139", "xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043"]

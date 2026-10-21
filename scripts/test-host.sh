@@ -48,7 +48,7 @@ CC="$CC" python3 "$ROOT/tests/test_p67_battery.py"
     -DRH_TARGET_1043=1 \
     -DRH_P67_BLUR_DIAGNOSTICS=1 -DCANOPUS_HOST=1 \
     -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \
-    "$ROOT/src/module.c" "$ROOT/src/platform_fs.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+    "$ROOT/src/module.c" "$ROOT/src/platform_fs.c" "$ROOT/src/platform_memory.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
     "$ROOT/src/launcher_background.c" "$SDK/runtime/control/canopus_control.c" \
     "$SDK/runtime/hook/canopus_hook.c" \
     "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_diagnostics"
@@ -77,11 +77,12 @@ for target in 139 155 177 1043; do
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         $TARGET_DEFINE -DCANOPUS_HOST=1 \
         -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \
-        "$ROOT/src/module.c" "$ROOT/src/platform_fs.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+        "$ROOT/src/module.c" "$ROOT/src/platform_fs.c" "$ROOT/src/platform_memory.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
         "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$SDK/runtime/hook/canopus_hook.c" \
         "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
+    "$ROOT/build/test_module_${target}" --mem-services
     "$ROOT/build/test_module_${target}" --time-services
     "$ROOT/build/test_module_${target}" --time-activation-failure 50
     "$ROOT/build/test_module_${target}" --time-activation-failure 1000
