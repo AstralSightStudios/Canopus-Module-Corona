@@ -229,7 +229,7 @@ class NativeCalendar(unittest.TestCase):
         self.trace.append((name, *r))
         if name == 'rh_platform_open':
             self.assertEqual(self.string(r[0]), self.string(self.output))
-            self.assertEqual(r[1], 0x426); return 7
+            self.assertEqual(r[1], 2); return 7
         if name == 'rh_platform_write':
             self.assertEqual(r[0], 7)
             n = self.write_results.pop(0) if self.write_results else r[2]

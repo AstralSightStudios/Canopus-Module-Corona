@@ -102,7 +102,7 @@ struct digest { uint32_t a,b,size; };
 static int fingerprint(const char *path, struct digest *out) {
     unsigned char buf[2048]; uint32_t i; int n,fd;
     struct digest h={2166136261u,0x9e3779b9u,0};
-    fd=rh_platform_open(path,1);
+    fd=rh_platform_open(path,RH_FILE_READ);
     if(fd<0) return -2210;
     while((n=rh_platform_read(fd,buf,sizeof(buf)))>0) {
         if(n>(int)sizeof(buf)) { rh_platform_close(fd); return -2210; }

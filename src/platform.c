@@ -5,45 +5,6 @@
 #include "resource_hook_calendar_runtime.h"
 #include "resource_hook_calendar_native.h"
 #include "resource_hook_calendar_internal.h"
-#include "canopus_veneer.h"
-
-static int *errno_location(void) {
-#if defined(RH_FW_ERRNO_LOCATION)
-    return ((int *(*)(void))(uintptr_t)RH_FW_ERRNO_LOCATION)();
-#else
-    return canopus_fw_errno_location();
-#endif
-}
-
-/* Only the selected, fingerprinted .139, .155 or 10 Pro .043 AP image is supported. */
-int rh_platform_open(const char *path, int mode) {
-    /* Always supply permissions when O_CREAT is present (NuttX bit 2).
-     * Extra varargs are ignored by opens of existing files/devices. */
-    int rc = ((int (*)(const char *, int, ...))(uintptr_t)RH_FW_OPEN)(path, mode, 0600);
-#if RH_FW_OPEN_NEGATIVE_ERRNO
-    /* nx_open returns -errno without updating task errno. Normalize to the
-     * POSIX contract used by the module. */
-    if (rc < 0) {
-        int *value = errno_location();
-        if (value) *value = -rc;
-        return -1;
-    }
-#endif
-    return rc;
-}
-int rh_platform_errno(void) {
-    const int *value = errno_location();
-    return value ? *value : 0;
-}
-int rh_platform_read(int fd, void *out, uint32_t size) {
-    return ((int (*)(int, void *, uint32_t))(uintptr_t)RH_FW_READ)(fd, out, size);
-}
-int rh_platform_write(int fd, const void *data, uint32_t size) {
-    return ((int (*)(int, const void *, uint32_t))(uintptr_t)RH_FW_WRITE)(fd, data, size);
-}
-void rh_platform_close(int fd) {
-    ((int (*)(int))(uintptr_t)RH_FW_CLOSE)(fd);
-}
 void *rh_platform_driver(void) { return (void *)(uintptr_t)RH_FW_POSIX_DRIVER; }
 rh_open_fn *rh_platform_slot(void) { return (rh_open_fn *)(uintptr_t)RH_FW_POSIX_OPEN_SLOT; }
 rh_open_fn rh_platform_original(void) { return (rh_open_fn)(uintptr_t)RH_FW_POSIX_OPEN; }

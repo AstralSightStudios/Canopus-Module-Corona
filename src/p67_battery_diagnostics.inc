@@ -145,7 +145,7 @@ static uint32_t p67_battery_diag_snapshot(char *out, uint32_t capacity) {
  * invoked solely by log(), at the serialized UI-poll boundary. fd=0 is valid. */
 static int p67_battery_diag_native_write(const char *data, uint32_t size) {
     uint32_t used = 0;
-    int fd = rh_platform_open(P67_BATTERY_DIAG_PATH, 38u), written;
+    int fd = rh_platform_open(P67_BATTERY_DIAG_PATH, RH_FILE_REPLACE), written;
     if (fd < 0) return 0;
     while (used < size) {
         written = rh_platform_write(fd, data + used, size - used);

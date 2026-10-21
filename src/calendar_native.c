@@ -189,9 +189,9 @@ static int save(uint32_t buf, const char *output) {
     /* RAM ownership/mutability flags are not a filesystem image contract.
      * Preserve PREMULTIPLIED, reject compressed/reserved metadata above. */
     header[2] &= (uint8_t)~0x30u;
-    /* Exact C4F8698 open mode. Platform supplies permissions and normalizes
-     * native errors; the complete-write loop never claims a partial bank. */
-    fd = rh_platform_open(output, 0x426);
+    /* Replace the inactive bank through the FS service. The complete-write
+     * loop never claims a partial bank as ready for publication. */
+    fd = rh_platform_open(output, RH_FILE_REPLACE);
     if (fd < 0) return -1;
     rc = rh_calendar_full_write(fd, header, sizeof(header));
     if (!rc) rc = rh_calendar_full_write(fd, (const void *)(uintptr_t)pixels, size);

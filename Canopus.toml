@@ -11,7 +11,7 @@ canopus_abi = "1"
 sources = [
     "src/module.c", "src/resource_hook.c", "src/config.c",
     "src/calendar_config.c", "src/calendar_icon.c", "src/calendar_native.c",
-    "src/launcher_background.c", "src/platform.c", "src/platform_memory.c",
+    "src/launcher_background.c", "src/platform.c", "src/platform_fs.c", "src/platform_memory.c",
     "src/font_reload.c", "src/quickapp_icon.c",
     "${CANOPUS_ROOT}/runtime/control/canopus_control.c",
 ]

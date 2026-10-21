@@ -6,6 +6,8 @@
 #include "resource_hook_background.h"
 #define RH_TARGET_1043 1
 #define RH_RELOAD_LIMIT 1024u
+/* Host seam: keep the file mode observable without external platform declarations. */
+#define RH_FILE_READ 1
 #define RH_FW_OBJECT_TREE_WALK 1u
 #define RH_FW_IMAGE_GET_INFO 2u
 #define RH_FW_IMAGE_CLASS 0x2cce61ecu
@@ -97,7 +99,7 @@ static int cache_valid(uint32_t a, uint32_t b) { (void)a; (void)b; return 1; }
 static int retire_cache(uint32_t a, uint32_t b, const struct rh_mapping_view *v, const char *p) {
     (void)a; (void)b; (void)v; (void)p; return 0;
 }
-static int rh_platform_open(const char *p, int flags) { (void)p; assert(flags == 0); return 1; }
+static int rh_platform_open(const char *p, int flags) { (void)p; assert(flags == RH_FILE_READ); return 1; }
 static void rh_platform_close(int fd) { assert(fd == 1); }
 static unsigned redraw_requests;
 static int redraw_result;

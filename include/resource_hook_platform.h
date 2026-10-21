@@ -3,16 +3,17 @@
 #include "resource_hook.h"
 #include <stdint.h>
 
-/* Exact NuttX flags: O_WRONLY=2, O_CREAT=4, O_TRUNC=32. The adapter supplies
- * owner-only permissions. .043 fs_open/mknod confirm the 0x26 combination. */
-#define RH_STARTUP_LOG_FLAGS 0x26
+/* Module file modes; the adapter maps them to Supervisor FS flags. Handles
+ * belong to ctx->fs and must never be returned to the native LVGL driver.
+ * Failures are negative service errno values; no task errno is consulted. */
+#define RH_FILE_READ 1
+#define RH_FILE_REPLACE 2
+#define RH_ENOENT 2
 /* Keep diagnostics inside the device log directory available to log export. */
 #define RH_STARTUP_LOG_PATH "/data/offlinelog/resource-hook-startup.log"
+struct canopus_context_v1;
+int rh_platform_bind_fs(const struct canopus_context_v1 *);
 int rh_platform_open(const char *, int);
-/* POSIX contract on every target: -1 and task errno on a failed open.
- * Snapshot errno immediately, before any diagnostic I/O on the same task. */
-#define RH_ENOENT 2
-int rh_platform_errno(void);
 int rh_platform_read(int, void *, uint32_t);
 int rh_platform_write(int, const void *, uint32_t);
 void rh_platform_close(int);

@@ -20,9 +20,9 @@ int rh_calendar_stage(struct rh_calendar_config **out) {
     c = rh_platform_alloc(sizeof(*c));
     if (!c) return -2151;
     rh_calendar_defaults(c);
-    fd = rh_platform_open(RH_CALENDAR_CONFIG_PATH, 1);
+    fd = rh_platform_open(RH_CALENDAR_CONFIG_PATH, RH_FILE_READ);
     if (fd < 0) {
-        if (rh_platform_errno() != RH_ENOENT) { rh_calendar_discard(c); return -2152; }
+        if (fd != -RH_ENOENT) { rh_calendar_discard(c); return -2152; }
         *out = c; return 0;
     }
     text = rh_platform_alloc(RH_CALENDAR_CONFIG_BYTES + 1u);

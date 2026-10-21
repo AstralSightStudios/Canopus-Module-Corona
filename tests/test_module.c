@@ -7,7 +7,6 @@
 #include "canopus_abi.h"
 #include "canopus_services.h"
 #include "canopus_hook.h"
-#include "canopus_module_registration.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +24,7 @@ static int reenter_read, nested_reload, activate_during_read;
 static int reenter_signal_read, reenter_result_open, reenter_result_write;
 static void fire_timers(uint32_t);
 extern struct canopus_module_descriptor_v1 canopus_module_descriptor;
+extern void rh_module_entry(const struct canopus_context_v1 *);
 static int watcher_scheduled;
 static char result_record[256];
 static unsigned result_position, result_writes;
@@ -41,7 +41,6 @@ static uint32_t blur_epoch, blur_root = 42u, blur_counters, blur_publications;
 static uint32_t blur_core_gate = 1u, blur_pending, blur_armed = 1u, blur_cleanup_armed;
 static int blur_capture_result = -7;
 #endif
-static int registration_fd = 10;
 static unsigned image_drops, redraws, rebuilds, retargets, timers_created, timers_deleted;
 static int font_retargeted;
 static int fail_timer, fail_timer_start, reject_redraw, reject_metadata, unsupported;
@@ -73,16 +72,28 @@ static int hook_is_hooked(const struct canopus_context_v1 *, uintptr_t);
 static const struct canopus_hook_obj hook_services = {
     .install = hook_install, .uninstall = hook_uninstall, .is_hooked = hook_is_hooked,
 };
+static int32_t fs_open(const struct canopus_context_v1 *, const char *, uint32_t);
+static int32_t fs_read(const struct canopus_context_v1 *, int32_t, void *, uint32_t);
+static int32_t fs_write(const struct canopus_context_v1 *, int32_t, const void *, uint32_t);
+static int32_t fs_close(const struct canopus_context_v1 *, int32_t);
+static int32_t module_register(const struct canopus_context_v1 *,
+                               const struct canopus_module_descriptor_v1 *);
+static const struct canopus_fs_obj fs_services = {
+    .open = fs_open, .read = fs_read, .write = fs_write, .close = fs_close,
+};
 static unsigned hooks_installed, hooks_uninstalled;
 static int fail_hook_install, fail_hook_uninstall;
 static struct canopus_services_v1 services = {
     .struct_size = sizeof(struct canopus_services_v1),
-    .group_version = {[CANOPUS_SVC_TIME] = 1, [CANOPUS_SVC_HOOK] = 1},
+    .group_version = {[CANOPUS_SVC_MODULE] = 1, [CANOPUS_SVC_FS] = 1,
+                      [CANOPUS_SVC_TIME] = 1, [CANOPUS_SVC_HOOK] = 1},
+    .module_register = module_register,
 };
 static struct canopus_context_v1 test_context = {
     .struct_size = sizeof(struct canopus_context_v1),
     .abi = (CANOPUS_ABI_MAJOR << 16) | CANOPUS_ABI_MINOR,
-    .services = &services, .time = &time_services, .hook = &hook_services,
+    .services = &services, .fs = &fs_services,
+    .time = &time_services, .hook = &hook_services,
 };
 static unsigned in_ui_timer, calendar_calls, calendar_queries, calendar_old_only;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
@@ -285,12 +296,12 @@ static int hook_is_hooked(const struct canopus_context_v1 *ctx, uintptr_t target
     assert(ctx == &test_context && locked && target == (uintptr_t)&slot);
     return canopus_hook_is_hooked(target);
 }
-int rh_platform_open(const char *path, int mode) {
-    assert(!locked);
+static int32_t fs_open(const struct canopus_context_v1 *ctx, const char *path, uint32_t mode) {
+    assert(ctx == &test_context && !locked);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (!strcmp(path, "/data/offlinelog/resource-hook-p67-blur.log")) {
-        assert(in_ui_timer && mode == 0x26 && mode == RH_STARTUP_LOG_FLAGS);
+        assert(in_ui_timer && mode == CANOPUS_FS_WRITE);
         blur_opens++;
         if (blur_open_fault) return -1;
         blur_position = 0;
@@ -299,7 +310,7 @@ int rh_platform_open(const char *path, int mode) {
     }
 #endif
     if (!strcmp(path, RH_STARTUP_LOG_PATH)) {
-        assert(mode == RH_STARTUP_LOG_FLAGS);
+        assert(mode == CANOPUS_FS_WRITE);
         startup_opens++;
         if (clobber_startup_errno && config_opens) open_errno = 24;
         if (fail_startup_open) return -1;
@@ -307,15 +318,8 @@ int rh_platform_open(const char *path, int mode) {
         memset(startup_record, 0, sizeof(startup_record));
         return 15;
     }
-    if (!strcmp(path, "/dev/canopus")) {
-        const char *fault = getenv("RH_TEST_REGISTRATION");
-        assert(mode == 2);
-        if (fault && !strcmp(fault, "open-fail")) { open_errno = 13; return -1; }
-        if (fault && !strcmp(fault, "fd-zero")) registration_fd = 0;
-        return registration_fd;
-    }
     if (!strcmp(path, RH_CONTROL_RESPONSE_PATH)) {
-        assert(mode == 2);
+        assert(mode == CANOPUS_FS_WRITE);
         if (fail_result_open) return -1;
         if (reenter_result_open) {
             unsigned signals = signal_opens, draws = redraws;
@@ -325,38 +329,38 @@ int rh_platform_open(const char *path, int mode) {
         }
         result_position=0; return 14;
     }
-    assert(mode == 1);
+    assert(mode == CANOPUS_FS_READ);
 #if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
     if (!strcmp(path, BACKGROUNDS_CONFIG_PATH)) {
         background_opens++;
         background_position = 0;
-        if (!background_config) { open_errno = RH_ENOENT; return -1; }
+        if (!background_config) return -RH_ENOENT;
         return 16;
     }
 #endif
     if (!strcmp(path, RH_CONTROL_REQUEST_PATH)) {
         signal_opens++;
         signal_position = 0;
-        if (!control_signal) { open_errno = RH_ENOENT; return -1; }
+        if (!control_signal) return -RH_ENOENT;
         return 12;
     }
     if (!strcmp(path, RH_CONFIG_PATH)) {
         if (watcher_scheduled) {
             control_opens++;
             control_position = 0;
-            if (!control_config) { open_errno = RH_ENOENT; return -1; }
+            if (!control_config) return -RH_ENOENT;
             return 13;
         }
         config_opens++;
         position = 0;
-        if (fail_open) return -1;
+        if (fail_open) return open_errno ? -open_errno : CANOPUS_SVC_ERR_IO;
         return 11;
     }
     assert(!"unexpected file path");
     return -1;
 }
-int rh_platform_errno(void) { assert(!locked); return open_errno; }
-int rh_platform_read(int fd, void *out, uint32_t size) {
+static int32_t fs_read(const struct canopus_context_v1 *ctx, int32_t fd, void *out, uint32_t size) {
+    assert(ctx == &test_context);
     const char *data;
     unsigned *cursor;
     unsigned remaining;
@@ -395,8 +399,8 @@ int rh_platform_read(int fd, void *out, uint32_t size) {
     *cursor += size;
     return (int)size;
 }
-int rh_platform_write(int fd, const void *data, uint32_t size) {
-    const struct canopus_module_registration_v1 *r = data;
+static int32_t fs_write(const struct canopus_context_v1 *ctx, int32_t fd, const void *data, uint32_t size) {
+    assert(ctx == &test_context);
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (fd == 17) {
@@ -439,28 +443,33 @@ int rh_platform_write(int fd, const void *data, uint32_t size) {
         result_position+=size; result_writes++;
         return (int)size;
     }
-    assert(!locked && fd == registration_fd && size == sizeof(*r));
-    assert(r->magic == CANOPUS_MODULE_REGISTRATION_MAGIC);
-    assert(!strcmp((const char *)r->module_id, "corona"));
-    registrations++;
-    {
-        const char *fault = getenv("RH_TEST_REGISTRATION");
-        if (fault && !strcmp(fault, "write-fail")) { open_errno = 5; return -1; }
-        if (fault && !strcmp(fault, "short-write")) return (int)size - 1;
-    }
-    return (int)size;
+    assert(!"unexpected write handle");
+    return CANOPUS_SVC_ERR_STATE;
 }
-void rh_platform_close(int fd) {
-    assert(!locked);
-    if(fd==14 || fd==15) return;
+static int32_t fs_close(const struct canopus_context_v1 *ctx, int32_t fd) {
+    assert(ctx == &test_context && !locked);
+    if(fd==14 || fd==15) return 0;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
-    if (fd == 17) { assert(in_ui_timer); return; }
+    if (fd == 17) { assert(in_ui_timer); return 0; }
 #endif
 #if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
-    if (fd == 16) { background_closes++; return; }
+    if (fd == 16) { background_closes++; return 0; }
 #endif
-    assert(fd == registration_fd || fd == 11 || fd == 12 || fd == 13); closes++;
+    assert(fd == 11 || fd == 12 || fd == 13); closes++;
+    return 0;
+}
+static int32_t module_register(const struct canopus_context_v1 *ctx,
+                               const struct canopus_module_descriptor_v1 *descriptor) {
+    const char *fault = getenv("RH_TEST_REGISTRATION");
+    assert(ctx == &test_context && descriptor == &canopus_module_descriptor && !locked);
+    assert(!strcmp((const char *)descriptor->module_id, "corona"));
+    if (fault) {
+        assert(!strcmp(fault, "service-fail"));
+        return CANOPUS_SVC_ERR_IO;
+    }
+    registrations++;
+    return 0;
 }
 void *rh_platform_alloc(uint32_t size) {
     void *pointer;
@@ -1130,33 +1139,23 @@ static int test_startup_diagnostics(void) {
     assert(strstr(startup_record, "RHSTART1 target="));
     assert(strstr(startup_record, "config=" RH_CONFIG_PATH "\n"));
     assert(strstr(startup_record, "ctor.begin rc=0"));
-    if (fault && !strcmp(fault, "open-fail")) {
+    if (fault) {
+        assert(!strcmp(fault, "service-fail"));
         assert(!registrations && !closes);
-        assert(strstr(startup_record, "register.open rc=-1 errno=13"));
-        assert(strstr(startup_record, "ctor.end rc=-1 errno=13"));
+        assert(strstr(startup_record, "register.end rc=-5 errno=5"));
+        assert(strstr(startup_record, "ctor.end rc=-5 errno=5"));
         return 0;
     }
-    assert(registrations == 1 && closes == 1);
-    if (fault && !strcmp(fault, "write-fail")) {
-        assert(strstr(startup_record, "register.write rc=-1 errno=5"));
-        assert(strstr(startup_record, "ctor.end rc=-1 errno=5"));
-        return 0;
-    }
-    if (fault && !strcmp(fault, "short-write")) {
-        assert(strstr(startup_record, "register.write rc=39 errno=0"));
-        assert(strstr(startup_record, "ctor.end rc=-1 errno=0"));
-        return 0;
-    }
-    assert(strstr(startup_record, fault ? "register.open rc=0" : "register.open rc=10"));
-    assert(strstr(startup_record, "register.write rc=40 errno=0"));
+    assert(registrations == 1 && !closes);
+    assert(strstr(startup_record, "register.end rc=0 errno=0"));
     assert(strstr(startup_record, "ctor.end rc=0"));
     assert(startup_writes > startup_opens); /* Logger completes short writes. */
 
-    /* Diagnostic opens must not replace the errno belonging to config.open. */
+    /* Diagnostic I/O must not replace the negative error from config.open. */
     fail_open = 1; open_errno = 13; clobber_startup_errno = 1;
     driver_valid = 0; /* Config failure is soft; the driver check still fails. */
     assert(d->activate(&test_context) == -2008 && slot == backend);
-    assert(strstr(startup_record, "config.open rc=-1 errno=13"));
+    assert(strstr(startup_record, "config.open rc=-13 errno=13"));
     assert(strstr(startup_record, "config.fallback rc=-2005 errno=13"));
     assert(strstr(startup_record, "prepare.end rc=0"));
     assert(strstr(startup_record, "activate.end rc=-2008"));
@@ -1196,7 +1195,7 @@ static int test_startup_diagnostics(void) {
         assert(strstr(startup_record, "activate.end rc=0"));
         fire_timers(1000u);
     }
-    puts("startup logging, registration faults, errno capture and bounded failures passed");
+    puts("startup logging, service registration faults, error capture and bounded failures passed");
     return 0;
 }
 static int test_calendar_initial_invalid(void) {
@@ -1401,10 +1400,10 @@ static int test_startup_fallback_then_reload(const char *fault) {
     unsigned before;
 
     if (!strcmp(fault, "eacces") || !strcmp(fault, "open-io") ||
-        !strcmp(fault, "unknown-errno")) {
+        !strcmp(fault, "unknown-error")) {
         fail_open = 1;
         open_errno = !strcmp(fault, "eacces") ? 13 :
-                     (!strcmp(fault, "open-io") ? 5 : 0);
+                     (!strcmp(fault, "open-io") ? 5 : 123);
         fallback = "config.fallback rc=-2005";
     } else if (!strcmp(fault, "scratch-oom") || !strcmp(fault, "snapshot-oom")) {
         fail_alloc_at = !strcmp(fault, "scratch-oom") ? 1u : 2u;
@@ -1434,7 +1433,7 @@ static int test_startup_fallback_then_reload(const char *fault) {
     assert(strstr(startup_record, "activate.end rc=0"));
     assert(slot != backend && active_timers(1000u) == 1 && !active_timers(50u));
     assert(!persistent_allocs && !live_bytes && allocations == frees);
-    assert(closes == 1u + (fail_open ? 0u : 1u));
+    assert(closes == (fail_open ? 0u : 1u));
     assert(!image_drops && !metadata_refreshes && !redraws && !retargets);
     backend_expected = "resource/icon.bin";
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
@@ -2139,6 +2138,12 @@ static int test_time_services(void) {
     test_context.time = NULL;
     assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
     test_context.time = &time_services;
+    services.group_version[CANOPUS_SVC_FS] = 0;
+    assert(d->prepare(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_FS] = 1;
+    test_context.fs = NULL;
+    assert(d->activate(&test_context) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    test_context.fs = &fs_services;
     assert(!config_opens && !timers_created && slot == backend);
 
     input = "";
@@ -2257,6 +2262,7 @@ static int test_hook_services(void) {
     return 0;
 }
 int main(int argc, char **argv) {
+    rh_module_entry(&test_context);
     canopus_hook_engine_init();
     if (argc == 3 && !strcmp(argv[1], "--time-activation-failure"))
         return test_time_activation_failure(argv[2]);
@@ -2325,7 +2331,7 @@ int main(int argc, char **argv) {
         assert(rh_validate_rules(&native, 1) == 0);
         assert(rh_validate_rules(&foreign, 1) == -2);
     }
-    assert(registrations == 1 && closes == 1);
+    assert(registrations == 1 && !closes);
     assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
     assert(!strcmp((const char *)d->module_id, "corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
@@ -2358,7 +2364,7 @@ int main(int argc, char **argv) {
     assert(strstr(startup_record, "config.fallback rc=-2005"));
     open_errno = 13;  /* EACCES degrades to a resident pass-through. */
     assert(d->prepare(&test_context) == 0 && slot == backend);
-    open_errno = 0;  /* Unknown config failure is also nonfatal. */
+    open_errno = 123;  /* Unknown negative service error is also nonfatal. */
     assert(d->prepare(&test_context) == 0);
     open_errno = RH_ENOENT;
     driver_valid = 0;

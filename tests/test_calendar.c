@@ -16,10 +16,9 @@ static unsigned fail_retire_at;
 void *rh_platform_alloc(uint32_t size) { assert(!locked); ++allocs; return calloc(1, size); }
 void rh_platform_free(void *p) { assert(!locked); ++frees; free(p); }
 int rh_platform_open(const char *path, int flags) {
-    assert(!locked && flags == 1 && !strcmp(path, RH_CALENDAR_CONFIG_PATH));
-    cursor = 0; return file ? 0 : -1;
+    assert(!locked && flags == RH_FILE_READ && !strcmp(path, RH_CALENDAR_CONFIG_PATH));
+    cursor = 0; return file ? 0 : -open_error;
 }
-int rh_platform_errno(void) { return open_error; }
 int rh_platform_read(int fd, void *out, uint32_t size) {
     unsigned n;
     assert(fd == 0 && !locked);

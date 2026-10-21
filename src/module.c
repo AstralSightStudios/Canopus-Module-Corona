@@ -1,6 +1,6 @@
 #include "canopus_abi.h"
 #include "canopus_services.h"
-#include "canopus_module_registration.h"
+#include "canopus_module_entry.h"
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 #include "resource_hook_quickapp.h"
@@ -54,6 +54,7 @@ static int32_t open_hook = -1;
 static rh_open_fn *open_hook_slot;
 
 static int bind_context(const struct canopus_context_v1 *ctx) {
+    int rc;
     if (!canopus_services_has(ctx, CANOPUS_SVC_TIME, 1) || !ctx->time ||
         !ctx->time->timer_create || !ctx->time->timer_start ||
         !ctx->time->timer_destroy) return CANOPUS_SVC_ERR_UNSUPPORTED;
@@ -61,6 +62,8 @@ static int bind_context(const struct canopus_context_v1 *ctx) {
         !ctx->hook->install || !ctx->hook->uninstall ||
         !ctx->hook->is_hooked) return CANOPUS_SVC_ERR_UNSUPPORTED;
     if (module_context && module_context != ctx) return CANOPUS_SVC_ERR_STATE;
+    rc = rh_platform_bind_fs(ctx);
+    if (rc < 0) return rc;
     module_context = ctx;
     return 0;
 }
@@ -152,7 +155,7 @@ static void startup_record(const char *stage, int32_t rc, int error, uintptr_t d
         *p++ = "0123456789abcdef"[(detail >> (shift - 4u)) & 15u];
     *p++ = '\n';
     startup_log_used = (uint32_t)(p - startup_log);
-    fd = rh_platform_open(RH_STARTUP_LOG_PATH, RH_STARTUP_LOG_FLAGS);
+    fd = rh_platform_open(RH_STARTUP_LOG_PATH, RH_FILE_REPLACE);
     if (fd < 0) return;
     while (used < startup_log_used) {
         written = rh_platform_write(fd, startup_log + used, startup_log_used - used);
@@ -308,9 +311,9 @@ static void poll_blur_diagnostics(void) {
     /* A post-budget repair attempt, including an open failure, consumes its
      * cooldown. Permanent failures get at most one repair per 32 watch polls. */
     if (blur_log_needs_repair) blur_log_repair_cooldown = RH_P67_BLUR_REPAIR_POLLS;
-    fd = rh_platform_open(RH_P67_BLUR_LOG_PATH, RH_STARTUP_LOG_FLAGS);
+    fd = rh_platform_open(RH_P67_BLUR_LOG_PATH, RH_FILE_REPLACE);
     if (fd < 0) return;
-    /* Best-effort, NOT atomic: O_TRUNC discards the last complete snapshot.
+    /* Best-effort, NOT atomic: replacing the file discards the last snapshot.
      * A failed replacement may temporarily leave a partial file. Invalidate
      * dedup and retain bounded repair eligibility even after attempt eight, so
      * recovered I/O can restore a complete current snapshot without a reload. */
@@ -494,8 +497,8 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
     int fd, got, rc = 0;
     char extra;
     if (!path || !out || !capacity || !used) return -1;
-    fd = rh_platform_open(path, 1);
-    if (fd < 0) return rh_platform_errno() == RH_ENOENT ? 1 : -1;
+    fd = rh_platform_open(path, RH_FILE_READ);
+    if (fd < 0) return fd == -RH_ENOENT ? 1 : -1;
     while (total < capacity) {
         got = rh_platform_read(fd, out + total, capacity - total);
         if (got < 0 || (uint32_t)got > capacity - total) { rc = -1; break; }
@@ -612,7 +615,7 @@ static void flush_result(void) {
     if(result_busy || !last_result_valid || result_written || !response_kind ||
        !response_matches(last_result,response_signal_size)) return;
     result_busy=1;
-    fd=rh_platform_open(RH_CONTROL_RESPONSE_PATH,2);
+    fd=rh_platform_open(RH_CONTROL_RESPONSE_PATH,RH_FILE_REPLACE);
     if(fd<0) { result_busy=0; return; }
     while(used<RH_RESULT_BYTES) {
         n=rh_platform_write(fd,last_result+used,RH_RESULT_BYTES-used);
@@ -745,7 +748,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
 
     revision = reload_request && !reload_signal_seen(signal, signal_size);
     if (revision) {
-        fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
+        fd = rh_platform_open(RH_CONTROL_CONFIG, RH_FILE_READ);
         if (fd < 0) {
             config_error = -2102;
             publish_result(signal, signal_size, -2102, 0, 0);
@@ -998,8 +1001,8 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         startup_record("prepare.end", -2004, 0, S.count);
         return -2004;
     }
-    fd = rh_platform_open(RH_CONTROL_CONFIG, 1);
-    error = fd < 0 ? rh_platform_errno() : 0;
+    fd = rh_platform_open(RH_CONTROL_CONFIG, RH_FILE_READ);
+    error = fd < 0 ? -fd : 0;
     startup_record("config.open", fd, error, 0);
     if (fd < 0) {
         if (error != RH_ENOENT) rc = -2005;
@@ -1197,9 +1200,18 @@ static void cp(char *d, const char *s, unsigned n) {
     while (i < n && s[i]) { d[i] = s[i]; i++; }
     while (i < n) d[i++] = 0;
 }
-__attribute__((constructor)) static void ctor(void) {
-    struct canopus_module_registration_v1 r;
-    int fd, error, written = -1;
+#if defined(CANOPUS_HOST)
+void rh_module_entry(const struct canopus_context_v1 *ctx) {
+#else
+__attribute__((constructor)) static void rh_module_entry(
+    const struct canopus_context_v1 *ctx) {
+#endif
+    int rc;
+#if !defined(CANOPUS_MODULE_STOCK_MODLIB)
+    (void)rh_platform_bind_fs(ctx);
+#endif
+    /* Stock modlib supplies no context. Buffer its entry diagnostics until
+     * prepare/activate binds FS; the SDK owns its atomic CMR1 transport. */
     startup_record("ctor.begin", 0, 0, 0);
     canopus_module_descriptor.struct_size = sizeof(canopus_module_descriptor);
     canopus_module_descriptor.abi_major = 1;
@@ -1215,21 +1227,9 @@ __attribute__((constructor)) static void ctor(void) {
     canopus_module_descriptor.deactivate = stop;
     canopus_module_descriptor.stop = stop;
     canopus_module_descriptor.query = query;
-    r.magic = CANOPUS_MODULE_REGISTRATION_MAGIC;
-    r.descriptor = (uint32_t)(uintptr_t)&canopus_module_descriptor;
-    cp((char *)r.module_id, RH_MODULE_ID, 32);
-    startup_record("register.begin", 0, 0, r.descriptor);
-    fd = rh_platform_open("/dev/canopus", 2);
-    error = fd < 0 ? rh_platform_errno() : 0;
-    startup_record("register.open", fd, error, 0);
-    if (fd >= 0) {
-        /* Registration is one atomic device message: never retry short writes.
-         * Log errors without changing descriptor/image lifetime semantics. */
-        written = rh_platform_write(fd, &r, sizeof(r));
-        error = written < 0 ? rh_platform_errno() : 0;
-        startup_record("register.write", written, error, sizeof(r));
-        rh_platform_close(fd);
-    }
-    startup_record("ctor.end", written == (int)sizeof(r) ? 0 : -1, error, 0);
+    startup_record("register.begin", 0, 0, (uintptr_t)&canopus_module_descriptor);
+    rc = canopus_module_register(ctx, &canopus_module_descriptor);
+    startup_record("register.end", rc, rc < 0 ? -rc : 0, 0);
+    startup_record("ctor.end", rc, rc < 0 ? -rc : 0, 0);
 }
 __attribute__((destructor)) static void dtor(void) { (void)stop(0); }

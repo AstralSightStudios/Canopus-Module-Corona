@@ -55,7 +55,6 @@ uint32_t rh_platform_lock(void) { return 0; }
 void rh_platform_unlock(uint32_t irq) { (void)irq; }
 int rh_platform_redraw_ready(void) { return 1; }
 int rh_platform_open(const char *p, int m) { (void)p; (void)m; return -1; }
-int rh_platform_errno(void) { return RH_ENOENT; }
 int rh_platform_read(int fd, void *p, uint32_t n) { (void)fd; (void)p; (void)n; return -1; }
 int rh_platform_write(int fd, const void *p, uint32_t n) { (void)fd; (void)p; return n; }
 void rh_platform_close(int fd) { (void)fd; }
@@ -228,7 +227,7 @@ void rh_platform_calendar_publish(void) { rh_p67_calendar_publish(); }
         args = [self.u.reg_read(r) for r in REGS]
         self.trace.append((name, *args))
         if name == 'rh_platform_open':
-            self.assertEqual(args[1], 0x426)
+            self.assertEqual(args[1], 2)
             return 7 if self.open_ok else -1
         if name == 'rh_platform_write':
             return args[2]

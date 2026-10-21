@@ -172,11 +172,11 @@ void *rh_platform_alloc(uint32_t n) {
 }
 void rh_platform_free(void *p) { assert(p && temp_live); temp_live--; free(p); }
 int rh_platform_open(const char *p,int mode) {
-    assert(mode==1); file_offset=0; file_opens++;
+    assert(mode==RH_FILE_READ); file_offset=0; file_opens++;
     if(eq(p,stock)) open_file=1;
     else if(eq(p,path_a)) open_file=2;
     else if(eq(p,path_b)) open_file=3;
-    else return -1;
+    else return -RH_ENOENT;
     return open_file;
 }
 int rh_platform_read(int fd,void *out,uint32_t n) {

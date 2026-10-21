@@ -1,7 +1,7 @@
-"""Compile the actual shared I/O adapter against native-call stubs.
+"""Exercise the production FS adapter through a fake Supervisor service object.
 
-This checks errno/vararg contracts without claiming firmware execution. The
-module suite separately covers the constructor and lifecycle diagnostic I/O.
+The service owns handle identity and error codes. These host checks do not
+execute firmware I/O or the SDK's stock-modlib registration transport.
 """
 import os
 from pathlib import Path
@@ -10,81 +10,137 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+SDK = Path(os.environ.get('CANOPUS_ROOT', ROOT.parent / 'Canopus-Private')).resolve()
 
 
-class NativeOpenContract(unittest.TestCase):
-    def test_exact_target_open_contracts(self):
-        source = (ROOT / 'src/platform.c').read_text()
-        # Keep the real definitions verbatim; substitute only firmware addresses.
-        adapter = source[source.index('static int *errno_location('):
-                         source.index('int rh_platform_read(')]
+class ServiceIOContract(unittest.TestCase):
+    def test_binding_handles_modes_and_errors(self):
         fixture = r'''
+#include "resource_hook_platform.h"
+#include "canopus_services.h"
 #include <assert.h>
-#include <stdarg.h>
-#include <stdint.h>
 #include <string.h>
-static int native_result, task_errno, expected_flags;
-static int native_open(const char *path, int flags, ...) {
-    va_list args;
-    assert(!strcmp(path, "/fixture"));
+
+static const struct canopus_context_v1 *expected_context;
+static int open_result, read_result, write_result, close_result;
+static unsigned opens, reads, writes, closes;
+static uint32_t expected_flags;
+static int32_t service_open(const struct canopus_context_v1 *ctx,
+                             const char *path, uint32_t flags) {
+    assert(ctx == expected_context && !strcmp(path, "/data/fixture"));
     assert(flags == expected_flags);
-    va_start(args, flags);
-    assert(va_arg(args, int) == 0600);
-    va_end(args);
-    return native_result;
+    opens++;
+    return open_result;
 }
-static int *native_errno_location(void) { return &task_errno; }
-#define RH_FW_OPEN ((uintptr_t)native_open)
-#define RH_FW_OPEN_NEGATIVE_ERRNO TEST_NEGATIVE_ERRNO
-#if TEST_NEGATIVE_ERRNO
-#define RH_FW_ERRNO_LOCATION ((uintptr_t)native_errno_location)
-#else
-static int *canopus_fw_errno_location(void) { return native_errno_location(); }
-#endif
-'''
-        checks = r'''
+static int32_t service_read(const struct canopus_context_v1 *ctx, int32_t handle,
+                             void *out, uint32_t size) {
+    assert(ctx == expected_context && handle == 0 && size == 4);
+    reads++;
+    if (read_result > 0) memcpy(out, "test", (unsigned)read_result);
+    return read_result;
+}
+static int32_t service_write(const struct canopus_context_v1 *ctx, int32_t handle,
+                              const void *data, uint32_t size) {
+    assert(ctx == expected_context && handle == 0 && size == 4);
+    assert(!memcmp(data, "test", size));
+    writes++;
+    return write_result;
+}
+static int32_t service_close(const struct canopus_context_v1 *ctx, int32_t handle) {
+    assert(ctx == expected_context && handle == 0);
+    closes++;
+    return close_result;
+}
+
 int main(void) {
-    expected_flags = 1;
-    native_result = 0; task_errno = 13;
-    assert(rh_platform_open("/fixture", 1) == 0);
-    assert(rh_platform_errno() == 13); /* Successful open need not clear errno. */
-#if TEST_NEGATIVE_ERRNO
-    native_result = -2; task_errno = 13;
-    assert(rh_platform_open("/fixture", 1) == -1);
-    assert(rh_platform_errno() == 2); /* nx_open did not update errno itself. */
-    native_result = -13; task_errno = 2;
-    assert(rh_platform_open("/fixture", 1) == -1);
-    assert(rh_platform_errno() == 13);
-    native_result = -1; task_errno = 2;
-    assert(rh_platform_open("/fixture", 1) == -1);
-    assert(rh_platform_errno() == 1);
-#else
-    native_result = -1; task_errno = 2;
-    assert(rh_platform_open("/fixture", 1) == -1);
-    assert(rh_platform_errno() == 2);
-    task_errno = 13;
-    assert(rh_platform_open("/fixture", 1) == -1);
-    assert(rh_platform_errno() == 13);
-#endif
-    native_result = 7; expected_flags = 2;
-    assert(rh_platform_open("/fixture", 2) == 7);
-    expected_flags = 0x26;
-    assert(rh_platform_open("/fixture", 0x26) == 7);
+    char buffer[4] = {0};
+    struct canopus_fs_obj fs = {
+        .open = service_open, .read = service_read,
+        .write = service_write, .close = service_close,
+    };
+    struct canopus_services_v1 services = {
+        .struct_size = sizeof(services),
+        .group_version = {[CANOPUS_SVC_FS] = 1},
+    };
+    struct canopus_context_v1 ctx = {
+        .struct_size = sizeof(ctx), .services = &services, .fs = &fs,
+    }, foreign;
+    expected_context = &ctx;
+
+    assert(rh_platform_open("/data/fixture", RH_FILE_READ) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    assert(rh_platform_read(0, buffer, sizeof(buffer)) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    assert(rh_platform_write(0, "test", 4) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    rh_platform_close(0);
+    assert(!opens && !reads && !writes && !closes);
+    assert(rh_platform_bind_fs(0) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_FS] = 0;
+    assert(rh_platform_bind_fs(&ctx) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    services.group_version[CANOPUS_SVC_FS] = 1;
+    ctx.fs = 0;
+    assert(rh_platform_bind_fs(&ctx) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    ctx.fs = &fs;
+    fs.open = 0;
+    assert(rh_platform_bind_fs(&ctx) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    fs.open = service_open; fs.read = 0;
+    assert(rh_platform_bind_fs(&ctx) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    fs.read = service_read; fs.write = 0;
+    assert(rh_platform_bind_fs(&ctx) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    fs.write = service_write; fs.close = 0;
+    assert(rh_platform_bind_fs(&ctx) == CANOPUS_SVC_ERR_UNSUPPORTED);
+    fs.close = service_close;
+    assert(!opens && !reads && !writes && !closes);
+
+    assert(rh_platform_bind_fs(&ctx) == 0);
+    assert(rh_platform_bind_fs(&ctx) == 0);
+    foreign = ctx;
+    assert(rh_platform_bind_fs(&foreign) == CANOPUS_SVC_ERR_STATE);
+    /* Unsupported mode must not open a file or accidentally truncate it. */
+    assert(rh_platform_open("/data/fixture", 0x26) == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(rh_platform_open("/data/fixture", 0) == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(!opens);
+
+    expected_flags = CANOPUS_FS_READ;
+    open_result = 0; /* Zero is a valid module-private handle. */
+    assert(rh_platform_open("/data/fixture", RH_FILE_READ) == 0);
+    read_result = 3;
+    assert(rh_platform_read(0, buffer, sizeof(buffer)) == 3);
+    assert(!memcmp(buffer, "tes", 3));
+    read_result = 0;
+    assert(rh_platform_read(0, buffer, sizeof(buffer)) == 0);
+    read_result = CANOPUS_SVC_ERR_IO;
+    assert(rh_platform_read(0, buffer, sizeof(buffer)) == CANOPUS_SVC_ERR_IO);
+    close_result = CANOPUS_SVC_ERR_IO;
+    rh_platform_close(0);
+    assert(closes == 1);
+    open_result = CANOPUS_SVC_ERR_NOTFOUND;
+    assert(rh_platform_open("/data/fixture", RH_FILE_READ) == -RH_ENOENT);
+    open_result = CANOPUS_SVC_ERR_ACCESS;
+    assert(rh_platform_open("/data/fixture", RH_FILE_READ) == CANOPUS_SVC_ERR_ACCESS);
+
+    expected_flags = CANOPUS_FS_WRITE;
+    open_result = 0;
+    assert(rh_platform_open("/data/fixture", RH_FILE_REPLACE) == 0);
+    write_result = 2;
+    assert(rh_platform_write(0, "test", 4) == 2);
+    write_result = CANOPUS_SVC_ERR_NOSPACE;
+    assert(rh_platform_write(0, "test", 4) == CANOPUS_SVC_ERR_NOSPACE);
+    close_result = 0;
+    rh_platform_close(0);
+    assert(opens == 4 && reads == 3 && writes == 2 && closes == 2);
     return 0;
 }
 '''
-        with tempfile.TemporaryDirectory(prefix='rh-native-io-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='rh-service-io-') as tmp:
             path = Path(tmp)
-            (path / 'test.c').write_text(fixture + adapter + checks)
-            for negative in (0, 1):
-                with self.subTest(negative_errno=negative):
-                    binary = path / f'test-{negative}'
-                    subprocess.run([os.environ.get('CC', 'cc'), '-std=c11',
-                                    '-Wall', '-Wextra', '-Werror',
-                                    '-fsanitize=address,undefined',
-                                    f'-DTEST_NEGATIVE_ERRNO={negative}',
-                                    str(path / 'test.c'), '-o', str(binary)], check=True)
-                    subprocess.run([str(binary)], check=True)
+            (path / 'test.c').write_text(fixture)
+            binary = path / 'test'
+            subprocess.run([os.environ.get('CC', 'cc'), '-std=c11',
+                            '-Wall', '-Wextra', '-Werror',
+                            '-fsanitize=address,undefined',
+                            '-I' + str(ROOT / 'include'), '-I' + str(SDK / 'sdk/c'),
+                            str(ROOT / 'src/platform_fs.c'), str(path / 'test.c'),
+                            '-o', str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
 
 
 if __name__ == '__main__':

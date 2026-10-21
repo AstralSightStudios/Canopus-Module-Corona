@@ -48,7 +48,7 @@ CC="$CC" python3 "$ROOT/tests/test_p67_battery.py"
     -DRH_TARGET_1043=1 \
     -DRH_P67_BLUR_DIAGNOSTICS=1 -DCANOPUS_HOST=1 \
     -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \
-    "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+    "$ROOT/src/module.c" "$ROOT/src/platform_fs.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
     "$ROOT/src/launcher_background.c" "$SDK/runtime/control/canopus_control.c" \
     "$SDK/runtime/hook/canopus_hook.c" \
     "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_diagnostics"
@@ -77,7 +77,7 @@ for target in 139 155 177 1043; do
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         $TARGET_DEFINE -DCANOPUS_HOST=1 \
         -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \
-        "$ROOT/src/module.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
+        "$ROOT/src/module.c" "$ROOT/src/platform_fs.c" "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" \
         "$ROOT/src/launcher_background.c" \
         "$SDK/runtime/control/canopus_control.c" "$SDK/runtime/hook/canopus_hook.c" \
         "$ROOT/tests/test_module.c" \
@@ -96,7 +96,7 @@ for target in 139 155 177 1043; do
     for startup in missing empty comments valid; do
         "$ROOT/build/test_module_${target}" --control-status "$startup"
     done
-    for fault in eacces open-io unknown-errno scratch-oom snapshot-oom \
+    for fault in eacces open-io unknown-error scratch-oom snapshot-oom \
                  materialize-oom materialized-map-oom read-io malformed outside duplicate oversized; do
         "$ROOT/build/test_module_${target}" --startup-fallback "$fault"
     done
@@ -106,7 +106,7 @@ for target in 139 155 177 1043; do
     "$ROOT/build/test_module_${target}" --calendar-coordinator-guards
     "$ROOT/build/test_module_${target}" --calendar-initial-invalid
     "$ROOT/build/test_module_${target}" --quickapp
-    for fault in open-fail write-fail short-write fd-zero; do
+    for fault in service-fail; do
         RH_TEST_REGISTRATION="$fault" "$ROOT/build/test_module_${target}" --startup-diagnostics
     done
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \

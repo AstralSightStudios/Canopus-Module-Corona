@@ -411,7 +411,7 @@ static int p67_stage_path(const char *path) {
     uint32_t header[3] = {0, 0, 0}, cache;
     int fd;
     if (!path[0] || rh_background_is_blur(path)) return 0;
-    fd = rh_platform_open(path, 0);
+    fd = rh_platform_open(path, RH_FILE_READ);
     if (fd < 0) return -2143;
     rh_platform_close(fd);
     cache = load32(RH_FW_HEADER_CACHE_SLOT);
