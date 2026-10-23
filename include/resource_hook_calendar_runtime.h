@@ -4,6 +4,10 @@
 /* Configuration staging is non-graphics work. A successful commit transfers
  * ownership; all render/poll/refresh operations require the serialized UI owner. */
 int rh_calendar_stage(struct rh_calendar_config **);
+int rh_calendar_stage_from(const char *path, struct rh_calendar_config **);
+/* Transactional ownership exchange. On success *previous owns the old config;
+ * callers may restore it before discarding the rejected candidate. */
+int rh_calendar_exchange(struct rh_calendar_config *, struct rh_calendar_config **);
 int rh_calendar_commit(struct rh_calendar_config *);
 void rh_calendar_discard(struct rh_calendar_config *);
 int rh_calendar_start(void);

@@ -7,6 +7,11 @@
 #include "canopus_abi.h"
 #include "canopus_services.h"
 #include "canopus_hook.h"
+#include "manager_state.h"
+#if RH_NATIVE_MANAGER
+#include "manager_config_store.h"
+#include "manager_ui.h"
+#endif
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,10 +82,17 @@ static int32_t fs_open(const struct canopus_context_v1 *, const char *, uint32_t
 static int32_t fs_read(const struct canopus_context_v1 *, int32_t, void *, uint32_t);
 static int32_t fs_write(const struct canopus_context_v1 *, int32_t, const void *, uint32_t);
 static int32_t fs_close(const struct canopus_context_v1 *, int32_t);
+#if RH_NATIVE_MANAGER
+static int32_t native_data_path(const struct canopus_context_v1 *, char *, uint32_t);
+static int32_t native_config_rename(const struct canopus_context_v1 *, const char *, const char *);
+#endif
 static int32_t module_register(const struct canopus_context_v1 *,
                                const struct canopus_module_descriptor_v1 *);
 static const struct canopus_fs_obj fs_services = {
     .open = fs_open, .read = fs_read, .write = fs_write, .close = fs_close,
+#if RH_NATIVE_MANAGER
+    .get_data_path = native_data_path, .rename = native_config_rename,
+#endif
 };
 static void *mem_alloc(const struct canopus_context_v1 *, uint32_t);
 static void mem_free(const struct canopus_context_v1 *, void *);
@@ -135,6 +147,16 @@ static char calendar_hook_path[RH_PATH];
 /* Coordinator model only; renderer/parser/bank ownership have separate tests. */
 int rh_calendar_stage(struct rh_calendar_config **out) { *out = NULL; return calendar_stage_rc; }
 int rh_calendar_commit(struct rh_calendar_config *config) { assert(!config); return 0; }
+#if RH_NATIVE_MANAGER
+int rh_calendar_stage_from(const char *path, struct rh_calendar_config **out) {
+    const char *name = strrchr(path, '/');
+    assert(name && !strcmp(name, "/calendar.cfg"));
+    return rh_calendar_stage(out);
+}
+int rh_calendar_exchange(struct rh_calendar_config *next, struct rh_calendar_config **previous) {
+    assert(!next); *previous = NULL; return 0;
+}
+#endif
 void rh_calendar_discard(struct rh_calendar_config *config) { assert(!config); }
 int rh_calendar_start(void) { assert(in_ui_timer && !locked); return calendar_start_rc; }
 int rh_calendar_poll(void) {
@@ -302,8 +324,49 @@ static int hook_is_hooked(const struct canopus_context_v1 *ctx, uintptr_t target
     assert(ctx == &test_context && locked && target == (uintptr_t)&slot);
     return canopus_hook_is_hooked(target);
 }
+#if RH_NATIVE_MANAGER
+static char native_active_config[32], native_config_part[32];
+static unsigned native_pointer_position, native_pointer_writes;
+static int native_rename_fail;
+static int32_t native_data_path(const struct canopus_context_v1 *ctx, char *out, uint32_t cap) {
+    assert(ctx == &test_context && cap >= sizeof(RH_APP_FILES_ROOT));
+    memcpy(out, RH_APP_FILES_ROOT, sizeof(RH_APP_FILES_ROOT));
+    return (int32_t)(sizeof(RH_APP_FILES_ROOT) - 1u);
+}
+static int32_t native_config_rename(const struct canopus_context_v1 *ctx, const char *from, const char *to) {
+    assert(ctx == &test_context && !locked);
+    assert(!strcmp(from, RH_APP_FILES_ROOT "active-config.part"));
+    assert(!strcmp(to, RH_APP_FILES_ROOT "active-config"));
+    if (native_rename_fail) return CANOPUS_SVC_ERR_IO;
+    memcpy(native_active_config, native_config_part, sizeof(native_active_config));
+    return 0;
+}
+int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *hooks) { (void)hooks; return 0; }
+int rh_manager_ui_register(const struct canopus_context_v1 *ctx) { (void)ctx; return 0; }
+int rh_manager_launcher_register(const struct canopus_context_v1 *ctx) { (void)ctx; return 0; }
+#endif
 static int32_t fs_open(const struct canopus_context_v1 *ctx, const char *path, uint32_t mode) {
     assert(ctx == &test_context && !locked);
+#if RH_NATIVE_MANAGER
+    if (!strcmp(path, RH_APP_FILES_ROOT "active-config")) {
+        assert(mode == CANOPUS_FS_READ);
+        native_pointer_position = 0;
+        return native_active_config[0] ? 19 : -RH_ENOENT;
+    }
+    if (!strcmp(path, RH_APP_FILES_ROOT "active-config.part")) {
+        assert(mode == CANOPUS_FS_WRITE);
+        memset(native_config_part, 0, sizeof(native_config_part));
+        native_pointer_position = 0;
+        return 18;
+    }
+    if (!strncmp(path, RH_APP_FILES_ROOT "active/", sizeof(RH_APP_FILES_ROOT "active/") - 1u)) {
+        const char *name = strrchr(path, '/');
+        assert(name);
+        if (!strcmp(name, "/mappings.tsv")) path = RH_CONFIG_PATH;
+        else if (!strcmp(name, "/backgrounds.cfg")) path = RH_APP_FILES_ROOT "backgrounds.cfg";
+        else assert(!"unexpected candidate file");
+    }
+#endif
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (!strcmp(path, "/data/offlinelog/resource-hook-p67-blur.log")) {
@@ -372,6 +435,16 @@ static int32_t fs_read(const struct canopus_context_v1 *ctx, int32_t fd, void *o
     unsigned remaining;
     assert(!locked);
     if (fail_read) return -1;
+#if RH_NATIVE_MANAGER
+    if (fd == 19) {
+        unsigned left = (unsigned)strlen(native_active_config) - native_pointer_position;
+        if (size > left) size = left;
+        if (size > 3u) size = 3u;
+        memcpy(out, native_active_config + native_pointer_position, size);
+        native_pointer_position += size;
+        return (int32_t)size;
+    }
+#endif
     if (fd == 12 && reenter_signal_read) {
         unsigned signals = signal_opens;
         reenter_signal_read = 0;
@@ -407,6 +480,16 @@ static int32_t fs_read(const struct canopus_context_v1 *ctx, int32_t fd, void *o
 }
 static int32_t fs_write(const struct canopus_context_v1 *ctx, int32_t fd, const void *data, uint32_t size) {
     assert(ctx == &test_context);
+#if RH_NATIVE_MANAGER
+    if (fd == 18) {
+        if (size > 3u) size = 3u;
+        assert(native_pointer_position + size < sizeof(native_config_part));
+        memcpy(native_config_part + native_pointer_position, data, size);
+        native_pointer_position += size;
+        ++native_pointer_writes;
+        return (int32_t)size;
+    }
+#endif
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (fd == 17) {
@@ -455,6 +538,9 @@ static int32_t fs_write(const struct canopus_context_v1 *ctx, int32_t fd, const 
 static int32_t fs_close(const struct canopus_context_v1 *ctx, int32_t fd) {
     assert(ctx == &test_context && !locked);
     if(fd==14 || fd==15) return 0;
+#if RH_NATIVE_MANAGER
+    if (fd == 18 || fd == 19) return 0;
+#endif
 #if defined(RH_TARGET_1043) && RH_TARGET_1043 && \
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (fd == 17) { assert(in_ui_timer); return 0; }
@@ -2320,9 +2406,192 @@ static int test_hook_services(void) {
     puts("hook services: ID zero, conflict, capacity, reset/release recovery and residency passed");
     return 0;
 }
+static unsigned manager_notifications, manager_status_notifications, manager_transfer_notifications;
+static void manager_state_changed(void *cookie, uint32_t changes) {
+    struct rh_module_status_snapshot status;
+    struct rh_transfer_ui_state transfer;
+    assert(cookie == &manager_notifications && !locked);
+    ++manager_notifications;
+    if (changes & RH_MANAGER_CHANGED_STATUS) ++manager_status_notifications;
+    if (changes & RH_MANAGER_CHANGED_TRANSFER) ++manager_transfer_notifications;
+    rh_module_get_status_snapshot(&status);
+    rh_manager_get_transfer_state(&transfer);
+    /* A notification cannot reenter the config publisher or transfer setter. */
+    if (status.reload_generation)
+        assert(rh_module_request_reload(status.reload_generation + 100u) == CANOPUS_SVC_ERR_BUSY);
+    assert(rh_manager_set_transfer_state(&transfer) == CANOPUS_SVC_ERR_BUSY);
+}
+static int test_manager_internal_state(void) {
+    struct rh_module_status_snapshot status;
+    struct rh_transfer_ui_state transfer = {0}, copied;
+    unsigned reads, signals, writes, notifications;
+    rh_module_get_status_snapshot(&status);
+    assert(status.state == RH_MGR_STATE_UNAVAILABLE && !status.active_rules);
+    assert(rh_manager_subscribe(NULL, NULL) == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(!rh_manager_subscribe(manager_state_changed, &manager_notifications));
+    assert(manager_notifications == 1 && manager_status_notifications == 1 &&
+           manager_transfer_notifications == 1);
+    assert(rh_manager_subscribe(manager_state_changed, NULL) == CANOPUS_SVC_ERR_BUSY);
+    assert(canopus_module_descriptor.activate(&test_context) == 0);
+    fire_timers(50u);
+    rh_module_get_status_snapshot(&status);
+    assert(status.state == RH_MGR_STATE_RUNNING && status.active_rules == 1 && !status.refresh_pending);
+    reads = config_opens + control_opens;
+    signals = signal_opens; writes = result_writes;
+    rh_module_get_status_snapshot(&status);
+    rh_manager_get_transfer_state(&copied);
+    assert(config_opens + control_opens == reads && signal_opens == signals && result_writes == writes);
+
+    control_config = "/resource/\tthemes/second/\n";
+    reject_redraw = 1;
+    in_ui_timer = 1;
+    assert(rh_module_request_reload(0) == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(!rh_module_request_reload(42u));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(status.reload_generation == 42 && status.reload_result == 1 && status.refresh_pending);
+    assert(rh_module_request_reload(43u) == CANOPUS_SVC_ERR_BUSY);
+    assert(signal_opens == signals && result_writes == writes && control_opens == 1);
+    reject_redraw = 0;
+    fire_timers(50u);
+    rh_module_get_status_snapshot(&status);
+    assert(status.reload_generation == 42 && !status.reload_result && !status.refresh_pending);
+    assert(rh_module_request_reload(42u) == CANOPUS_SVC_ERR_ARGUMENT);
+    notifications = manager_notifications;
+    fire_timers(50u);
+    assert(manager_notifications == notifications);
+
+    control_config = "/resource/\t/outside/\n";
+    in_ui_timer = 1;
+    assert(!rh_module_request_reload(43u));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(status.state == RH_MGR_STATE_CONFIG_ERROR && status.reload_result == -2103);
+    assert(status.active_rules == 1 && !status.refresh_pending);
+    backend_expected = (RH_THEME_ROOT "second/icon.bin") + 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    backend_expected = "resource/icon.bin";
+    assert(slot(&driver, ".rh_sys/resource/icon.bin", 2) == 7);
+    assert(slot(&driver, ".rh_sys/../resource/icon.bin", 2) == -1);
+    assert(slot(&driver, ".rh_sys/resource//icon.bin", 2) == -1);
+    assert(slot(&driver, ".rh_sys/", 2) == -1);
+    backend_expected = "r";
+    assert(slot(&driver, "r", 2) == 7); /* Short strings are safe under ASan. */
+
+    transfer.phase = RH_XFER_PHASE_RECEIVING;
+    transfer.remote_connected = 1;
+    transfer.archive_bytes = UINT32_MAX;
+    transfer.written_offset = UINT32_MAX / 2u;
+    transfer.durable_offset = 65536u;
+    transfer.percent = 99; /* Caller percentages do not advance disk progress. */
+    assert(!rh_manager_set_transfer_state(&transfer));
+    rh_manager_get_transfer_state(&copied);
+    assert(copied.percent == 49 && copied.written_offset == transfer.written_offset);
+    notifications = manager_notifications;
+    assert(!rh_manager_set_transfer_state(&transfer));
+    assert(manager_notifications == notifications);
+    transfer.durable_offset = UINT32_MAX;
+    assert(rh_manager_set_transfer_state(&transfer) == CANOPUS_SVC_ERR_ARGUMENT);
+    rh_manager_get_transfer_state(&transfer);
+    transfer.phase = 7;
+    assert(rh_manager_set_transfer_state(&transfer) == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(rh_manager_set_transfer_state(NULL) == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(signal_opens == signals && result_writes == writes);
+    rh_manager_unsubscribe(manager_state_changed, &manager_notifications);
+    transfer = (struct rh_transfer_ui_state){0};
+    assert(!rh_manager_set_transfer_state(&transfer));
+    assert(manager_notifications == notifications);
+#if RH_NATIVE_MANAGER
+    fire_timers(1000u);
+    assert(signal_opens == signals && result_writes == writes);
+#endif
+    puts("native manager: direct state, event completion, failure retention, stock previews and disk progress passed");
+    return 0;
+}
+static int test_manager_reentrant_reload(void) {
+    struct rh_module_status_snapshot status;
+    input = "";
+    assert(!canopus_module_descriptor.activate(&test_context));
+    rh_module_get_status_snapshot(&status);
+    assert(!status.active_rules && !status.refresh_pending);
+    control_config = config;
+    activate_during_read = 1;
+    reject_redraw = 1;
+    in_ui_timer = 1;
+    assert(!rh_module_request_reload(10u));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(status.reload_generation == 10u && status.reload_result == 1 && status.refresh_pending);
+    reject_redraw = 0;
+    fire_timers(50u);
+    rh_module_get_status_snapshot(&status);
+    assert(!status.reload_result && !status.refresh_pending && status.active_rules == 1u);
+    control_config = "/resource/\t/outside/\n";
+    in_ui_timer = 1;
+    assert(!rh_module_request_reload(11u));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(status.reload_result == -2103 && status.error_code == -2103);
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+    control_config = config;
+    background_config = "version=1\nmode=system\n";
+    background_stage_rc = -2142;
+    in_ui_timer = 1;
+    assert(!rh_module_request_reload(12u));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(status.reload_result == -2142 && status.error_code == -2103);
+#endif
+    puts("native manager: reentrant activation cannot acknowledge early; each attempt keeps its own error");
+    return 0;
+}
+#if RH_NATIVE_MANAGER
+static int test_manager_config_generations(void) {
+    struct rh_module_status_snapshot status;
+    assert(!canopus_module_descriptor.activate(&test_context));
+    fire_timers(50u);
+    control_config = "/resource/\tthemes/second/\n";
+    in_ui_timer = 1;
+    assert(rh_module_request_reload_from(41u, "active/42") == CANOPUS_SVC_ERR_ARGUMENT);
+    assert(!rh_module_request_reload_from(42u, "active/42"));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(!status.reload_result && status.reload_generation == 42u);
+    assert(!strcmp(native_active_config, "active/42\n") && native_pointer_writes > 1u);
+    assert(!strcmp(rh_manager_config_current_dir(), RH_APP_FILES_ROOT "active/42/"));
+    native_rename_fail = 1;
+    control_config = "/resource/\tthemes/third/\n";
+    in_ui_timer = 1;
+    assert(!rh_module_request_reload_from(43u, "active/43"));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(status.reload_result == CANOPUS_SVC_ERR_IO && !status.refresh_pending);
+    assert(!strcmp(native_active_config, "active/42\n"));
+    assert(!strcmp(rh_manager_config_current_dir(), RH_APP_FILES_ROOT "active/42/"));
+    backend_expected = (RH_THEME_ROOT "second/icon.bin") + 1;
+    assert(slot(&driver, "resource/icon.bin", 2) == 7);
+    native_rename_fail = 0;
+    in_ui_timer = 1;
+    assert(!rh_module_request_reload_from(44u, "active/44"));
+    in_ui_timer = 0;
+    rh_module_get_status_snapshot(&status);
+    assert(!status.reload_result && !strcmp(native_active_config, "active/44\n"));
+    assert(!signal_opens && !result_writes);
+    puts("native manager: config generation commit, rename failure retention and retry passed");
+    return 0;
+}
+#endif
 int main(int argc, char **argv) {
     rh_module_entry(&test_context);
     canopus_hook_engine_init();
+#if RH_NATIVE_MANAGER
+    if (argc == 2 && !strcmp(argv[1], "--manager-generations"))
+        return test_manager_config_generations();
+#endif
+    if (argc == 2 && !strcmp(argv[1], "--manager-reentrant"))
+        return test_manager_reentrant_reload();
+    if (argc == 2 && !strcmp(argv[1], "--manager-internal"))
+        return test_manager_internal_state();
     if (argc == 3 && !strcmp(argv[1], "--time-activation-failure"))
         return test_time_activation_failure(argv[2]);
     if (argc == 2 && !strcmp(argv[1], "--hook-services")) return test_hook_services();
@@ -2392,7 +2661,8 @@ int main(int argc, char **argv) {
         assert(rh_validate_rules(&foreign, 1) == -2);
     }
     assert(registrations == 1 && !closes);
-    assert(d->struct_size == sizeof(*d) && d->abi_major == 1 && d->abi_minor == 2);
+    assert(d->struct_size == sizeof(*d) && d->abi_major == CANOPUS_ABI_MAJOR &&
+           d->abi_minor == CANOPUS_ABI_MINOR);
     assert(!strcmp((const char *)d->module_id, "corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
     assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));

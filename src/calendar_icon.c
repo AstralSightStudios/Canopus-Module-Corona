@@ -10,17 +10,17 @@ static unsigned bank;
 #endif
 
 void rh_calendar_discard(struct rh_calendar_config *c) { if (c) rh_platform_free(c); }
-int rh_calendar_stage(struct rh_calendar_config **out) {
+int rh_calendar_stage_from(const char *path, struct rh_calendar_config **out) {
     struct rh_calendar_config *c;
     char *text;
     uint32_t used = 0;
     int fd, n, rc = 0;
-    if (!out) return -2151;
+    if (!path || !out) return -2151;
     *out = 0;
     c = rh_platform_alloc(sizeof(*c));
     if (!c) return -2151;
     rh_calendar_defaults(c);
-    fd = rh_platform_open(RH_CALENDAR_CONFIG_PATH, RH_FILE_READ);
+    fd = rh_platform_open(path, RH_FILE_READ);
     if (fd < 0) {
         if (fd != -RH_ENOENT) { rh_calendar_discard(c); return -2152; }
         *out = c; return 0;
@@ -40,22 +40,33 @@ int rh_calendar_stage(struct rh_calendar_config **out) {
     if (rc) rh_calendar_discard(c); else *out = c;
     return rc;
 }
-int rh_calendar_commit(struct rh_calendar_config *c) {
+int rh_calendar_stage(struct rh_calendar_config **out) {
+    return rh_calendar_stage_from(RH_CALENDAR_CONFIG_PATH, out);
+}
+int rh_calendar_exchange(struct rh_calendar_config *c, struct rh_calendar_config **previous) {
     struct rh_calendar_config *old;
     uint32_t irq;
-    if (!c) return -2153;
+    if (!previous) return -2153;
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
-    old = active; active = c; initialized = 1;
+    old = active; active = c; initialized = c != 0;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
-    dirty = c->custom ? 1 : 0;
-    if (!c->custom) ready = 0;
+    dirty = c && c->custom ? 1u : 0u;
+    if (!c || !c->custom) ready = 0;
 #else
     dirty = 1;
 #endif
     rh_platform_unlock(irq);
-    rh_calendar_discard(old);
+    *previous = old;
     return 0;
+}
+int rh_calendar_commit(struct rh_calendar_config *c) {
+    struct rh_calendar_config *old = 0;
+    int rc;
+    if (!c) return -2153;
+    rc = rh_calendar_exchange(c, &old);
+    if (!rc) rh_calendar_discard(old);
+    return rc;
 }
 int rh_calendar_start(void) {
     struct rh_calendar_config *c = 0;

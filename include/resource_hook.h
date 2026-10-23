@@ -3,11 +3,20 @@
 #include <stdint.h>
 #define RH_RULES 256
 #define RH_PATH 256
-/* Native internal://files/ roots differ between Band 10 Pro and Band 11. */
+/* Keep the legacy root available for one-time import. Native builds resolve
+ * the fixed corona module's private root through get_data_path before UI I/O. */
+#ifndef RH_NATIVE_MANAGER
+#define RH_NATIVE_MANAGER 0
+#endif
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
-#define RH_APP_FILES_ROOT "/data/files/ng.lst.corona/"
+#define RH_LEGACY_APP_FILES_ROOT "/data/files/ng.lst.corona/"
 #else
-#define RH_APP_FILES_ROOT "/data/quickapp/files/ng.lst.corona/"
+#define RH_LEGACY_APP_FILES_ROOT "/data/quickapp/files/ng.lst.corona/"
+#endif
+#if RH_NATIVE_MANAGER
+#define RH_APP_FILES_ROOT "/data/canopus/m.corona/"
+#else
+#define RH_APP_FILES_ROOT RH_LEGACY_APP_FILES_ROOT
 #endif
 #define RH_CONFIG_PATH RH_APP_FILES_ROOT "mappings.tsv"
 /* Shared status-v1 / reload-v1 / optional reload-v2 channel. Reload v2 adds

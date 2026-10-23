@@ -8,6 +8,11 @@
 #include "resource_hook_font_reload.h"
 #include "resource_hook_background.h"
 #include "resource_hook_calendar_runtime.h"
+#include "manager_state.h"
+#if RH_NATIVE_MANAGER
+#include "manager_ui.h"
+#include "manager_config_store.h"
+#endif
 
 #define RH_MODULE_ID "corona"
 #define RH_VERSION "0.3.0"
@@ -53,6 +58,52 @@ static const struct canopus_context_v1 *module_context;
 static int32_t refresh_timer = -1, watch_timer = -1;
 static int32_t open_hook = -1;
 static rh_open_fn *open_hook_slot;
+#if RH_NATIVE_MANAGER
+static int manager_config_error;
+static char manager_candidate_dir[RH_PATH];
+static const char *manager_candidate_relative;
+static struct rh_backgrounds manager_background_current;
+#endif
+static int manager_config_path(const char *name, char out[RH_PATH]) {
+    const char *root = RH_APP_FILES_ROOT;
+    unsigned i = 0, j = 0;
+#if RH_NATIVE_MANAGER
+    if (manager_config_error && !manager_candidate_dir[0]) return manager_config_error;
+    root = manager_candidate_dir[0] ? manager_candidate_dir : rh_manager_config_current_dir();
+    if (!root) return CANOPUS_SVC_ERR_STATE;
+#endif
+    while (root[i]) {
+        if (i + 1u >= RH_PATH) return CANOPUS_SVC_ERR_ARGUMENT;
+        out[i] = root[i];
+        ++i;
+    }
+    while (name[j]) {
+        if (i + 1u >= RH_PATH) return CANOPUS_SVC_ERR_ARGUMENT;
+        out[i++] = name[j++];
+    }
+    out[i] = 0;
+    return 0;
+}
+static int manager_calendar_stage(struct rh_calendar_config **out) {
+#if RH_NATIVE_MANAGER
+    char path[RH_PATH];
+    int rc = manager_config_path("calendar.cfg", path);
+    return rc ? rc : rh_calendar_stage_from(path, out);
+#else
+    return rh_calendar_stage(out);
+#endif
+}
+static int manager_calendar_start(void) {
+#if RH_NATIVE_MANAGER
+    struct rh_calendar_config *candidate = 0;
+    int rc = manager_calendar_stage(&candidate);
+    if (!rc) rc = rh_calendar_commit(candidate);
+    if (rc) rh_calendar_discard(candidate);
+    return rc;
+#else
+    return rh_calendar_start();
+#endif
+}
 
 static int bind_context(const struct canopus_context_v1 *ctx) {
     int rc;
@@ -67,6 +118,9 @@ static int bind_context(const struct canopus_context_v1 *ctx) {
     if (rc < 0) return rc;
     rc = rh_platform_bind_fs(ctx);
     if (rc < 0) return rc;
+#if RH_NATIVE_MANAGER
+    if (!module_context) manager_config_error = rh_manager_config_bind(ctx);
+#endif
     module_context = ctx;
     return 0;
 }
@@ -101,7 +155,74 @@ static uint32_t response_signal_size;
 static unsigned response_kind;
 static unsigned refresh_pending, cache_dropped, images_done, fonts_done, calendar_done, refreshing;
 static void publish_current_result(void);
+static void notify_manager_status(void);
 static char *result_number(char *, uint32_t);
+static rh_manager_state_listener manager_listener;
+static void *manager_listener_cookie;
+static unsigned manager_notifying, manager_status_valid;
+static struct rh_module_status_snapshot manager_last_status;
+static struct rh_transfer_ui_state manager_transfer;
+static uint32_t manager_reload_generation;
+static int32_t manager_reload_result;
+
+static void manager_notify(uint32_t changes) {
+    if (!manager_listener || manager_notifying) return;
+    manager_notifying = 1;
+    manager_listener(manager_listener_cookie, changes);
+    manager_notifying = 0;
+}
+void rh_manager_get_transfer_state(struct rh_transfer_ui_state *out) {
+    if (out) *out = manager_transfer;
+}
+int rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state) {
+    struct rh_transfer_ui_state candidate;
+    uint32_t accumulator = 0, i;
+    uint8_t percent = 0;
+    if (!state || state->phase > RH_XFER_PHASE_CANCELED || state->detail > 11u ||
+        state->remote_connected > 1u ||
+        state->durable_offset > state->written_offset ||
+        state->written_offset > state->archive_bytes)
+        return CANOPUS_SVC_ERR_ARGUMENT;
+    if (manager_notifying) return CANOPUS_SVC_ERR_BUSY;
+    candidate = *state;
+    /* Exact floor(100 * written / total) without a 64-bit divide runtime
+     * import. The validated written<=total bound makes each addition safe. */
+    if (state->archive_bytes) {
+        for (i = 0; i < 100u; ++i) {
+            if (accumulator >= state->archive_bytes - state->written_offset) {
+                accumulator -= state->archive_bytes - state->written_offset;
+                ++percent;
+            } else accumulator += state->written_offset;
+        }
+    }
+    candidate.percent = percent;
+    if (manager_transfer.phase == candidate.phase &&
+        manager_transfer.detail == candidate.detail &&
+        manager_transfer.remote_connected == candidate.remote_connected &&
+        manager_transfer.percent == candidate.percent &&
+        manager_transfer.written_offset == candidate.written_offset &&
+        manager_transfer.durable_offset == candidate.durable_offset &&
+        manager_transfer.archive_bytes == candidate.archive_bytes) return 0;
+    manager_transfer = candidate;
+    manager_notify(RH_MANAGER_CHANGED_TRANSFER);
+    return 0;
+}
+int rh_manager_subscribe(rh_manager_state_listener listener, void *cookie) {
+    if (!listener) return CANOPUS_SVC_ERR_ARGUMENT;
+    if (manager_notifying || (manager_listener &&
+        (manager_listener != listener || manager_listener_cookie != cookie)))
+        return CANOPUS_SVC_ERR_BUSY;
+    manager_listener = listener;
+    manager_listener_cookie = cookie;
+    manager_notify(RH_MANAGER_CHANGED_STATUS | RH_MANAGER_CHANGED_TRANSFER);
+    return 0;
+}
+void rh_manager_unsubscribe(rh_manager_state_listener listener, void *cookie) {
+    if (manager_listener == listener && manager_listener_cookie == cookie) {
+        manager_listener = 0;
+        manager_listener_cookie = 0;
+    }
+}
 
 static void *snapshot_alloc(void *cookie, uint32_t size) {
     (void)cookie;
@@ -488,11 +609,40 @@ static int request_refresh(void) {
     return ensure_refresh_timer();
 }
 
+static int stock_preview_prefix(const char *path) {
+    static const char prefix[] = ".rh_sys/";
+    unsigned i;
+    if (!path) return 0;
+    for (i = 0; i < sizeof(prefix) - 1u; ++i)
+        if (!path[i] || path[i] != prefix[i]) return 0;
+    return 1;
+}
 static int rh_wrapper(void *d, const char *p, int m) {
     struct rh_mapping_view view;
     struct rh_snapshot *snapshot;
     uint32_t irq;
     int result;
+    /* A distinct LVGL key reads stock preview bytes even when the public path
+     * is redirected or cached. Never interpret this namespace for writes or a
+     * different driver. The suffix is the original driver's slashless path. */
+    if (d == S.driver && m == 2 && S.original && p &&
+        stock_preview_prefix(p)) {
+        const char *segment = p + 8;
+        const char *at = segment;
+        if (!*segment || *segment == '/') return -1;
+        for (;;) {
+            if (*at && *at != '/') {
+                if ((unsigned char)*at < 32u || *at == '\\') return -1;
+                ++at;
+                continue;
+            }
+            if (at == segment || (at - segment == 1 && segment[0] == '.') ||
+                (at - segment == 2 && segment[0] == '.' && segment[1] == '.')) return -1;
+            if (!*at) break;
+            segment = ++at;
+        }
+        return S.original(d, p + 8, m);
+    }
     irq = rh_platform_lock();
     snapshot = active_snapshot;
     if (snapshot && snapshot->references == UINT32_MAX) {
@@ -543,10 +693,10 @@ static int read_bounded_file(const char *path, char *out, uint32_t capacity,
     return rc;
 }
 static int background_stage(struct rh_backgrounds *candidate) {
-    char data[RH_PATH * 4 + 128u];
+    char data[RH_PATH * 4 + 128u], path[RH_PATH];
     uint32_t used = 0;
-    int rc = read_bounded_file(RH_APP_FILES_ROOT "backgrounds.cfg",
-                               data, sizeof(data), &used);
+    int rc = manager_config_path("backgrounds.cfg", path);
+    if (!rc) rc = read_bounded_file(path, data, sizeof(data), &used);
     candidate->launcher[0] = 0;
     candidate->control_center[0] = 0;
     candidate->notifications[0] = 0;
@@ -559,8 +709,12 @@ static void background_start(void) {
     struct rh_backgrounds candidate;
     if (background_initialized) return;
     background_error = background_stage(&candidate);
-    if (!background_error)
+    if (!background_error) {
         background_error = rh_platform_backgrounds_commit(&candidate);
+#if RH_NATIVE_MANAGER
+        if (!background_error) manager_background_current = candidate;
+#endif
+    }
     background_initialized = 1;
 }
 static int valid_reload_signal(const char *signal, uint32_t size) {
@@ -686,6 +840,40 @@ static struct control_status_snapshot control_status_snapshot(void) {
     rh_platform_unlock(irq);
     return status;
 }
+void rh_module_get_status_snapshot(struct rh_module_status_snapshot *out) {
+    struct control_status_snapshot status;
+    if (!out) return;
+    status = control_status_snapshot();
+    out->state = !configured ? RH_MGR_STATE_UNAVAILABLE :
+        (!S.installed ? RH_MGR_STATE_UNRESPONSIVE :
+         (status.error ? RH_MGR_STATE_CONFIG_ERROR : RH_MGR_STATE_RUNNING));
+    out->refresh_pending = (uint8_t)(status.pending != 0u);
+    out->active_rules = (uint16_t)status.count;
+    out->error_code = status.error;
+    out->last_font_result = font_result;
+    out->last_changed = font_last_changed;
+    out->reload_generation = manager_reload_generation;
+    out->reload_result = manager_reload_result;
+}
+static void notify_manager_status(void) {
+    struct rh_module_status_snapshot current;
+    if (!control_busy && manager_reload_generation && manager_reload_result == 1 && !refresh_pending) {
+        struct control_status_snapshot status = control_status_snapshot();
+        manager_reload_result = status.error ? status.error : (font_result < 0 ? font_result : 0);
+    }
+    rh_module_get_status_snapshot(&current);
+    if (manager_status_valid && current.state == manager_last_status.state &&
+        current.refresh_pending == manager_last_status.refresh_pending &&
+        current.active_rules == manager_last_status.active_rules &&
+        current.error_code == manager_last_status.error_code &&
+        current.last_font_result == manager_last_status.last_font_result &&
+        current.last_changed == manager_last_status.last_changed &&
+        current.reload_generation == manager_last_status.reload_generation &&
+        current.reload_result == manager_last_status.reload_result) return;
+    manager_last_status = current;
+    manager_status_valid = 1;
+    manager_notify(RH_MANAGER_CHANGED_STATUS);
+}
 static void publish_result(const char *signal, uint32_t size, int32_t result,
                            uint32_t pending, uint32_t changed) {
     char buffer[RH_RESULT_BYTES], *p=buffer;
@@ -734,6 +922,7 @@ static void publish_status_result(void) {
     commit_result(buffer,p);
 }
 static void publish_current_result(void) {
+    notify_manager_status();
     if(response_kind == RH_REQUEST_STATUS) {
         publish_status_result();
         return;
@@ -747,7 +936,7 @@ static int resolve_quickapp(void *cookie, const char *package, char path[RH_PATH
     return rh_platform_quickapp_icon_path(package, path);
 }
 /* Called with the watcher's control reservation already held. */
-static void poll_control_file(const char *signal, uint32_t signal_size,
+static int poll_control_file(const char *signal, uint32_t signal_size,
                               unsigned reload_request) {
     uint32_t irq;
     struct rh_snapshot *captured = 0, *candidate = 0, *declarations = 0;
@@ -755,21 +944,27 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     struct rh_mapping_view captured_view;
     struct rh_calendar_config *calendar_candidate = 0;
     int fd, rc, identical, calendar_affected, revision = 0, quickapp_affected;
+    int outcome = CANOPUS_SVC_ERR_BUSY;
     unsigned commit_reserved = 0;
     struct rh_backgrounds background_candidate;
+#if RH_NATIVE_MANAGER
+    struct rh_calendar_config *calendar_previous = 0;
+    unsigned background_committed = 0, calendar_committed = 0;
+#endif
+    char config_path[RH_PATH];
 
     /* Active maps may be empty; NULL is the transparent zero-rule snapshot. */
     irq = rh_platform_lock();
     if (refresh_pending || refreshing || !S.installed) {
         rh_platform_unlock(irq);
-        return;
+        return CANOPUS_SVC_ERR_BUSY;
     }
     captured = active_snapshot;
     declarations = quickapp_declarations;
     if ((declarations && declarations->references == UINT32_MAX) ||
         (captured && captured->references == UINT32_MAX)) {
         rh_platform_unlock(irq);
-        return;
+        return CANOPUS_SVC_ERR_BUSY;
     }
     if (captured) captured->references++;
     if (declarations) declarations->references++;
@@ -777,9 +972,11 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
 
     revision = reload_request && !reload_signal_seen(signal, signal_size);
     if (revision) {
-        fd = rh_platform_open(RH_CONTROL_CONFIG, RH_FILE_READ);
+        rc = manager_config_path("mappings.tsv", config_path);
+        fd = rc ? rc : rh_platform_open(config_path, RH_FILE_READ);
         if (fd < 0) {
             config_error = -2102;
+            outcome = -2102;
             publish_result(signal, signal_size, -2102, 0, 0);
             goto done;
         }
@@ -805,6 +1002,7 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     if (rc) {
         int error = rc == -7 ? -2101 : (rc == -9 ? -2105 :
                     (rc == -8 ? -2104 : -2103));
+        outcome = error;
         if (revision) {
             config_error = error;
             publish_result(signal, signal_size, error, 0, 0);
@@ -821,14 +1019,16 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         rc = background_stage(&background_candidate);
         if (rc) {
             background_error = rc;
+            outcome = rc;
             publish_result(signal, signal_size, rc, 0, 0);
             goto done;
         }
     }
     if (revision) {
-        rc = rh_calendar_stage(&calendar_candidate);
+        rc = manager_calendar_stage(&calendar_candidate);
         if (rc) {
             calendar_config_error = rc;
+            outcome = rc;
             publish_result(signal, signal_size, rc, 0, 0);
             goto done;
         }
@@ -862,18 +1062,48 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
         background_error = rh_platform_backgrounds_commit(&background_candidate);
         background_initialized = 1;
         if (background_error) {
+            outcome = background_error;
             publish_result(signal, signal_size, background_error, refresh_pending, 0);
             goto done;
         }
+#if RH_NATIVE_MANAGER
+        background_committed = 1;
+#endif
     }
     if (revision && calendar_candidate) {
+#if RH_NATIVE_MANAGER
+        calendar_config_error = rh_calendar_exchange(calendar_candidate, &calendar_previous);
+#else
         calendar_config_error = rh_calendar_commit(calendar_candidate);
+#endif
         if (calendar_config_error) {
+            outcome = calendar_config_error;
             publish_result(signal, signal_size, calendar_config_error, refresh_pending, 0);
             goto done;
         }
         calendar_candidate = 0;
+#if RH_NATIVE_MANAGER
+        calendar_committed = 1;
+#endif
     }
+#if RH_NATIVE_MANAGER
+    if (revision && manager_candidate_relative) {
+        rc = rh_manager_config_commit(manager_candidate_relative);
+        if (rc) {
+            config_error = rc;
+            outcome = rc;
+            goto done;
+        }
+        manager_config_error = 0;
+    }
+    if (revision) {
+        manager_background_current = background_candidate;
+        background_committed = calendar_committed = 0;
+        rh_calendar_discard(calendar_previous);
+        calendar_previous = 0;
+        calendar_started = 1;
+    }
+#endif
     irq = rh_platform_lock();
     if (revision) {
         config_error = calendar_config_error = 0;
@@ -926,12 +1156,26 @@ static void poll_control_file(const char *signal, uint32_t signal_size,
     refreshing = 0; commit_reserved = 0;
     rh_platform_unlock(irq);
     if (revision) remember_reload_signal(signal, signal_size);
+    outcome = 0;
     if (refresh_pending) {
         refresh_step(1u);
         (void)ensure_refresh_timer();
     }
     publish_current_result();
 done:
+#if RH_NATIVE_MANAGER
+    if (calendar_committed) {
+        struct rh_calendar_config *rejected = 0;
+        int rollback = rh_calendar_exchange(calendar_previous, &rejected);
+        if (!rollback) { calendar_previous = 0; rh_calendar_discard(rejected); }
+        else calendar_config_error = rollback;
+    }
+    if (background_committed) {
+        int rollback = rh_platform_backgrounds_commit(&manager_background_current);
+        if (rollback) background_error = rollback;
+    }
+    rh_calendar_discard(calendar_previous);
+#endif
     if (commit_reserved) {
         irq = rh_platform_lock(); refreshing = 0; rh_platform_unlock(irq);
     }
@@ -941,6 +1185,77 @@ done:
     snapshot_release(old_declarations);
     snapshot_release(declarations);
     snapshot_release(captured);
+    return outcome;
+}
+int rh_module_request_reload(uint32_t generation) {
+    char signal[RH_CONTROL_REQUEST_MAX], *end;
+    struct control_status_snapshot status;
+    uint32_t size;
+    int rc;
+    if (!generation || generation == manager_reload_generation)
+        return CANOPUS_SVC_ERR_ARGUMENT;
+    if (!module_context || !S.installed) return CANOPUS_SVC_ERR_STATE;
+    if (manager_notifying || control_busy || result_busy || refreshing || refresh_pending)
+        return CANOPUS_SVC_ERR_BUSY;
+    /* The same validated publisher serves both callers. A local revision has
+     * no response-slot owner, so it never writes a file receipt. */
+    control_busy = 1;
+    manager_reload_generation = generation;
+    manager_reload_result = 1;
+    end = log_text(signal, RH_RELOAD_PREFIX "ng.lst.corona\tnative_");
+    end = result_number(end, generation);
+    *end++ = '\n';
+    size = (uint32_t)(end - signal);
+#if RH_NATIVE_MANAGER
+    /* Candidate auxiliary configs are staged and committed by the transaction
+     * below; do not apply them as startup defaults before pointer publication. */
+    if (!manager_candidate_relative) {
+#endif
+        if (!calendar_started) {
+            calendar_config_error = manager_calendar_start();
+            if (!calendar_config_error) calendar_started = 1;
+        }
+        background_start();
+#if RH_NATIVE_MANAGER
+    }
+#endif
+    rc = poll_control_file(signal, size, 1u);
+    status = control_status_snapshot();
+    if (rc)
+        manager_reload_result = rc;
+    else if (refresh_pending && (rc = ensure_refresh_timer()) < 0)
+        manager_reload_result = rc;
+    else if (!refresh_pending)
+        manager_reload_result = status.error ? status.error : (font_result < 0 ? font_result : 0);
+    control_busy = 0;
+    notify_manager_status();
+    return 0;
+}
+int rh_module_request_reload_from(uint32_t generation, const char *relative_config_dir) {
+#if RH_NATIVE_MANAGER
+    char expected[32], *end;
+    uint32_t i;
+    int rc;
+    if (!generation || !relative_config_dir) return CANOPUS_SVC_ERR_ARGUMENT;
+    end = log_text(expected, "active/");
+    end = result_number(end, generation);
+    *end = 0;
+    for (i = 0; expected[i] && relative_config_dir[i] == expected[i]; ++i) {}
+    if (expected[i] || relative_config_dir[i]) return CANOPUS_SVC_ERR_ARGUMENT;
+    if (manager_candidate_relative || manager_notifying || control_busy || result_busy ||
+        refreshing || refresh_pending) return CANOPUS_SVC_ERR_BUSY;
+    rc = rh_manager_config_candidate(relative_config_dir, manager_candidate_dir);
+    if (rc) return rc;
+    manager_candidate_relative = relative_config_dir;
+    rc = rh_module_request_reload(generation);
+    manager_candidate_relative = 0;
+    manager_candidate_dir[0] = 0;
+    return rc;
+#else
+    (void)generation;
+    (void)relative_config_dir;
+    return CANOPUS_SVC_ERR_UNSUPPORTED;
+#endif
 }
 static void watch_step(const struct canopus_context_v1 *ctx,
                        int32_t timer, void *user_data) {
@@ -962,12 +1277,15 @@ static void watch_step(const struct canopus_context_v1 *ctx,
     control_busy = 1;
     rh_platform_unlock(irq);
     if (!calendar_started) {
-        calendar_config_error = rh_calendar_start();
+        calendar_config_error = manager_calendar_start();
         if (!calendar_config_error) calendar_started = 1;
     }
     background_start();
     rh_platform_backgrounds_poll();
-    rc = read_bounded_file(RH_CONTROL_REQUEST_PATH, signal, sizeof(signal), &signal_size);
+    /* Native Manager is event-driven. Retain the old external diagnostic
+     * channel only in the legacy host compatibility build, not production. */
+    rc = RH_NATIVE_MANAGER ? 1 : read_bounded_file(RH_CONTROL_REQUEST_PATH, signal,
+                                                  sizeof(signal), &signal_size);
     if (!rc) {
         if (valid_status_signal(signal, signal_size)) kind = RH_REQUEST_STATUS;
         else if (valid_reload_signal(signal, signal_size) ||
@@ -1014,6 +1332,7 @@ static void watch_step(const struct canopus_context_v1 *ctx,
     irq = rh_platform_lock();
     control_busy = 0;
     rh_platform_unlock(irq);
+    notify_manager_status();
 }
 static int schedule_watch_timer(void) {
     if (watch_timer >= 0) return 0;
@@ -1024,6 +1343,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     struct rh_snapshot *candidate = 0, *previous, *declarations = 0, *old_declarations;
     uint32_t irq;
     int fd, rc = 0, error;
+    char config_path[RH_PATH];
     rc = bind_context(c);
     if (rc) return rc;
     collect_snapshots();
@@ -1032,7 +1352,8 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
         startup_record("prepare.end", -2004, 0, S.count);
         return -2004;
     }
-    fd = rh_platform_open(RH_CONTROL_CONFIG, RH_FILE_READ);
+    rc = manager_config_path("mappings.tsv", config_path);
+    fd = rc ? rc : rh_platform_open(config_path, RH_FILE_READ);
     error = fd < 0 ? -fd : 0;
     startup_record("config.open", fd, error, 0);
     if (fd < 0) {
@@ -1081,6 +1402,7 @@ static int32_t prepare(const struct canopus_context_v1 *c) {
     }
     snapshot_release(declarations);
     startup_record("prepare.end", 0, 0, S.count);
+    notify_manager_status();
     return 0;
 }
 /* Caller holds the publication lock. Only the known original or our own
@@ -1233,6 +1555,7 @@ activation_done:
     if (rc && !activated_once) rollback_initial_activation();
     if (!rc) activated_once = 1;
     startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
+    notify_manager_status();
     return rc;
 }
 static int32_t stop(const struct canopus_context_v1 *c) {
@@ -1272,6 +1595,23 @@ static int32_t query(struct canopus_status_writer_v1 *writer) {
         canopus_status_put_u32(writer, font_pending)) return -1;
     return canopus_status_writer_publish(writer);
 }
+#if RH_NATIVE_MANAGER
+static int manager_quickapp_icon(void *cookie, const char *package, char out[RH_PATH]) {
+    (void)cookie;
+    return rh_platform_quickapp_icon_path(package, out);
+}
+static int32_t publish_native_app_stage(const struct canopus_context_v1 *ctx, uint32_t stage) {
+    struct rh_manager_data_hooks hooks = {0, manager_quickapp_icon, 0};
+    int rc = bind_context(ctx);
+    if (rc) return rc;
+    if (stage == 1u) {
+        rc = rh_manager_ui_set_data_hooks(&hooks);
+        return rc ? rc : rh_manager_ui_register(ctx);
+    }
+    if (stage == 2u) return rh_manager_launcher_register(ctx);
+    return CANOPUS_SVC_ERR_ARGUMENT;
+}
+#endif
 __attribute__((used)) struct canopus_module_descriptor_v1 canopus_module_descriptor;
 static void cp(char *d, const char *s, unsigned n) {
     unsigned i = 0;
@@ -1292,9 +1632,15 @@ __attribute__((constructor)) static void rh_module_entry(
      * prepare/activate binds FS; the SDK owns its atomic CMR1 transport. */
     startup_record("ctor.begin", 0, 0, 0);
     canopus_module_descriptor.struct_size = sizeof(canopus_module_descriptor);
-    canopus_module_descriptor.abi_major = 1;
-    canopus_module_descriptor.abi_minor = 2;
+    canopus_module_descriptor.abi_major = CANOPUS_ABI_MAJOR;
+    canopus_module_descriptor.abi_minor = CANOPUS_ABI_MINOR;
     canopus_module_descriptor.flags = CANOPUS_FLAG_REACTIVATE_AFTER_UI_RESTART;
+#if RH_NATIVE_MANAGER
+    canopus_module_descriptor.flags |= CANOPUS_FLAG_HAS_NATIVE_APP |
+        CANOPUS_FLAG_NATIVE_APP_INTEGRATED | CANOPUS_FLAG_REGISTERS_LAUNCHER_ENTRY |
+        CANOPUS_FLAG_REQUIRES_UI_DISPATCHER | CANOPUS_FLAG_APP_UNREGISTER_REBOOT_REQUIRED;
+    canopus_module_descriptor.publish_native_app_stage = publish_native_app_stage;
+#endif
     cp((char *)canopus_module_descriptor.module_id, RH_MODULE_ID, 32);
     cp((char *)canopus_module_descriptor.module_version, RH_VERSION, 16);
     cp((char *)canopus_module_descriptor.build_id,
