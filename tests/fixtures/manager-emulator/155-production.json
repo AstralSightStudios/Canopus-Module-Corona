@@ -1,0 +1,71 @@
+{
+  "description": "Production smoke: no test hook and no probe assertions; status captured requires human visual inspection.",
+  "steps": [
+    {
+      "shot": "production-home"
+    },
+    {
+      "tap": [
+        106,
+        244
+      ]
+    },
+    {
+      "shot": "production-resources"
+    },
+    {
+      "tap": [
+        106,
+        116
+      ]
+    },
+    {
+      "shot": "production-detail"
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        348
+      ]
+    },
+    {
+      "shot": "production-mix"
+    },
+    {
+      "tap": [
+        106,
+        116
+      ]
+    },
+    {
+      "shot": "production-choices"
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "shot": "production-home-return"
+    }
+  ]
+}

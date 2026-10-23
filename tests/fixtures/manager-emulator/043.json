@@ -1,0 +1,613 @@
+{
+  "description": "Real Mirage native-manager acceptance. Requires generated seed plus RH_MANAGER_UI_TEST artifact. Natural management routes and all seven transfer phases use only touch and internal test state; no Connect transport is implemented.",
+  "steps": [
+    {
+      "shot": "home",
+      "pixels": [
+        {
+          "point": [
+            100,
+            162
+          ],
+          "rgb": [
+            29,
+            163,
+            98
+          ],
+          "tolerance": 3
+        }
+      ]
+    },
+    {
+      "tap": [
+        168,
+        226
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "resources-top"
+    },
+    {
+      "tap": [
+        168,
+        104
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "detail-top"
+    },
+    {
+      "tap": [
+        168,
+        430
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "delete-prompt"
+    },
+    {
+      "tap": [
+        168,
+        430
+      ],
+      "settle": 0.1
+    },
+    {
+      "tap": [
+        168,
+        430
+      ],
+      "settle": 0.2
+    },
+    {
+      "shot": "delete-protected"
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
+    },
+    {
+      "drag": [
+        168,
+        104,
+        168,
+        312
+      ],
+      "hold": 0.8,
+      "duration": 0.6,
+      "settle": 0.4
+    },
+    {
+      "shot": "resources-dragged"
+    },
+    {
+      "drag": [
+        168,
+        312,
+        168,
+        104
+      ],
+      "hold": 0.8,
+      "duration": 0.6,
+      "settle": 0.4
+    },
+    {
+      "shot": "resources-drag-restored"
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "shot": "resources-window"
+    },
+    {
+      "tap": [
+        168,
+        208
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "detail-after-virtual-scroll"
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
+    },
+    {
+      "tap": [
+        168,
+        330
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "mix-explicit-first"
+    },
+    {
+      "tap": [
+        168,
+        208
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "choices-default-and-system",
+      "pixels": [
+        {
+          "point": [
+            168,
+            104
+          ],
+          "rgb": [
+            80,
+            110,
+            130
+          ],
+          "tolerance": 3
+        }
+      ]
+    },
+    {
+      "tap": [
+        168,
+        356
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "choices-system-selected"
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "mix-restored"
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "swipe": [
+        168,
+        400,
+        168,
+        140
+      ],
+      "settle": 0.45
+    },
+    {
+      "shot": "mix-virtual-window"
+    },
+    {
+      "tap": [
+        168,
+        208
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "choices-later-item"
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
+    },
+    {
+      "shot": "mix-virtual-restored"
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
+    },
+    {
+      "tap": [
+        168,
+        430
+      ],
+      "settle": 0.4
+    },
+    {
+      "shot": "reload-result"
+    },
+    {
+      "wait": 1
+    },
+    {
+      "drag": [
+        168,
+        116,
+        168,
+        116
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-idle-disconnected"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-idle-connected"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-receiving-68"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-verifying"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-installing"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-installed"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-hash-error"
+    },
+    {
+      "drag": [
+        168,
+        276,
+        168,
+        276
+      ],
+      "hold": 0.7,
+      "duration": 0.1,
+      "settle": 0.5
+    },
+    {
+      "shot": "transfer-canceled"
+    }
+  ],
+  "probe": {
+    "path": "ui-probe.txt",
+    "required": [
+      "^route=5$",
+      "^phase=6$",
+      "^routes_mask=63$",
+      "^phases_mask=127$",
+      "^render_failures=0$",
+      "^idle_connected_seen=1$",
+      "^received_68_seen=1$",
+      "^reload=[1-9][0-9]*$",
+      "^drag=(?:[2-9]|[1-9][0-9]+)$",
+      "^delete=[1-9][0-9]*$",
+      "^pick=[1-9][0-9]*$",
+      "^scroll=[1-9][0-9]*$"
+    ],
+    "forbidden": [
+      "^render_error=[1-9]",
+      "^render_failures=[1-9]"
+    ]
+  }
+}
