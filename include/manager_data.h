@@ -59,11 +59,15 @@ int rh_manager_data_option_count(struct rh_manager_data *, const char *key, uint
 int rh_manager_data_option_get(struct rh_manager_data *, const char *key,
                                uint32_t index, struct rh_manager_option *);
 int rh_manager_data_choose(struct rh_manager_data *, const char *key, const char *choice);
-/* Builds candidate mappings/backgrounds/calendar under config_dir relative to
- * module root. Caller publishes the three files together using its internal
- * reload transaction and then calls complete_apply. Until then old AND new
- * package references remain protected. Never implies refresh has completed. */
+/* Builds candidate mappings/backgrounds/calendar under canonical
+ * active/<nonzero uint32 decimal> (no leading zeros or trailing slash).
+ * Caller publishes the three files together using its internal reload
+ * transaction and then calls complete_apply. Until then old AND new package
+ * references remain protected. Never implies refresh has completed. */
 int rh_manager_data_prepare_apply(struct rh_manager_data *, const char *config_dir);
+/* Success requires active-config still names the exact pending generation.
+ * Then retires old canonical config trios and old overlay bytes, retaining
+ * empty directory shells. Invalid/changed pointers leave protection intact. */
 int rh_manager_data_complete_apply(struct rh_manager_data *, int success);
 int rh_manager_data_delete(struct rh_manager_data *, const char *id);
 const char *rh_manager_data_error(const struct rh_manager_data *);
