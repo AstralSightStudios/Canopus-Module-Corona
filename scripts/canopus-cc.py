@@ -23,7 +23,10 @@ def main():
     if len(targets) != 1 or next(iter(targets)) not in TARGET_FLAGS:
         sys.exit('Resource Hook requires one supported exact Canopus target include directory')
     target = targets.pop()
-    flags = list(TARGET_FLAGS[target])
+    flags = [*TARGET_FLAGS[target], '-DRH_NATIVE_MANAGER=1']
+    # Emulator-only touch/probe hooks never enter normal deliverables.
+    if os.environ.get('RH_MANAGER_UI_TEST', '0') == '1':
+        flags.append('-DRH_MANAGER_UI_TEST=1')
     for name in ('RH_P67_LIVE_LAUNCHER', 'RH_P67_LIVE_BACKGROUNDS', 'RH_P67_BLUR_NATIVE'):
         if name in os.environ:
             sys.exit(f'Retired build flag {name}; remove it')

@@ -79,7 +79,7 @@ class P67LiveLauncher(unittest.TestCase):
         env = self.clean_environment()
         env['RH_P67_BLUR_DIAGNOSTICS'] = '1'
         result = subprocess.run(['sh', str(ROOT / 'scripts/build.sh'),
-            'xiaomi-band-11-4.100.139'], env=env, capture_output=True, text=True)
+            'xiaomi-band-11-4.100.155'], env=env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Blur diagnostics requires exact .043', result.stderr)
 

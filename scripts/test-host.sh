@@ -82,6 +82,8 @@ for target in 139 155 177 1043; do
         "$SDK/runtime/control/canopus_control.c" "$SDK/runtime/hook/canopus_hook.c" \
         "$ROOT/tests/test_module.c" \
         -o "$ROOT/build/test_module_${target}"
+    "$ROOT/build/test_module_${target}" --manager-internal
+    "$ROOT/build/test_module_${target}" --manager-reentrant
     "$ROOT/build/test_module_${target}" --mem-services
     "$ROOT/build/test_module_${target}" --time-services
     "$ROOT/build/test_module_${target}" --time-activation-failure 50
@@ -127,6 +129,14 @@ python3 "$ROOT/tests/test_config_cli.py"
 python3 "$ROOT/tests/test_target_receipts.py"
 python3 "$ROOT/tests/test_quickapp_allowlist.py"
 python3 "$ROOT/tests/firmware_support_test.py"
+
+# Native Manager uses the actual production root, immutable generation pointer,
+# internal completion notifications and bounded semantic UI trees.
+sh "$ROOT/scripts/test-manager-module.sh"
+sh "$ROOT/scripts/test-manager-config-store.sh"
+sh "$ROOT/scripts/test-manager-assets.sh"
+sh "$ROOT/scripts/test-manager-data.sh"
+sh "$ROOT/scripts/test-manager-ui.sh"
 
 # Exact APs and emulator dependencies are intentionally optional for host users.
 if [ "${RH_TEST_BAND11_FEATURES:-0}" = 1 ]; then

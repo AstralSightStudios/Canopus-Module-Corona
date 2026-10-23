@@ -6,18 +6,21 @@ version_code = 3
 kind = "target"
 language = "c"
 lifecycle = "resident-after-activation"
-canopus_abi = "1"
+canopus_abi = "2"
 [build]
 sources = [
     "src/module.c", "src/resource_hook.c", "src/config.c",
     "src/calendar_config.c", "src/calendar_icon.c", "src/calendar_native.c",
     "src/launcher_background.c", "src/platform.c", "src/platform_fs.c", "src/platform_memory.c",
     "src/font_reload.c", "src/quickapp_icon.c",
+    "src/manager_config_store.c", "src/manager_data.c",
+    "src/manager_assets.c", "src/manager_ui.c",
     "${CANOPUS_ROOT}/runtime/control/canopus_control.c",
 ]
 include_dirs = ["include"]
 
 [targets]
-include = ["xiaomi-band-11-4.100.177", "xiaomi-band-11-4.100.139", "xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043"]
+# Initial native UI targets; each requires its own emulator acceptance run.
+include = ["xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043"]
 [capabilities]
 required = []

@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#define RH_TARGET_1043 1
+#include "resource_hook_target.h"
 
 #define ROOT 0x20001000u
 #define STATUS 0x20002000u
@@ -467,7 +469,7 @@ static uintptr_t native(uint32_t address) {
     case 0x0c587f39u: return (uintptr_t)create;
     case 0x0cac0db9u: return (uintptr_t)destroy;
     case 0x0ca5fb41u: return (uintptr_t)capture;
-    case 0x0c143799u: return (uintptr_t)mask_info;
+    case RH_FW_IMAGE_GET_INFO: return (uintptr_t)mask_info;
     case 0x0c1068a9u: return (uintptr_t)mask_style_get;
     case 0x0c588d59u: return (uintptr_t)mask_child_create;
     case 0x0c587fa1u: return (uintptr_t)mask_source_set;

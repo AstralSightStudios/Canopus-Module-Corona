@@ -3,10 +3,10 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus-Private"}
 [ "$#" -le 1 ] || { printf 'usage: build.sh [target-id]\n' >&2; exit 1; }
-TARGET_ID=${1:-xiaomi-band-11-4.100.139}
+TARGET_ID=${1:-xiaomi-band-11-4.100.155}
 case "$TARGET_ID" in
-    xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.177|xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043) ;;
-    *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
+    xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043) ;;
+    *) printf 'Unsupported native Manager target: %s (supported: .155, .043)\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 # One complete product per exact target. Refuse stale product selectors,
 # including explicit zero, rather than silently changing their old semantics.
@@ -54,5 +54,5 @@ CANOPUS_ROOT="$SDK" CC="$ROOT/scripts/canopus-cc.py" CLANG="$CLANG" \
     LD="$ROOT/scripts/canopus-ld.sh" LD_LLD="$LD_LLD" \
     "$CANOPUS_CLI" build --manifest "$ROOT/Canopus.toml" --target "$TARGET_ID"
 cp "$ROOT/build/$TARGET_ID/corona.elf" "$ROOT/build/resource-hook.elf"
-printf 'Built resource-hook.elf for %s. Static/build verification only; this artifact and .177 device behavior: NOT_PROBED.\n' "$TARGET_ID"
+printf 'Built resource-hook.elf for %s. Build verification completed; emulator acceptance is recorded separately.\n' "$TARGET_ID"
 printf 'GPU recovery and framework restart safety remain unsupported.\n'

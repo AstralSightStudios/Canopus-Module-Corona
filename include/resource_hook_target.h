@@ -79,8 +79,11 @@
 #define RH_FW_FONT_REMOVE_PATH        0x0c860399u
 #define RH_FW_CACHE_RELEASE           0x0c1666edu
 
-#define RH_FW_IMAGE_SET_SRC           0x0c17a2f5u
-#define RH_FW_IMAGE_GET_INFO          0x0c143799u
+/* Startup-copied executable aliases, as pinned by the current .043 pack:
+ * flash .0c17a2f4 -> .1c06ceb4; flash .0c143798 -> .1c036358.
+ * Load addresses are not callable after startup relocation. */
+#define RH_FW_IMAGE_SET_SRC           0x1c06ceb5u
+#define RH_FW_IMAGE_GET_INFO          0x1c036359u
 #define RH_FW_OBJECT_TREE_WALK        0x0c13c691u
 #define RH_FW_OBJECT_STYLE_GET        0x0c1068a9u
 #define RH_FW_OBJECT_STYLE_REFRESH    0x0c1070adu

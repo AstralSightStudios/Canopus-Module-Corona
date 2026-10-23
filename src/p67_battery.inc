@@ -228,7 +228,7 @@ static int p67_battery_alpha_sample(uint32_t obj, uint32_t generation, uint32_t 
     }
     /* A failed lookup can be transient (I/O/cache allocation); do not cache
      * it as permanent unsupported input for an otherwise unchanged source. */
-    diag->info_rc = ((int (*)(uint32_t, void *))(uintptr_t)P67_NATIVE(0x0c143799u))(source, header);
+    diag->info_rc = ((int (*)(uint32_t, void *))(uintptr_t)P67_NATIVE(RH_FW_IMAGE_GET_INFO))(source, header);
     diag->info_w = header[1] & 0xffffu; diag->info_h = header[1] >> 16;
     diag->info_cf = (header[0] >> 8) & 0xffu;
     if (diag->info_rc != 1u) {
