@@ -1,6 +1,12 @@
-# Module control channel
+# Module control channel (legacy quick-app compatibility)
 
-This documents the native module control protocol. The accompanying Manager uses it: migrate to the control paths, query status once on
+The native ABI 2 Manager reads shared module snapshots and submits reloads through
+internal calls; production native builds do not poll these control files. This
+document records the earlier quick-app transport, retained in compatibility host
+tests. See [native Manager implementation](native_manager_ui_plan.md) for the
+current internal state and configuration-generation boundary.
+
+This documents the legacy native module control protocol. The quick-app Manager uses it: migrate to the control paths, query status once on
 first homepage entry, then use reload v2's memory snapshot to update status and
 active rule count after each reload without another status query. Older clients
 using `reload.request` / `reload.result` must migrate their paths.

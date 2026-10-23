@@ -146,8 +146,8 @@ struct rh_transfer_ui_state {
      | `unresponsive` | `0xDA593C` | `"模块异常"` | `"未检测到模块"` | `0xF6D5CE` | `status-unresponsive.bin` |
      | `unavailable` | `0x262626` | `"检测失败"` | `"请稍后重载"` | `0xBFBFBF` | 无 |
    - 字号与坐标：
-     - Band 11 (`.155`)：主标题 `(14, 14) 134×40 font_px=30`；副标题 `(14, 54) 134×32`，`running` 时 `font_px=17`、`unresponsive` 时 `font_px=21`、其余 `font_px=24`；右下角图标裁切为卡片内可见尺寸 `71×97` 置于 `(133, 3)`（避免超出父容器撑大滚动 `extent`）。
-     - Band 10 Pro (`.043`)：主标题 `(14, 12) 183×42 font_px=32`；副标题 `(14, 54) 183×34`，`running` 时 `font_px=24`、其余 `font_px=26`；右下角图标裁切为卡片内可见尺寸 `132×100` 置于 `(192, 0)`。
+     - Band 11 (`.155`)：主标题 `(14, 14) 134×40 font_px=30`；副标题 `(14, 54) 134×32`，`running` 时 `font_px=17`、`unresponsive` 时 `font_px=21`、其余 `font_px=24`；装饰图保留原 PNG，布局框为 `(133, 1) 92×97`，由状态卡裁剪。
+     - Band 10 Pro (`.043`)：主标题 `(14, 12) 183×42 font_px=32`；副标题 `(14, 54) 183×34`，`running` 时 `font_px=24`、其余 `font_px=26`；装饰图布局框为 `(186, -7) 138×145`，保留原图尺寸并由状态卡裁剪。坐标以旧页面实际 CSS 计算修正了计划初版近似值。
 3. **功能入口行**：
    - `CANOPUS_UI_NODE_ACTION_ROW`：`label = "资源管理"`，`detail = ""`，点击推入 `ROUTE_RESOURCES`。
    - `CANOPUS_UI_NODE_ACTION_ROW`：`label = "混搭微调"`，`detail = ""`，点击推入 `ROUTE_MIX_MATCH`。
@@ -239,12 +239,13 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
      4. `简介`：`manifest.description`（缺省 `"暂无简介"`）
      5. `适用设备`：`manifest.targets` 以 `"、"` 拼接（缺省 `"未声明目标设备"`）
      6. `资源包 ID`：`themeId`
+   - 元数据长度超过系统双行项可显示宽度时，使用同字段标题的系统 SECTION/TEXT 分块完整展示；长说明与适用设备均可滚动，不截断原文。
 3. **底部删除按钮与 500ms 双击确认**：
    - 列表末尾居中放置 `del.bin`（`150×78`）或 `del-wide.bin`（`324×80`）。
    - 首次点击记录 `delete_first_tap_ms = ctx->time->monotonic_ms(ctx)`，弹出 `TOAST` `"双击删除"`。
    - `500ms` 内再次点击触发删除事务：
      - 检查 `mappings.tsv`、`resource-active-generations.json` 的 `protectedThemes` 及 `calendar.cfg` 是否引用了该 `themeId`；若正在使用，拒绝删除并弹 `TOAST` `"正在使用的资源包不能删除"`。
-     - 否则清理 `resource-overrides.json` 中的引用、删除主题目录、更新 `interconnect-themes.json` / `resource-order.json` / `resource-files.json`，弹出 `TOAST` `"资源包已删除"` 并返回上一页。
+     - 否则清理 `resource-overrides.json` 中的引用、删除主题文件、更新 `interconnect-themes.json` / `resource-order.json` / `resource-files.json`，弹出 `TOAST` `"资源包已删除"` 并返回上一页。没有目录删除服务时仅保留空目录，文件或索引操作失败均不显示成功。
 
 ```text
 Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
@@ -384,9 +385,10 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
   - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`connect.png`、`choose.png`、`download.png`、`error.png`、`succ.png`、`logo.png` 转为 LVGL v9 `.bin` 并在 UI 初始化时按需落盘到模块私有目录 `/data/canopus/m.corona/assets/`。
 
 ### Step 2：C 语言移植 Manager 数据与配置生成层
-- **`src/manager_pack.c`**：移植 `corona.json` / `canora.json` 解析与校验（UTF-8 长度、路径安全、`quickappIcons` 归一化、`backgrounds` 四区域与 `calendar` 配置解析）。
-- **`src/manager_order.c` & `src/manager_storage.c`**：移植 `interconnect-themes.json`、`resource-order.json`（含 `@system` 唯一分界归一化）、`resource-files.json`（含目录枚举回退）读写及活动资源包删除保护（检查 `mappings.tsv`、`protectedThemes`、`calendar.cfg`）。
-- **`src/manager_overrides.c` & `src/manager_activation.c`**：移植资源目录快照构建（最长前缀遮蔽、计算 `@default` 与 `@system` 的 `.bin` 预览路径）、`resource-overrides.json`（v1/v2 `overrides` + `features`）读写，以及 `regenerateActiveMappings`（重叠目录直接展开或 `.active-<gen>/r<N>/` 叠加拷贝、`calendar.cfg` / `backgrounds.cfg` / `mappings.tsv` 生成与旧代次清理）。
+- **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。
+- **原生存储与发布**：`get_data_path` 必须对应 `/data/canopus/m.corona/`；每次重载先写完整 `active/<generation>/{mappings.tsv,backgrounds.cfg,calendar.cfg}`，再由内部事务验证并发布 `active-config` 指针。指针内容为 `active/<非零规范 uint32>\n`。旧、新资源引用在刷新完成前共同受保护；只有匹配成功通知才能缩小保护范围。
+- **清理能力边界**：当前 SDK 没有目录删除接口。默认清理逐文件调用 `fs.remove`，成功后移除安装索引；空目录保留等待未来目录回收能力。文件删除、索引写入或清理失败均返回错误，不把失败显示为成功。
+- **旧存储导入**：保留旧快应用数据，复制到原生根后最后发布原生索引；导入不代表已应用，仍需内部重载事务。新传输的 `registry.*` 安装适配留待接收状态机实现。
 
 ### Step 3：实现 6 路由原生 UI 视图与事件状态机
 - **`src/manager_ui.c`**：

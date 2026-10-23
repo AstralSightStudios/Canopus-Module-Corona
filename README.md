@@ -6,6 +6,12 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)](Canopus.toml)
 
+当前 Manager 已迁入 `corona` 模块，使用 Canopus ABI 2 原生页面与桌面入口；首批目标为
+Band 11 `4.100.155` 和 Band 10 Pro `3.101.043`。首页状态卡保留原视觉，其他控件使用系统组件。
+模块状态和重载结果通过内存快照与内部通知更新，不再轮询控制文件。本轮仅实现主题传输 UI，
+新 CanopusConnect 接收与安装状态机尚未接入。设计、实现边界与验证记录见
+[原生 Manager 文档](docs/native_manager_ui_plan.md)。
+
 ---
 
 ## 背景配置支持范围
@@ -47,12 +53,12 @@ GPU 故障恢复与帧时间仍未验证，详见
                                | 传输
                                v
 +-------------------------------------------------------------+
-|                     Manager (快应用前端)                     |
-|          资源包管理 / 优先级排序 / 混搭配置 / 发送重载信号       |
+|                    Manager (模块内原生 UI)                   |
+|          资源包管理 / 优先级排序 / 混搭配置 / 内部重载事务       |
 +-------------------------------------------------------------+
                                |
-               control.request | control.response
-              (mappings.tsv)   | (RHST1 / RHRS2)
+                 内存快照 / 状态变更通知
+                 active-config 配置代次指针
                                v
 +-------------------------------------------------------------+
 |             Canopus-Module-Resource-Hook (C 核心)           |
@@ -72,6 +78,9 @@ GPU 故障恢复与帧时间仍未验证，详见
 ---
 
 ## 支持设备与固件
+
+以下为 Hook 各精确适配的历史设备反馈；不代表新增原生 Manager 已在这些设备上实测。
+当前原生 Manager 构建目标仅为 `.155` / `.043`，其余适配源码保留，需另行集成 UI 与验证。
 
 | 设备型号 | 固件版本 | 验证状态 | 图片重定向 | 快应用图标 | 日历动态图标 | 字体热重载 |
 |---|---|---|:---:|:---:|:---:|:---:|
@@ -95,14 +104,16 @@ GPU 故障恢复与帧时间仍未验证，详见
   - **快应用包名图标**：支持 `@quickapp-icon/<package>` 声明，UI 线程只读查询真实应用注册记录并精准映射。
   - **透明日历图标**：Band11 独立 ARGB8888 合成与文件读取重定向；P67 自定义图标仅 RAM 发布，默认配置沿用原生日历。`corona.json` 的 `calendar` 支持 month/day/weekday 文字或图片，底图仍使用原来的资源映射。配置示例见 `examples/calendar/corona.json`。
 - **字体热重载**：三个目标默认启用受检查的字体事务，保留现有字体 wrapper、fallback 与原厂路径基线，支持字体切换和规则移除后的原厂恢复。需使用不可变字体代次；GPU 故障恢复、框架重启及自定义字体 owner 不在支持范围内。
-- **优雅的配置与控制通道**：模块与 Manager 通过 `control.request` / `control.response` 进行全异步双向通信，无需重启手环即可无感热更新规则。
+- **内部状态与配置事务**：Manager 与 Hook 共用模块内状态。重载按不可变代次准备完整配置，发布 `active-config` 后等待内部刷新通知；失败保留旧资源引用。
 - **独立容错与启动诊断**：配置缺失或语法错误自动退回 pass-through 零规则模式，绝不阻断系统启动；启动各阶段独立记入 `/data/offlinelog/resource-hook-startup.log`。
 
 ---
 
 ## 规则配置 (`mappings.tsv`)
 
-配置文件位于快应用文件根目录下的 `mappings.tsv`（以真实 `\t` 制表符分隔，最多 256 条）：
+原生数据根为 `get_data_path` 返回的 `/data/canopus/m.corona/`。
+`active-config` 指向 `active/<generation>/` 内的 `mappings.tsv`、`backgrounds.cfg`、`calendar.cfg`；
+没有指针时读取根目录配置。以下 TSV 格式保持不变（真实 `\t` 制表符，最多 256 条）：
 
 ```tsv
 # 目录映射：必须以 '/' 结尾，自动追加子路径
@@ -127,11 +138,11 @@ GPU 故障恢复与帧时间仍未验证，详见
 - 相邻 `../Canopus-Private` 新版仓库（CMI2 / CPC2；先编译 `cargo build -p canopus-cli`）
 - Clang / LLVM（支持 ARM target）、`ld.lld`、Python 3.11+
 
-框架模块 ID 为 `corona`，快应用包名及主题目录仍为 `ng.lst.corona`。
-`Canopus.toml` 声明四个精确 target；`scripts/build.sh` 通过新 CLI 构建并验证，
-用 `scripts/canopus-cc.py` 注入各固件的编译宏，并用 `scripts/canopus-ld.sh`
-合并 ELF sections，以满足 Band11 loader 的 section 数量限制。通用服务替换留待后续迁移，
-这一阶段保留现有原生资源适配与控制协议。
+框架模块 ID 为 `corona`，私有数据与主题迁至 `/data/canopus/m.corona/`。
+`Canopus.toml` 声明 `.155` / `.043` 两个原生 UI target；`scripts/build.sh` 默认构建 `.155`。
+编译包装器统一启用 `RH_NATIVE_MANAGER=1`，并注入精确固件宏；
+`scripts/canopus-ld.sh` 合并 ELF sections，满足 Band11 loader 的 section 数量限制。
+旧 `manager/` 快应用源码保留作行为参考，当前原生入口不依赖它。
 
 ### 常用命令
 
@@ -149,9 +160,10 @@ RESOURCE_HOOK_PAYLOAD=dist/0.3.0-155/payload/xiaomi-band-11-4.100.155 \
 ```
 
 原生交付目录根部的 `corona-0.3.0.canopus` 是可安装模块包，通过 AstroBox 的 Canopus
-入口安装。四个 target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
-Canopus 处理。主题文件和 Corona Manager 仍单独安装，不放进原生模块包。
-默认交付运行宿主与产物校验；如需同时执行固件仿真，追加 `--firmware-tests`。
+入口安装。两个原生 UI target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
+Canopus 处理。Corona Manager 及内置图片已包含在模块内；本轮不提供新主题上传实现。
+默认交付运行宿主与产物校验；原生页面模拟器脚本为 `scripts/test-manager-emulator.py`，
+每个目标使用独立 `--library` 与 `--work`，详见原生 Manager 文档。
 
 Supervisor 的安装表盘仍用于引导框架。`build-watchface.py` 和
 `build-quickapp-watchface.py` 是保留的旧模块投递工具，不属于新版默认交付。
@@ -159,8 +171,7 @@ Supervisor 的安装表盘仍用于引导框架。`build-watchface.py` 和
 构建全部 target 后，也可用新 CLI 生成统一模块包：
 
 ```sh
-for target in xiaomi-band-11-4.100.139 xiaomi-band-11-4.100.155 \
-              xiaomi-band-11-4.100.177 xiaomi-band-10-pro-3.101.043; do
+for target in xiaomi-band-11-4.100.155 xiaomi-band-10-pro-3.101.043; do
   sh scripts/build.sh "$target" || exit 1
 done
 CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
@@ -169,7 +180,7 @@ CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
 输出为 `dist/corona-0.3.0.canopus`，包含每个 target 的 ELF 与 CMI2 回执。
 旧 Supervisor 需要按新版框架流程重装；安装及升级语义见 [安装说明](docs/INSTALL.md)。
 
-当前新框架兼容验证：四个目标 `.043/.139/.155/.177` 均已通过新 CLI 编译与 ELF 校验，
+以下为原生 UI 迁移前的 Hook 兼容性记录：四个目标 `.043/.139/.155/.177` 曾通过 CLI 编译与 ELF 校验，
 四目标统一 `.canopus` 包已通过 CLI 校验；`.043` 原生完整交付也已通过宿主与产物测试。
 `.043` 需要包含 Canopus 提交 `219fcb9` 的 target pack（revision 8），其中补齐了图片创建与
 控制中心样式的两项精确 XIP 跳板身份。它们仍为 `restricted / STATIC_RECOVERED / PENDING`，
@@ -189,7 +200,8 @@ CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
 如果你需要深入了解实现细节、逆向审计证据或协议标准，请参阅：
 
 - 📦 [安装、回退与实机验收指南](docs/INSTALL.md)
-- 🔌 [模块控制协议规范 (`control.request/response`)](docs/MODULE_CONTROL.md)
+- 🖥️ [原生 Manager 设计、实现与验收](docs/native_manager_ui_plan.md)
+- 🔌 [旧快应用控制协议记录 (`control.request/response`)](docs/MODULE_CONTROL.md)
 - 🩺 [启动诊断日志与错误排查](docs/STARTUP_DIAGNOSTICS.md)
 - ⚙️ [底层生命周期边界、内存基准与固件仿真](docs/LIFECYCLE_AND_INTERNALS.md)
 - 📅 [原生日历图标动态重载机制](docs/CALENDAR_RELOAD.md)
