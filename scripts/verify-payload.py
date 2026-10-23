@@ -15,7 +15,7 @@ TARGETS = {
 FIRMWARE = TARGETS[TARGET]  # Backward-compatible .139 default.
 MODULE_ID = "corona"
 MODULE_VERSION = 3
-MAX_ARTIFACT = 393216
+MAX_ARTIFACT = 4194304
 
 
 def require(condition, message):
