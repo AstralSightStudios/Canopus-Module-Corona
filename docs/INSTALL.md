@@ -1,14 +1,19 @@
 # Resource Hook 安装与验收
 
 适用交付：Canopus-Module-Resource-Hook **0.3.0**，支持 Xiaomi Band 11
-**4.100.139 / 4.100.155 / 4.100.177** 与 Xiaomi Band 10 Pro **3.101.043**。各固件使用独立
+**4.100.139 / 4.100.155 / 4.100.177 / 4.100.179** 与 Xiaomi Band 10 Pro **3.101.043**。各固件使用独立
 ELF 和收据，不能混用。新版模块交付为 `.canopus` 包，包含按精确 target 绑定的
 ELF 和无签名 CMI2 回执。AstroBox 的 Canopus 入口查询设备 target，选择对应产物，
-通过 WearPacket L2 `0x43` / CPC2 原生分块安装；四个目标遵循相同协议，通信后端由框架适配。
+通过 WearPacket L2 `0x43` / CPC2 原生分块安装；各目标遵循相同协议，通信后端由框架适配。
 Supervisor 的安装表盘只负责引导框架，模块无需安装表盘。`.043` 需使用包含 Canopus
 提交 `219fcb9` 的 target pack（revision 8），该版本已补齐模块依赖的两项精确 XIP 跳板。
 四目标统一包及 `.043` 原生完整交付已通过宿主与产物校验，尚未实机验证；
 详情见 [构建状态](../README.md#常用命令)。
+`.179` 新增精确静态适配与原生 Manager 构建，设备状态为 **NOT_PROBED**；
+必须使用匹配的 `.179` Supervisor 和 revision **2** 的框架 target pack；
+revision 2 通过独立静态证据补齐可见区域函数的 Thumb 身份并记为 STATIC_RECOVERED，
+仍为 restricted / PENDING / NOT_PROBED，没有新增公开 API 批准或设备验收。
+地址来源与验证边界见 [.179 适配记录](../targets/xiaomi-band-11-4.100.179/README.md)。
 用户已反馈三个目标的正常字体重载实机验收通过（**USER_REPORTED_PASS**），字体事务
 现已默认启用；该反馈不自动覆盖 GPU 故障、框架重启或所有资源 owner，也不代表新生成
 的每份交付产物均重新做过实机测试。详见[字体重载说明](FONT_RELOAD.md)。
@@ -39,6 +44,7 @@ Supervisor 的安装表盘只负责引导框架，模块无需安装表盘。`.0
   - `.139`：`31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74`
   - `.155`：`ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f`
   - `.177`：`ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`
+  - `.179`：`307adabe0ff61c77be73d045a8260e279cddd131c7a535a2678eb34199278a2b`
   - `10 Pro .043`：`519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec`
 - 已重新部署兼容 Canopus ABI **1.2**、CMI2 和 CPC2 的新版 Supervisor。
   新框架拒绝旧 registry / inbox 格式；先备份主题配置并按框架流程重装 Supervisor。
@@ -54,7 +60,7 @@ shasum -a 256 -c SHA256SUMS
 ```
 
 `.139` 包将命令中的目标改为 `xiaomi-band-11-4.100.139`。校验器默认 `.139`，
-不会从不可信收据自动猜测目标；`.155` 和 `10 Pro .043` 必须显式指定。固件升级前先禁用旧模块并完整
+不会从不可信收据自动猜测目标；其他固件（包括 `.179`）必须显式指定。固件升级前先禁用旧模块并完整
 重启，再按新固件重新部署匹配的 Supervisor 和模块，不要只给旧 ELF 换收据。
 
 CMI2 校验模块 ID、版本、生命周期、精确 target、固件 SHA-256 以及 ELF 大小和 SHA-256。

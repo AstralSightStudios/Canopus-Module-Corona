@@ -23,6 +23,10 @@ TARGETS = {
                 service_slot=0x20084ec4, registry_slot=0x20084ebc,
                 package_offset=12, icon_offset=16, root=b'/data/quickapp/app/',
                 flash_high=0x0cd00000),
+    '179': dict(service=0x2ca3b5cc, lookup=0x0c69faeb,
+                service_slot=0x20084e74, registry_slot=0x20084e6c,
+                package_offset=12, icon_offset=16, root=b'/data/quickapp/app/',
+                flash_high=0x0cd00000),
     '155': dict(service=0x2ca3da58, lookup=0xc6a1693,
                 service_slot=0x20084ec4, registry_slot=0x20084ebc,
                 package_offset=12, icon_offset=16, root=b'/data/quickapp/app/',
@@ -148,7 +152,7 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
         return result
 
     def test_fixtures_cover_all_supported_exact_targets(self):
-        self.assertEqual(set(TARGETS), {'139', '155', '1043'})
+        self.assertEqual(set(TARGETS), {'139', '155', '179', '1043'})
 
     def test_supported_exact_targets_copy_and_no_pointer_retention(self):
         for version, target in TARGETS.items():

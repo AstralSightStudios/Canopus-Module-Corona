@@ -5,9 +5,8 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus-Private"}
 CC=${CC:-cc}
 mkdir -p "$ROOT/build"
-for target in 155 1043; do
-    DEFINE=-DRH_TARGET_155=1
-    [ "$target" != 1043 ] || DEFINE=-DRH_TARGET_1043=1
+for target in 155 179 1043; do
+    DEFINE=-DRH_TARGET_$target=1
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         "$DEFINE" -DRH_NATIVE_MANAGER=1 -DCANOPUS_HOST=1 \
         -I"$ROOT/include" -I"$SDK/sdk/c" -I"$SDK/runtime/hook" \

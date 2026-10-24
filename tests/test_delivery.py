@@ -48,8 +48,9 @@ class FirmwareSelection(unittest.TestCase):
                 self.assertNotIn('firmware_quickapp_reload_1043', suites)
                 self.assertEqual(suites['firmware_calendar'][-2:], ['--target', target])
 
-    def test_177_has_no_unrelated_firmware_suites(self):
+    def test_new_targets_have_no_unrelated_firmware_suites(self):
         self.assertEqual(self.suites('xiaomi-band-11-4.100.177'), {})
+        self.assertEqual(set(self.suites('xiaomi-band-11-4.100.179')), {'test_calendar_native'})
 
     def test_unknown_native_target_refused(self):
         with self.assertRaisesRegex(ValueError, 'unsupported target'):
@@ -111,6 +112,11 @@ class Delivery(unittest.TestCase):
                              (PAYLOAD / 'resource-hook.elf').read_bytes())
             self.assertEqual(archive.extractfile(f'receipts/{TARGET}.cmi').read(),
                              (PAYLOAD / 'receipt.bin').read_bytes())
+            manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
+            for relative in manifest.get('resources', {}).get('files', []):
+                resource = ROOT / relative
+                self.assertEqual(archive.extractfile('resources/common/' + resource.name).read(),
+                                 resource.read_bytes())
         self.assertFalse((PAYLOAD / 'signer-public.pem').exists())
 
     def test_manifest_and_release_identity(self):
@@ -123,7 +129,7 @@ class Delivery(unittest.TestCase):
         self.assertEqual(metadata['version'], manifest['module']['version'])
         self.assertEqual(metadata['physical_device'], 'NOT_PROBED')
         self.assertEqual(metadata['font_reload_device_status'],
-                         'NOT_PROBED' if TARGET.endswith('4.100.177') else 'USER_REPORTED_PASS')
+                         'NOT_PROBED' if TARGET.endswith(('4.100.177', '4.100.179')) else 'USER_REPORTED_PASS')
         self.assertEqual(metadata['receipt_format_version'], 2)
         self.assertEqual(metadata['format'], 'elf-cmi2')
         self.assertTrue(metadata['font_reload'])
@@ -144,7 +150,7 @@ class Delivery(unittest.TestCase):
         source = ROOT / 'targets' / TARGET
         expected = [item for item in source.iterdir()
                     if item.is_file() and item.suffix in ('.json', '.md')]
-        if not TARGET.endswith('4.100.177'):
+        if not TARGET.endswith(('4.100.177', '4.100.179')):
             self.assertTrue(any(item.name.startswith('font-reload') for item in expected))
         for item in expected:
             self.assertEqual((PAYLOAD / 'evidence' / item.name).read_bytes(), item.read_bytes())

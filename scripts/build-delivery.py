@@ -24,6 +24,9 @@ def firmware_test_commands(target, python):
     """Select only suites that actually support the exact requested AP."""
     if target not in TARGETS:
         raise ValueError(f'unsupported target: {target}')
+    if target == 'xiaomi-band-11-4.100.179':
+        # Selected native calendar instructions and the compiled adapter only.
+        return [('test_calendar_native', [python, str(ROOT / 'tests/test_calendar_native.py')])]
     if target == 'xiaomi-band-11-4.100.177':
         # Existing native harnesses contain only .139/.155/.043 address maps.
         return []
@@ -109,10 +112,15 @@ def main():
             local_ap = ROOT / 'build/firmware-analysis' / f'vela_ap_{target.rsplit("-", 1)[1]}.bin'
             if not native_env.get('RESOURCE_HOOK_FIRMWARE') and local_ap.is_file():
                 native_env['RESOURCE_HOOK_FIRMWARE'] = str(local_ap)
+            if target == 'xiaomi-band-11-4.100.179':
+                native_env['RH_CALENDAR_TARGET'] = '179'
             if args.firmware_tests:
                 for name, command in firmware_test_commands(target, firmware_python):
                     run(f'{target}: {name}', command, native_env)
-        if firmware_targets:
+        legacy_firmware_targets = [target for target in firmware_targets
+                                   if target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155',
+                                                 'xiaomi-band-10-pro-3.101.043')]
+        if legacy_firmware_targets:
             run('Native harness targets .139/.155/.043: firmware_quickapp_icon',
                 [firmware_python, str(ROOT / 'tests/firmware_quickapp_icon.py')])
         if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155') for target in firmware_targets):
@@ -130,6 +138,7 @@ def main():
                 raise RuntimeError('expected one [targets] table in Canopus.toml')
             manifest_path = project / 'Canopus.toml'
             manifest_path.write_text(selected)
+            OPTIONS['stage_resources'](ROOT, project, module_manifest, targets)
             for target in targets:
                 artifact = project / 'build' / target / f'{project_id}.elf'
                 artifact.parent.mkdir(parents=True)
@@ -142,19 +151,21 @@ def main():
         source.mkdir()
         for name in ('src', 'include', 'scripts', 'tests', 'tools', 'docs', 'examples', 'targets'):
             shutil.copytree(ROOT / name, source / name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        # The native Manager asset generator needs these original PNG inputs.
+        shutil.copytree(ROOT / 'manager/src/common', source / 'manager/src/common')
         for name in ('Canopus.toml', 'README.md', '.gitignore'):
             shutil.copyfile(ROOT / name, source / name)
         (stage / 'README.md').write_text(
             '# Resource Hook 0.3.0 integration delivery\n\n'
             f'Targets: {", ".join(targets)}. New artifact physical device: NOT_PROBED.\n\n'
-            'Font reload: legacy targets have user reports; .177 is NOT_PROBED. '
+            'Font reload: legacy targets have user reports; .177/.179 are NOT_PROBED. '
             'Transactional font reload is included by default; GPU recovery and framework '
             'restart safety remain unsupported.\n\n'
             '- Read INSTALL.md before installing or enabling.\n'
             f'- {package_name}: install through AstroBox Canopus using native L2/CPC2.\n'
             '- payload/: per-target ELF/CMI2, Canopus package, example mapping and verifier.\n'
             '- Supervisor bootstrap is separate from module installation.\n'
-            '- Theme resources and the Corona Manager are installed separately; the native package contains only the module.\n'
+            '- The package includes the native Corona Manager and its built-in images; theme packs are separate.\n'
             '- source/: complete module sources; see source/README.md for build prerequisites.\n'
             '- evidence/: firmware lifecycle evidence and limitations.\n'
             '- validation.json and validation.log: checks run for this delivery.\n\n'
@@ -178,7 +189,8 @@ def main():
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',
             'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
             'font_reload_device_status': ('NOT_PROBED'
-                if 'xiaomi-band-11-4.100.177' in targets else 'USER_REPORTED_PASS'),
+                if any(target.endswith(('4.100.177', '4.100.179')) for target in targets)
+                else 'USER_REPORTED_PASS'),
             'receipt_format_version': 2,
             'delivery_format': 'canopus', 'package': package_name,
             'transport': 'wearpacket-l2-cpc2',
@@ -190,7 +202,7 @@ def main():
                 target: ('No exact-target firmware harness' if not firmware_test_commands(target, firmware_python)
                          else 'Not requested; use --firmware-tests')
                 for target in targets if target not in firmware_targets},
-            'cross_target_suites': (['firmware_quickapp_icon'] if firmware_targets else []) + (
+            'cross_target_suites': (['firmware_quickapp_icon'] if legacy_firmware_targets else []) + (
                 ['firmware_font_compatibility']
                 if any(target in ('xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155')
                        for target in firmware_targets) else []),
@@ -216,7 +228,7 @@ def main():
     print(f'Release bundle (new artifacts NOT_PROBED): {output}')
     print(f'Installable module: {output / package_name}')
     print(f'Archive: {output / archive.name}')
-    print('Font reload: legacy user reports; .177 and new artifacts NOT_PROBED.')
+    print('Font reload: legacy user reports; .177/.179 and new artifacts NOT_PROBED.')
     print('GPU recovery/restart safety unsupported; no device was modified.')
 
 

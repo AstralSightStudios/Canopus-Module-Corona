@@ -1,0 +1,3865 @@
+{
+  "schema": 1,
+  "source_target": "xiaomi-band-11-4.100.177",
+  "source_firmware_sha256": "ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b",
+  "target_id": "xiaomi-band-11-4.100.179",
+  "firmware_sha256": "307adabe0ff61c77be73d045a8260e279cddd131c7a535a2678eb34199278a2b",
+  "ap_size": 12293060,
+  "xip_base": "0xc0c0000",
+  "cached_base": "0x2c0c0000",
+  "startup_data": {
+    "load_address": "0x2cc4919c",
+    "start": "0x2007dcc8",
+    "end": "0x200add84"
+  },
+  "physical_device": "NOT_PROBED",
+  "approval": "No framework policy/status/approval changes. Existing restricted/PENDING records remain unchanged.",
+  "addresses": {
+    "0xc8b708a": "0xc8b716a",
+    "0xc8b7b6c": "0xc8b7c4c",
+    "0xc547870": "0xc5478f0",
+    "0x200c5d88": "0x200c5d88",
+    "0xc54779c": "0xc54781c",
+    "0xc381650": "0xc381650",
+    "0x200bd0a4": "0x200bd0a4",
+    "0xc381630": "0xc381630",
+    "0xc492450": "0xc492458",
+    "0xc9030dc": "0xc9031bc",
+    "0xc490e4c": "0xc490e54",
+    "0xc8b6e40": "0xc8b6f20",
+    "0xc3abd84": "0xc3abd88",
+    "0xc3a37c4": "0xc3a37c8",
+    "0xc3a7aa0": "0xc3a7aa4",
+    "0xc3a9d70": "0xc3a9d74",
+    "0x200bd290": "0x200bd290",
+    "0x200bd094": "0x200bd094",
+    "0x200bd1bc": "0x200bd1bc",
+    "0xc39a388": "0xc39a38c",
+    "0xc3965ba": "0xc3966ec",
+    "0xc396718": "0xc39671c",
+    "0xc396a88": "0xc396a8c",
+    "0xc3abdbc": "0xc3abdc0",
+    "0xc42426c": "0xc424274",
+    "0xc399ac6": "0xc399aca",
+    "0xc3a08f6": "0xc3a08fa",
+    "0xc395b38": "0xc395b38",
+    "0xc395b48": "0xc395b48",
+    "0x200bd090": "0x200bd090",
+    "0xc3a4640": "0xc3a4644",
+    "0xc396ac0": "0xc396ac4",
+    "0xc39fcfe": "0xc39fd02",
+    "0xc3a5e18": "0xc3a5e1c",
+    "0xc326e0e": "0xc39fcfc",
+    "0xc3a7b6c": "0xc3a7b70",
+    "0xc39fd30": "0xc39fd34",
+    "0xc3a8ae0": "0xc3a8ae4",
+    "0xc3a0958": "0xc3a095c",
+    "0xc398134": "0xc398138",
+    "0x200bd0b4": "0x200bd0b4",
+    "0xc394814": "0xc394814",
+    "0x200d2170": "0x200d2170",
+    "0xc391354": "0xc391354",
+    "0x200d216c": "0x200d216c",
+    "0x2ca14a00": "0x2ca14b08",
+    "0x200bd1b8": "0x200bd1b8",
+    "0x2ca14980": "0x2ca14a88",
+    "0x200bd1b4": "0x200bd1b4",
+    "0xc38e44c": "0xc38e44c",
+    "0x2ca12d74": "0x2ca12e7c",
+    "0xc3b2b8c": "0xc3b2b90",
+    "0xc382080": "0xc382080",
+    "0xc383434": "0xc383434",
+    "0xc37fbec": "0xc37fbec",
+    "0xc37fc32": "0xc37fc32",
+    "0xc38e03c": "0xc38e03c",
+    "0xc38e47c": "0xc38e47c",
+    "0x2ca435bc": "0x2ca436ec",
+    "0x2ca3bad4": "0x2ca3bbec",
+    "0x200c5f10": "0x200c5f10",
+    "0x200c5f0c": "0x200c5f0c",
+    "0x200c5adc": "0x200c5adc",
+    "0x200c5ad8": "0x200c5ad8",
+    "0x200c5668": "0x200c5668",
+    "0x200c633c": "0x200c633c",
+    "0x200c6240": "0x200c6240",
+    "0x2ca3bab0": "0x2ca3bbc8",
+    "0xc3a3ec0": "0xc3a3ec4",
+    "0xc381e66": "0xc381e66",
+    "0xc383f00": "0xc383f00",
+    "0xc381d4c": "0xc381d4c",
+    "0xc91e58c": "0xc91e66c",
+    "0xc92e5f4": "0xc92e6d4",
+    "0xc721248": "0xc7211e8",
+    "0xc5f126c": "0xc5f12ec",
+    "0xc8f29ec": "0xc8f2acc",
+    "0xc386c14": "0xc386c14",
+    "0x200bd18c": "0x200bd18c",
+    "0xc380164": "0xc380164",
+    "0xc382878": "0xc382878",
+    "0xc38151c": "0xc38151c",
+    "0x200bd260": "0x200bd260",
+    "0x200bd25c": "0x200bd25c",
+    "0xc3a60bc": "0xc3a60c0",
+    "0x200bd268": "0x200bd268",
+    "0x200bd08c": "0x200bd08c",
+    "0x2ca6cb78": "0x2ca6cca8",
+    "0xc69e288": "0xc69e308",
+    "0xc69f6ac": "0xc69f72c",
+    "0xc69f6dc": "0xc69f75c",
+    "0xc34d45c": "0xc34d45c",
+    "0xc34fcec": "0xc34fcec",
+    "0xc382ff0": "0xc382ff0",
+    "0xc3836d2": "0xc3836d2",
+    "0xc502de0": "0xc502de8",
+    "0xc3ae134": "0xc3ae138",
+    "0xc3ab228": "0xc3ab22c",
+    "0xc3b38ac": "0xc3b38b0",
+    "0xc3839ae": "0xc3839ae",
+    "0xc383a10": "0xc383a10",
+    "0xc3839e4": "0xc3839e4",
+    "0xc38361c": "0xc38361c",
+    "0xc50934c": "0xc509354",
+    "0xc495008": "0xc495010",
+    "0xc4924fc": "0xc492504",
+    "0xc542cdc": "0xc542d5c",
+    "0xc6a29c8": "0xc6a2a48",
+    "0xc6a2a24": "0xc6a2aa4",
+    "0xc384488": "0xc384488",
+    "0xc907918": "0xc9079f8",
+    "0xc8b7720": "0xc8b7800",
+    "0x200c45dc": "0x200c45dc",
+    "0x200c5af0": "0x200c5af0",
+    "0x2cbc6578": "0x2cbc66d7",
+    "0x2cbc6568": "0x2cbc66c7",
+    "0x2ca12930": "0x2ca12a38",
+    "0xc547a0e": "0xc547a8e",
+    "0x20084e74": "0x20084e74",
+    "0x20084e6c": "0x20084e6c",
+    "0x2ca3b4b4": "0x2ca3b5cc",
+    "0xc69fa6a": "0xc69faea",
+    "0xcd00000": "0xcd00000",
+    "0xc720f08": "0xc720f08",
+    "0xc34af78": "0xc34af78",
+    "0xc4f87fc": "0xc4f8804",
+    "0xc384c40": "0xc384c40"
+  },
+  "macros": {
+    "RH_CALENDAR_BACKGROUND": {
+      "value": "\"/resource/app/perpetual_calendar/launcher_icon.bin\"",
+      "source_value": "\"/resource/app/perpetual_calendar/launcher_icon.bin\"",
+      "kind": "string",
+      "witnesses": [
+        {
+          "address": "0x2cb672ba",
+          "size": 51,
+          "bytes": "2f7265736f757263652f6170702f70657270657475616c5f63616c656e6461722f6c61756e636865725f69636f6e2e62696e00",
+          "sha256": "4ab34ec03917febec62b7e0eb704f38376c6da9d86296389def8783c5b307d1b",
+          "kind": "string"
+        }
+      ]
+    },
+    "RH_CALENDAR_OUTPUT": {
+      "value": "\"/data/app/perpetual_calendar/calendar_icon.bin\"",
+      "source_value": "\"/data/app/perpetual_calendar/calendar_icon.bin\"",
+      "kind": "string",
+      "witnesses": [
+        {
+          "address": "0x2cb63b38",
+          "size": 47,
+          "bytes": "2f646174612f6170702f70657270657475616c5f63616c656e6461722f63616c656e6461725f69636f6e2e62696e00",
+          "sha256": "c1def8d69371b85ee3a8bf39ff5c131008c7c9d1e19a27d6e87054fd025a3448",
+          "kind": "string"
+        }
+      ]
+    },
+    "RH_FW_CACHE_DROP": {
+      "value": "0xc8b716b",
+      "source_value": "0xc8b708b",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_cache_drop",
+      "witnesses": [
+        {
+          "address": "0xc8b716a",
+          "size": 70,
+          "bytes": "f8b503680022db6800af05469847044678b1466876b92b680146324628465b699847a0683146201aab6998472046ecf623f3f8bd012303732b680146002228465b699847f5e7",
+          "sha256": "5f1cc35e9b865e5506b9a662837a74d87f9dd88df0c9a4277ecf30d13748121f",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc8b716b"
+    },
+    "RH_FW_CACHE_RELEASE": {
+      "value": "0xc8b7c4d",
+      "source_value": "0xc8b7b6d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_cache_release",
+      "witnesses": [
+        {
+          "address": "0xc8b7c4c",
+          "size": 90,
+          "bytes": "b0b582b04b6805460c4602afabb90193124b6e2200930320114b1249eef67af0616841b9237b33b1a068ab69201a98472046ebf6b0f5bd46b0bd013b002b4b60eeda0193084b402200930220074b0549eef660f000236360e2e7",
+          "sha256": "6a54fcdcc65efa93850cf5b3e13eb33d66064bea26b9e13b30bef7a1d3b405e6",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc8b7c4d"
+    },
+    "RH_FW_CALENDAR_GENERATE": {
+      "value": "0xc5478f1",
+      "source_value": "0xc547871",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.calendar_icon_generate",
+      "witnesses": [
+        {
+          "address": "0xc5478f0",
+          "size": 414,
+          "bytes": "2de9f047ccb0664b062000af654a664908f630fdc822002107f16800d9f1fcfac821624a07f1680003f62efb07f1680091f13bff5e4b5b4a5e49062008f61afd07f1080005f692fd07f13c0107f1080008f6d4f900207c6dd7f848a03bf650fb7022814611463bf6bcfe4846bbf744fa484666f6e9fb504905466bf611f97022284611463bf6adfe2846b0f743ff284663f654fc8046284663f650fc10220646002107f11c00d9f1b7fa1022002107f12c00d9f1b1fa5346404a102107f11c0003f6e2fa2046002407f12c01fbf7cef9404607f11c016bf673ff304607f12c016bf66effbc80bc712246404679683bf6e6ff2246022140463cf612f83048c1f7b1fc2246014640463bf6f4ff22462223022140463bf60afe48f2ff233b803423bb702246304639683bf6c9ff2246022130463bf6f5ff2348c1f794fc2246014630463bf6d7ff22461123022130463bf6edfd122128465af1ffff044698b9144b104a1949032008f685fc48463cf614fd03200b4b0b4a154908f67cfc07f59877bd46bde8f08748463cf606fd204607f16801b0f70dfe20465bf10cf8eee7",
+          "sha256": "c23a08e43c41c67f8c505dc52d308557d0a204a1d29c123976545817db43023a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc5478f1"
+    },
+    "RH_FW_CALENDAR_LAUNCHER_SLOT": {
+      "value": "0x200c5d88",
+      "source_value": "0x200c5d88",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc541786",
+          "size": 8,
+          "bytes": "084b1b683bb1002a",
+          "sha256": "5359cd08c7be695601f8cac2de3dd144cd26e90e1aa8523f85407bfaf47980d6",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C5D88"
+        },
+        {
+          "address": "0xc541788",
+          "size": 8,
+          "bytes": "1b683bb1002a14bf",
+          "sha256": "d0b0ed0399ffc595c56efbf8c5129fac713d47314d43fbe0a7c9d68d106f883d",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3]"
+        },
+        {
+          "address": "0xc5417a8",
+          "size": 8,
+          "bytes": "885d0c2080b58cb0",
+          "sha256": "42d20e831673c37bc5ae5375bd13fd1a28e3c8014bfc06b5b2ce54f437d31a6a",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C5D88"
+        },
+        {
+          "address": "0xc5417f4",
+          "size": 8,
+          "bytes": "084b00af1b6843b1",
+          "sha256": "303e32edf11cef27417b78dd24f7186319bec1aeb4035ece219d2f065853fc60",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C5D88"
+        }
+      ]
+    },
+    "RH_FW_CALENDAR_PUBLISH": {
+      "value": "0xc54781d",
+      "source_value": "0xc54779d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.calendar_icon_publish",
+      "witnesses": [
+        {
+          "address": "0xc54781c",
+          "size": 170,
+          "bytes": "b0b582b0294b2a4a1c6800af294b34b92949032008f698fd0837bd46b0bd0620264908f691fd002206213846236898473a681ab91f4b1e4a2149eae75368002bead0198845292cd11c7e14f00104e3d15d691db1284638f65df818b9154b144a1849d6e72846214639f604fc054610b138f650f818b90f4b0d4a1349c9e72146284639f6f7fb044610b138f643f818b9084b074a0d49bce720460d496bf66af9bae711680b445b68c9e7",
+          "sha256": "d04a90eaa44d0903c7de5b258b81ec2daa7237262ec8a4f02a6547e9b2c74c13",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc54781d"
+    },
+    "RH_FW_DISPLAY_HEIGHT": {
+      "value": "0xc381651",
+      "source_value": "0xc381651",
+      "kind": "function",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc381650",
+          "size": 26,
+          "bytes": "80b500af10b9054b986928b190f8f4329b074cbf0068406880bd",
+          "sha256": "4cc61c9d8c4f3b52324a4b2a05b487ea6e094c4fe1a53c6b265b99862aecef9f",
+          "kind": "function-body"
+        }
+      ],
+      "comparison_177": {
+        "source_address": "0xc381650",
+        "target_address": "0xc381650",
+        "size": 32,
+        "sha256": "f3e764668440c997a7f861e1bcc2e08f335f9cde7cec7b3f947b5ae284ed6c50",
+        "comparison": "Byte-identical complete accessor; paired with horizontal accessor and independently decompiled."
+      }
+    },
+    "RH_FW_DISPLAY_SLOT": {
+      "value": "0x200bd0a4",
+      "source_value": "0x200bd0a4",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc37f5ec",
+          "size": 8,
+          "bytes": "9b690bb9f0bd0346",
+          "sha256": "cb2c5799cb7831ddc09b5bf1287a52ca4ca0652f3cb7e3cf0a9a16d417683157",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(dword_200BD0A4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc381638",
+          "size": 8,
+          "bytes": "986928b190f8f432",
+          "sha256": "37588765009ea3057582e888dc27c1f2bfaf1c122f4355e2a2fd004ec6ae7289",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R3,#(dword_200BD0A4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc381658",
+          "size": 8,
+          "bytes": "986928b190f8f432",
+          "sha256": "37588765009ea3057582e888dc27c1f2bfaf1c122f4355e2a2fd004ec6ae7289",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R3,#(dword_200BD0A4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3816a4",
+          "size": 8,
+          "bytes": "9e697eb9284b3f22",
+          "sha256": "3fc74fb1e3aa0e3e188f810d1e6d21820d2291b5f6ab724663fcec37b4e5a93f",
+          "kind": "data-reference",
+          "disassembly": "LDR             R6, [R3,#(dword_200BD0A4 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_DISPLAY_WIDTH": {
+      "value": "0xc381631",
+      "source_value": "0xc381631",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_display_get_horizontal_resolution",
+      "witnesses": [
+        {
+          "address": "0xc381630",
+          "size": 26,
+          "bytes": "80b500af10b9054b986928b190f8f4329b074cbf4068006880bd",
+          "sha256": "93f88bcde98032248d935a78044b700891aef2f4891f112b2e2348cec6bdf322",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc381631"
+    },
+    "RH_FW_FONT_ADD_PATH": {
+      "value": "0xc492459",
+      "source_value": "0xc492451",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.font_manager_add_path",
+      "witnesses": [
+        {
+          "address": "0xc492458",
+          "size": 152,
+          "bytes": "2de9f04385b0244b0e461b680146d3f81c9004af05464846fef7f0fc0146804630468ef215fe044670b9b02202201b4bcde9015800931a491a4b13f765fc20460437bd46bde8f08309f1180012f7b1f8044628468ef2e0fe00f10108404619f767fc42462946206074f014f730468ef2d3fe00f10108404619f75afc42463146606074f007f7084bc12200930420cde90156044b0249d0e7",
+          "sha256": "9bf7b22db573f6211b419d31d8c1852e41e4f1716bf7ecd234c27f1d56eee86e",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc492459"
+    },
+    "RH_FW_FONT_REMOVE_PATH": {
+      "value": "0xc9031bd",
+      "source_value": "0xc9030dd",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.font_manager_remove_path",
+      "witnesses": [
+        {
+          "address": "0xc9031bc",
+          "size": 106,
+          "bytes": "90b585b0194b04461b6804afd869c3694bb9174bd62200930220164b16490194a2f6c0f51ae09c421bd121461830a1f62bf26368ce22029323680f4901930f4b042000930b4ba2f6adf52068a8f6daf56068a8f6d7f52046a8f6d4f50437bd4690bd826913445b68d2e7",
+          "sha256": "3a23f8c09240a71ad2a2ddaa3e27f471d2b1ab9c29227727440d67d352be87d5",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc9031bd"
+    },
+    "RH_FW_FONT_RESOLVE_PATH": {
+      "value": "0xc490e55",
+      "source_value": "0xc490e4d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.font_manager_generate_def_path",
+      "witnesses": [
+        {
+          "address": "0xc490e54",
+          "size": 90,
+          "bytes": "f0b583b005460e46c46902afbcb905f592744ff480712046104a009605f124031df7bffcff2810d90d4b0190009340f2651202200b4b0c4914f768ff05e03046216890f207f920b9646820460437bd46f0bdab691c446468d8e7",
+          "sha256": "a33bc10bd71dbf071d4bb3cecc42c661fd17d5400cbc0adaeebc2eb33275eca4",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc490e55"
+    },
+    "RH_FW_FONT_SET_PIXEL_SIZE": {
+      "value": "0xc8b6f21",
+      "source_value": "0xc8b6e41",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_ft_set_pixel_size",
+      "witnesses": [
+        {
+          "address": "0xc8b6f20",
+          "size": 136,
+          "bytes": "012938bf01214ff6ff72914228bf11460023f0b587b0890100af0446c7e90211c7e904333b7168b3826d926ad360036edd68ab6d2bb1391da06d98471c37bd46f0bd866806f00303022b15d13a46391dfff789ff0028f1d1b30713d5396800290edbe36999420bdaeb6d002be4d120466ef718f00020e1e7391d6ef746f0f9e70620dbe72320d9e7",
+          "sha256": "3b7694e5cc0499b353d7240d8d404f5c5fe63c956c201afb1a046cd968381941",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc8b6f21"
+    },
+    "RH_FW_FR_ALLOC": {
+      "value": "0xc3abd88",
+      "source_value": "0xc3abd84",
+      "kind": "function",
+      "basis": "equal body; 60/61 anchored callers call the target; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_lv_malloc",
+      "witnesses": [
+        {
+          "address": "0xc3abd88",
+          "size": 16,
+          "bytes": "80b500af10b1a5f7adfb80bd0048fce7",
+          "sha256": "821aff037083b8a496c0d366901f34c888b6c188b90a8f739104ba21fe467bee",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3abd89"
+    },
+    "RH_FW_FR_CACHE_ACQUIRE": {
+      "value": "0xc3a37c8",
+      "source_value": "0xc3a37c4",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_cache_acquire",
+      "witnesses": [
+        {
+          "address": "0xc3a37c8",
+          "size": 26,
+          "bytes": "98b5c46800af34b10368db689847044608b163f11ff6204698bd",
+          "sha256": "853ca3663d25e697bbe6121bd82f763e71e343ac2aaace92d13462e597369b40",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a37c9"
+    },
+    "RH_FW_FR_CACHE_ACQUIRE_CREATE": {
+      "value": "0xc3a7aa4",
+      "source_value": "0xc3a7aa0",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_cache_acquire_or_create",
+      "witnesses": [
+        {
+          "address": "0xc3a7aa4",
+          "size": 96,
+          "bytes": "2de9f041c36805468846164600af3bb10368db689847044610b15ff1adf402e0ab681bb900242046bde8f081324641462846fff7a9ff04460028f3d0806831466b69201a984748b92b682846324621465b6998472046fbf772fee3e72046dce7",
+          "sha256": "9d4ebe0cba9092ca6d85034f5f0af813b303fc6696050b4ae3afb54752b783ef",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a7aa5"
+    },
+    "RH_FW_FR_CACHE_INIT": {
+      "value": "0xc3a9d74",
+      "source_value": "0xc3a9d70",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_count_cache_init",
+      "witnesses": [
+        {
+          "address": "0xc3a9d74",
+          "size": 82,
+          "bytes": "90b583b04268044602af5ab9114bc7220193114b032011490093114bfbf7e6fff9f7e6ff016919b900200437bd4690bd8369002bf8d014322430fff7b7ff0028f2d00023c4e90d3304232363054be363ebe7",
+          "sha256": "1f5b9e4e44759b939d4dc56773064e4c7f290542b3dfd939f2a7bc4451b07519",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a9d75"
+    },
+    "RH_FW_FR_CONTEXT_SLOT": {
+      "value": "0x200bd290",
+      "source_value": "0x200bd290",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (7 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_freetype_context_slot",
+      "witnesses": [
+        {
+          "address": "0xc396726",
+          "size": 8,
+          "bytes": "d3f804328146d3f8",
+          "sha256": "0c04377e72caf3a297ebbc2846231e7abf7c551d4f241baf43ca80c9e08352a5",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R3, [R3,#(dword_200BD290 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a0964",
+          "size": 8,
+          "bytes": "d3f8040274f1eef7",
+          "sha256": "ae6eefbbeb4a56bd264cfc8174417be8dbe6d0c19b8af00e5753378cd90af626",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R0, [R3,#(dword_200BD290 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a8a8c",
+          "size": 8,
+          "bytes": "d3f80482d7f7e6fa",
+          "sha256": "78b73d521d3205b654d823aeda7e48ad804f80a4600d49c84e5076895918988c",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R8, [R3,#(dword_200BD290 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a95fc",
+          "size": 8,
+          "bytes": "d4f80452a36307f1",
+          "sha256": "edae5ac284465cc9b5e242bf990c6396ac24e470dc8e6c7390b369d61fa81d3e",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R5, [R4,#(dword_200BD290 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_FR_DISPLAY_LIST": {
+      "value": "0x200bd094",
+      "source_value": "0x200bd094",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (4 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_display_list",
+      "witnesses": [
+        {
+          "address": "0xc37f924",
+          "size": 8,
+          "bytes": "9b6818444068fae7",
+          "sha256": "df7fc57ac01a97856d1961b20e9ecb5fc129b863ceeb88cbd288e3439abfb974",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(dword_200BD094 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc38105e",
+          "size": 8,
+          "bytes": "8a6822445468ede7",
+          "sha256": "ed5aacf445b148ce2a40290cd8e2db74b9dababcc491f3a21e076789d9b2ab75",
+          "kind": "data-reference",
+          "disassembly": "LDR             R2, [R1,#(dword_200BD094 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc384592",
+          "size": 8,
+          "bytes": "1748214620f055f8",
+          "sha256": "7e9441bcbc329a080cad7665e54892803255173fad72356755ee749d6a7c0536",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =dword_200BD094"
+        },
+        {
+          "address": "0xc3845f0",
+          "size": 8,
+          "bytes": "94d00b202de9f04f",
+          "sha256": "6a97ca2d76e7a05d1bbd98f13f40380c68d3845005e59ef72c82633d9da41ae1",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200BD094"
+        }
+      ]
+    },
+    "RH_FW_FR_DRAW_SLOT": {
+      "value": "0x200bd1bc",
+      "source_value": "0x200bd1bc",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (5 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_draw_unit_slot",
+      "witnesses": [
+        {
+          "address": "0xc3879c8",
+          "size": 8,
+          "bytes": "d3f83041002c87d0",
+          "sha256": "baf9049711e19fb6090bb94601332847072fdec0687220bb66c940d186e6c770",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R4, [R3,#(dword_200BD1BC - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc387a6c",
+          "size": 8,
+          "bytes": "d5f8305115b9fff7",
+          "sha256": "85f475f6f1389ca98f91efd42929eb26a72681e055a37da7b65c7255305a3f88",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R5, [R5,#(dword_200BD1BC - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc387a92",
+          "size": 8,
+          "bytes": "d5f83051002dedd0",
+          "sha256": "2e48a50c06f4c72c8239024c8fb1e6421c2cfd28a2449d1acdc955c32a7ce7ec",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R5, [R5,#(dword_200BD1BC - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a9930",
+          "size": 8,
+          "bytes": "d4f83031a14a0360",
+          "sha256": "8a2fed6efba37d5a9ba6e222d12da21d688b793f8a9a27b776606ff08b0ce570",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R3, [R4,#(dword_200BD1BC - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_FR_DROP_FACE_ID": {
+      "value": "0xc39a38c",
+      "source_value": "0xc39a388",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_drop_face_id",
+      "witnesses": [
+        {
+          "address": "0xc39a38c",
+          "size": 88,
+          "bytes": "90b585b0846804af74b9134b40f259120293124b03200193114b12490093124b0bf0d8fc09f0d8fc23688b4210d16368013b63604bb9214604300af03df9206811f0f8fc204611f0f5fc0437bd4690bd43681c446468d7e7",
+          "sha256": "35b4619ef19c1cbe42d0ec25f5acbb0b18de0f7a85f82fdd286242ac06bdf7d3",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc39a38d"
+    },
+    "RH_FW_FR_FACE_COMPARE": {
+      "value": "0xc3966ed",
+      "source_value": "0xc3965bb",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_face_compare",
+      "witnesses": [
+        {
+          "address": "0xc3966ec",
+          "size": 46,
+          "bytes": "80b5c288cb8800af9a4202d00cd9012080bd82888b889a42f8d1096800688af3cdfc0028f4d0f2dc4ff0ff30f0e7",
+          "sha256": "51080527069cf100ab9bf5a8f38880472bedf2a38fee75bf7ab61b8338db752a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3966ed"
+    },
+    "RH_FW_FR_FACE_CREATE": {
+      "value": "0xc39671d",
+      "source_value": "0xc396719",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_face_create",
+      "witnesses": [
+        {
+          "address": "0xc39671c",
+          "size": 866,
+          "bytes": "2de9f04f89b0a74b02afd3f804328146d3f800a003687b60002b00f075810023c7e90333baf1000f1bd12123bb604ff000084646bb6803f0fb02512a02d0dbb2022b01d10223bb600021f8688ff0e6f93969002900f096803246404690f032fa90e0daf800b02821584607f114028ff063f97e6905466ebb7b68c0e90566c0f81cb0c66003610660866040f201411846acf736fab0f100083ddb0223002200930023a6f78bfe01230022009340460023a6f784fe686000bb4046a1f7d9fc51267b687e612b6146b3294658468ff07af90025fd607b69bb60002ba8d155460b2255f8148bba60daf8102007f1100b05eb820aaa4514d81e469ce70023002240460096a6f75bfe08f10103eb60664b6b61664bab61d4e70126d2e7c5f81cb0d8e755f8046b32681268d207e2d5002330461a46cdf804b0009307f10c0120f114f2b86028b1c0b202287ff474af3346d0e70c21404607f108028ff0eef8bb6801463c69002b40f0cc808460206e103090f054f9204620f1a0f20646b860a8b120466ef106f3ba68002a00f0c080484b03200192009340f26912464b47490ff052fa00201c37bd46bde8f08f236e002b77d0d3f80cb0d4f86480dbf82810404607f114028ff0b9f87b690546002b65d10c21404607f114028ff0aff87b698246002b3ed000233b607e6976b1514640468ff0e9f82db14046a96a8ff0e4f80023ab62294640468ff0def8be60002eb7d1a2683b68d007a3650cd5b4f94a30002bbcbf5b42a4f84a3091065cbfb4f84a30a4f84e30920703d50021e3699e423edb00224ff48031d4f88030c3e90012c3e90221c3e9042201221a64ff2283f8382091e7242140462c6007f114028ff065f87b69002bb6d1a862dbf8383043b95146caf8085004f16c0090f0c8f83d60abe72846984778610028a4d1f0e7b2463e60a2e72226b1e78cd00b20d5d3440cbdd3440c24a6b12c002fa12ce6a5b12c226a3501505f02eb06130028bcbf4042505398680028bcbf40429860d8680028bcbf4042d860505f002805db9868002802dbd868002803da5151c3e90111d96001369be700287ff43cafa3e606223fe78023c9f80830b9f80430db070dd54ff4803143f26a60d4f88030c3e90010c3e902210121c3e9042299614ff48840c9f80c401af077f9c9f8180050b94ff488430193054b7b2200930220044b04490ff073f901201fe7",
+          "sha256": "afee5c008d96db556d20406fda3e0fe368e1ec24975b08e756f12460079c0136",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc39671d"
+    },
+    "RH_FW_FR_FACE_DESTROY": {
+      "value": "0xc396a8d",
+      "source_value": "0xc396a89",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_face_destroy",
+      "witnesses": [
+        {
+          "address": "0xc396a8c",
+          "size": 56,
+          "bytes": "b0b5044680690d4600af18b115f092f90023a361e0686ef103f2206920b129460cf082fe00232361606920b129460cf07bfe00236361b0bd",
+          "sha256": "fb900a8fe77cccbb5916c7001f3d3a2afc3e25f494d55d4141dbd3508c856180",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc396a8d"
+    },
+    "RH_FW_FR_FACE_SIZE": {
+      "value": "0x1c",
+      "source_value": "0x1c",
+      "kind": "abi",
+      "basis": "Exact same-model structural ABI; see audited native initializer/accessors.",
+      "witnesses": [
+        {
+          "address": "0xc3a94c4",
+          "size": 1772,
+          "bytes": "2de9f04f8db0b24c02af25795db1b14b962200930220b04bb049fcf73ffc2c37bd46bde8f08f4ff405712046d6f7b6fd4ff44673a360cc23a364a94b4ff00309e366012384f828308d2323634423a367a44bdff8ecb2dff8eca2dff8ec82a24e182104f1d0002367c4e90355c4e91355c4f86090d6f792fd182104f1e800c4e93685c4f8d0b0c4f8d4a0c4f8e050c4f8e460d6f783fd182104f58070c4e93abac4e93c85c4e93e56d6f778fd40f20470c4e940bac4e94285c4e94456a7f7b4ffc4f8080238b9894b692200934846884b8849fcf7e3fb0025182301264ff0040ae367c4e9205584f8886002f05bfb206ec4e97255c000c4f8c4a102f0e3fb7e4b60668360636e7d4add60636e10211a61636e2a465d616c237948c4f8b430c4e92e5502f04ffbc4f8b000faf753f92023c4e90f55a4f8ac50d4f80452a36307f11c08c5b1442202206e4b6f4900936f4bfcf7a4fbd4f81861002e00f073816c4b2b2201936b4b03206b4900936b4bfcf795fbfaf795fb1c2007f086fb8146c4f8040230b9664b4b22009303205f4b5e49dee74ff4807343611020a7f745ff28b9024640f2f1115f486ef105f25e4a056042605e4ad021c2605d4a7861826042467cf0e6f9d7f81cb005467b69bbf1000f66d103604ff0020c0a23c0e901c3554bc0f80ca0c0f8cc60bb60c9f80000bb6853f804abbb60baf1000f54d0daf810304d4a9342f3dc002605f110022b699e4217d252f8043fdaf8081018683a6180687b6177f3dffcd7e9042300284ed11a68daf80c10d2689142d9dd194628465bf167f32b687b612b691f2bd0d8daf80410786907f118027cf09bf9bb690646002bc5d17b6945608360c0f800a0daf8003098076bd433681b68590700f1b28033681a68d20748bff360daf81830002b40f0ab802b695a1c05eb83032a615e61a6e71846a3f789fad9f800007df059fdbbf1000f00f0a080214b572200930320134b1149cdf804b0fcf7e9fa43e701369de78cd00b2066d6b12c544ba12c3ad6b12cd4c3b2a1cdab3412e3f6370cbcd6b12c414ba12c83d6b12c71b3390c75f4390ca9473a0cdcd6b12ce6a5b12c304ba12cced7b12c6692b12c8bd7b12cb04aa12cf9d6b12c21d7b12c97d3440ca3d3440cb1d3440cf04aa12c0a0002005ad7b12c7df6370cbdf6370c89f6370c2b68424618460c213b617cf01bf9fb69f8603bbb3368f3605a6a7b6032619a6b52685ab1386906f134019047f86198b97b689a6b1269b2639b6af363fb6805f1940019469e607df06ef90022284626497bf09ffcc5f89c00fb691bb1d7e903107cf036f9fb69bb61002b3ff45daf33681b689b070ad5f36843b1596a1a4a914204d1706b10b19b6b5b699847314678697cf01ef905e7c5f8a0604ae730469847b86100283ff44fafe1e70823c9f804300e4bc9e902bb93e8070088e8070007f1280313e903008de803006ff000421c21fb690748fef73af8c9f8180000283ff493ae044b03628fe66c74756fa854a12c084ba12c77d7b12c202007f01ffa0546002840f03981a64bab2200930320a54ba549fcf71dfa2820c4f8185107f00efad4f83031a14a0360a14bc4f830010361a04bc2604361002383614362c4e90833c4e948331c231422c4f81c31d4f82831e26107f12009a3b9974b93e8070088e8070099e803008de803004ff4c0021821fb699248fdf7eaffc4f8280108b1904b0362d4f82c319bb98e4b93e8070088e8070099e803008de8030080221821fb698948fdf7d3ffc4f82c0108b1874b0362e4f78efc002840f0e880854b662200930220844b8449fcf7c3f9844d2b781bb97bf1caf401232b70eef710fa804b4ff49270c4f8e43007f0a9f9d4f83031dff8a0a203607b4bc4f8300103617a4b054643617a4b04218361794bc0f80ca0c3614c20eef7d8f94ff0000b764b68624362754bc0f828b093e8070088e8070043f67c5007f083f942f66413c0e904bbc3600560064699e803008de8030020220421fb695d48fdf77aff706008b1674b036204210846eef7aff97368654ab060c0e90923644bae62d3e9010120228de803001b6834215048fdf761ffe86208b15e4b03620320edf750fd0026c5f81c0185f821610320edf748fd85f82061c5f81801e4f70efc554bc0f814a00360544b554a4360554b0821c360d4f8043218201a61eef779f9514b2863514dc0e9093634212846d6f7b5fa2f2384f8d0314ff48053c4f8d4314b4ba5f10c00c4f8dc314a4bc4f8e031494bc4f8e431494bc4f8e831484bc4f8ec31484bc4f8f031474bc4f8fc31474bc4f8f431464bc4f8f831faf7ebfb00b10560e4f7cbfb434b0360434b4360434bc360434b4361e4f7c1fb424b0360424b4360424bc360424b4361e4f7b7fb414b0360414b4360414bc360414b436101232371ace43f4bc0e90063082303764ff44053c361c5e63c4b03603c4b43603c4b83603c4bc3603c4b436114e7",
+          "sha256": "39788dc095c82e61d471bccd2ffe3136aa07872f7d8de10190cc2a4fb0e8261f",
+          "kind": "lvgl-init-body"
+        }
+      ]
+    },
+    "RH_FW_FR_FREE": {
+      "value": "0xc3abdc0",
+      "source_value": "0xc3abdbc",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_lv_free",
+      "witnesses": [
+        {
+          "address": "0xc3abdc0",
+          "size": 18,
+          "bytes": "80b5044a00af904202d008b1a0f756ff80bd",
+          "sha256": "c808bae7957493f5daee788a8ede28d0f6d25a2fda90283c21f0d1da5fce1abd",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3abdc1"
+    },
+    "RH_FW_FR_FT_MUL_FIX": {
+      "value": "0xc424274",
+      "source_value": "0xc42426c",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_ft_mul_fix",
+      "witnesses": [
+        {
+          "address": "0xc424274",
+          "size": 32,
+          "bytes": "80b500af81fb00324feae27000f500401b1842f100024fea134040ea024080bd",
+          "sha256": "44efec7c9ec295b1ad21827d379bd55c76928537df3a41b4c1f22f9ee3c3dbfe",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc424275"
+    },
+    "RH_FW_FR_GLYPH_PENDING_FREE": {
+      "value": "0xc399acb",
+      "source_value": "0xc399ac7",
+      "kind": "function",
+      "basis": "equal body; neighbouring anchors keep their relative function distance; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_glyph_pending_release",
+      "witnesses": [
+        {
+          "address": "0xc399aca",
+          "size": 10,
+          "bytes": "80b500affff7f1ff80bd",
+          "sha256": "f6f99abe88dfdd43b81d80ce229c10af957b29942e577c1eda61dcfed871d7dc",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc399acb"
+    },
+    "RH_FW_FR_GLYPH_RELEASE": {
+      "value": "0xc3a08fb",
+      "source_value": "0xc3a08f7",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_outline_release",
+      "witnesses": [
+        {
+          "address": "0xc3a08fa",
+          "size": 26,
+          "bytes": "98b50c46496900af31b183695b6b586917f19ff10023636198bd",
+          "sha256": "d76deed9adc523f2a67d3e6d8ba077eafa4a3de605b8e14c4c3710e5ca62644f",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a08fb"
+    },
+    "RH_FW_FR_GRADIENT_PENDING_FREE": {
+      "value": "0xc395b39",
+      "source_value": "0xc395b39",
+      "kind": "function",
+      "basis": "equal body; neighbouring anchors keep their relative function distance; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_gradient_pending_release",
+      "witnesses": [
+        {
+          "address": "0xc395b38",
+          "size": 16,
+          "bytes": "0b4680b5016800af184622f183f080bd",
+          "sha256": "453bf7b045679769dc562c8116a34dec057b6808317313dfffdf3453f133b9b9",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc395b39"
+    },
+    "RH_FW_FR_IMAGE_PENDING_FREE": {
+      "value": "0xc395b49",
+      "source_value": "0xc395b49",
+      "kind": "function",
+      "basis": "equal body; neighbouring anchors keep their relative function distance; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_image_pending_release",
+      "witnesses": [
+        {
+          "address": "0xc395b48",
+          "size": 10,
+          "bytes": "80b500aff7f7b4f980bd",
+          "sha256": "d98142fe41cb8cbb6e04ae1420f1977c58f098818e990add7b122a9e16b6aeeb",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc395b49"
+    },
+    "RH_FW_FR_INITIALIZED_SLOT": {
+      "value": "0x200bd090",
+      "source_value": "0x200bd090",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (2 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_lv_initialized",
+      "witnesses": [
+        {
+          "address": "0xc3a94ce",
+          "size": 8,
+          "bytes": "25795db1b14b9622",
+          "sha256": "0913ee54d89efa663079834a9086502b552f090ba5f511508f6a4aa9ef1b4472",
+          "kind": "data-reference",
+          "disassembly": "LDRB            R5, [R4,#(byte_200BD090 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a9b84",
+          "size": 8,
+          "bytes": "2371ace43f4bc0e9",
+          "sha256": "687ce08771957a84d163c2585e346e27ab80c221a05a67615d42828450bae6e6",
+          "kind": "data-reference",
+          "disassembly": "STRB            R3, [R4,#(byte_200BD090 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a9e76",
+          "size": 8,
+          "bytes": "237963b97d4b4ff4",
+          "sha256": "baa41e1d10a879e151b5ba21e50ab236f3c93a5185fca6152312d76eed13208f",
+          "kind": "data-reference",
+          "disassembly": "LDRB            R3, [R4,#(byte_200BD090 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3aa040",
+          "size": 8,
+          "bytes": "2571c4f8b45121e7",
+          "sha256": "2060875ac61b5809f411cecc622b1831d82407504d970bb2fce9544d3bceeb7d",
+          "kind": "data-reference",
+          "disassembly": "STRB            R5, [R4,#(byte_200BD090 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_FR_LIST_REMOVE": {
+      "value": "0xc3a4644",
+      "source_value": "0xc3a4640",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_list_remove",
+      "witnesses": [
+        {
+          "address": "0xc3a4644",
+          "size": 80,
+          "bytes": "b0b50b4600af40b1d0e90014a34209d10b445968416009b98160b0bd0022fcf77bf8fae785685c58ab4208d184600cb94460f2e700222146fcf774f8ede70b445d6821462a46fcf76df822462946e6e7",
+          "sha256": "11276eb9cae9156649a43fcdc8ec13fe5bc49930d411068722594242c28f3e72",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a4645"
+    },
+    "RH_FW_FR_METRICS": {
+      "value": "0xc396ac5",
+      "source_value": "0xc396ac1",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_glyph_metrics",
+      "witnesses": [
+        {
+          "address": "0xc396ac4",
+          "size": 384,
+          "bytes": "2de9f04f8fb01f2a04af0d4690467b6006d80023c1e901338b818b7301206ce0d0f81890564bd9f800209a420dd0554bd8220293544b03200193544b54490093544b0ff02bf90df02bf9d9f834b0d9f82860dbf81820002a32d04f4b4f4988ea03034b4373404b434421dbb24b43d418d358984502d163689e421fd0236a98451ed1636a9e421bd101232e4684f8403004eb431408340fcc0fc694e8030086e80300b9f82c30db0705d57b681bb9eb886a891344ab8000236b61afe70023e4e71822002107f110008af3bcf9dbf810a04a46504607f10801c7e9028610f080ff064670b92e4b03200093f022294b2849cdf804800ff0d2f830462c37bd46bde8f08fac468468041b04f1080ebee80f00ace80f009ee803008ce80300dbf81810083441b31c4b1d4888ea03034343d9f82820534043434420dbb200fb031c9cf840e0befa8efe4fea5e1e0ceb4e1b4fea4e134cf80380cbf804200bf108080fcca8e80f00002394e8030088e80300cbf81c308cf840e03146504621f105f090e7",
+          "sha256": "67e38c5dacb359fa70bb9d04b127d3beb1d0d3c97836c755722f21e72237a76e",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc396ac5"
+    },
+    "RH_FW_FR_METRICS_COMPARE": {
+      "value": "0xc39fd03",
+      "source_value": "0xc39fcff",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_metrics_compare",
+      "witnesses": [
+        {
+          "address": "0xc39fd02",
+          "size": 36,
+          "bytes": "80b50b68026800af9a4203d008d84ff0ff3080bd42684b689a42f7d10020f8e70120f6e7",
+          "sha256": "8032289b67e1cdbfef2d449c2773cd0312c710c928a5ee00456fc65f0803b245",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc39fd03"
+    },
+    "RH_FW_FR_METRICS_CREATE": {
+      "value": "0xc3a5e1d",
+      "source_value": "0xc3a5e19",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_metrics_create",
+      "witnesses": [
+        {
+          "address": "0xc3a5e1c",
+          "size": 222,
+          "bytes": "2de9f04182b04b6b8846dd680446016802afcdb90026d8f82810284611f172f0314628462e4a88f06bfdc0b12d4b0190009303204ff48e722b4b2c49fff782ff0020bd46bde8f081e86d0028e2d0c368db6898472b6906469842dbd2dbe7b8f82e206b6d012a28d19a6a9211a281dd69ad1125829a699211e281196a89116182596adb69cb1a9b11a3820a23a375b8f82c30db0707d543f26a63adb25d4392b202eb1542e281b6fa86f3e27d5b0963f300020120e275a661c3e7002af3d11a6c9211a281b3f84c202282196de181596e61829b6e9b1aa3820823a375e3e7",
+          "sha256": "c91449877551ace1456a94e4f6deffb826e8cd0ed9bcabb14db565957a64017b",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a5e1d"
+    },
+    "RH_FW_FR_METRICS_DESTROY": {
+      "value": "0xc39fcfd",
+      "source_value": "0xc326e0f",
+      "kind": "function",
+      "basis": "empty function (push {r7, lr}; add r7, sp, #0; pop {r7, pc}) sitting directly before font_reload_metrics_compare, exactly as in the source image; the matcher's pick 0xc326e0e is one of many identical empty bodies and is rejected",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_metrics_destroy",
+      "witnesses": [
+        {
+          "address": "0xc39fcfc",
+          "size": 6,
+          "bytes": "80b500af80bd",
+          "sha256": "0c798781172d8fe62a4a9c22e107e0baf6b0671c49e40edbca14e06f127ccc71",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc39fcfd"
+    },
+    "RH_FW_FR_OUTLINE": {
+      "value": "0xc3a7b71",
+      "source_value": "0xc3a7b6d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_outline_acquire",
+      "witnesses": [
+        {
+          "address": "0xc3a7b70",
+          "size": 102,
+          "bytes": "f0b587b0036805469a69174b116804af99420dd0154ba6220293154b03200193144b15490093154bfef7e2f8fcf7e2f8536b0669394658693e60fff77bff044638b183686861c31a5c6820460c37bd46f0bd0b4bc822009303200a4b06490196fef7c6f8f1e7",
+          "sha256": "bfe89ec7dfb102768697965a65eacbf62966d9df33f3a02ff66b83e39ca13a76",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a7b71"
+    },
+    "RH_FW_FR_OUTLINE_COMPARE": {
+      "value": "0xc39fd35",
+      "source_value": "0xc39fd31",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_outline_compare",
+      "witnesses": [
+        {
+          "address": "0xc39fd34",
+          "size": 28,
+          "bytes": "80b50b68026800af9a4202d003d9012080bd0020fce74ff0ff30f9e7",
+          "sha256": "dbbbe9b8fdef6885e5b43ca13a9f44433409e439a9746fe97cd6d968700779d6",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc39fd35"
+    },
+    "RH_FW_FR_OUTLINE_CREATE": {
+      "value": "0xc3a8ae5",
+      "source_value": "0xc3a8ae1",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_outline_create",
+      "witnesses": [
+        {
+          "address": "0xc3a8ae4",
+          "size": 1060,
+          "bytes": "2de9f04fa3b00b6b02afbb614b6b0568da688c8dba6378609968b86b0ef10ef270b140f233128f4b019000938e4b03208e49fdf723f900208437bd46bde8f08f294648f20802b86b85f0f6fe014630b1874b4ff49f7200930190834be7e7a30740f1ab80bb6b1022d3f854a007f1580078f3d8f9baf96e30002b3fdd07f158010af16c007cf0f5fcb96d3b6e994200f08680f86d7a6e904200f08180b1f17f4f7ddbb0f17f4f7adbb3f1807f77dcb2f1807f74dc121a0020002bb8bf5b420029b8bf49420b43b3fa83f3b2fa82f204460546baf96c10c3f1110323eae373c2f11102daf870e0fb6322eae27279637b6b9d422cdb002800f3958050d000233b610023daf870b07b633b633a6bbaf96c309a4252dadaf878303a6b7e6b33f91230fb62002399469846fb63fb60bb603b624ff0ff33fc6abb62a64202d0bb6aa34272d1fb6a01337b633b6b0133dce7daf87810fb6b31f915c00eebc4095ef83c100eebcc0641fa03f871681141a44509f1080903da0cf101040135b8e7fb6b59f8086c01341e4159f8043cb04443fa02fbabeb010108fb01005946b046e6e7baf96c3053b106230193324b4ff4a372009303202d4b2d49fdf761f82f4d07f140040fcd0fc495e8030084e80300282107f15800d7f7d3f90022bb6b1146586d1346b0f96e40944200f3dd80b0f96c20b869114413445b00b96707f158022321fb67fff79cfe0128bc6d02d1002c40f0dc801a4b40f2791200930320134b1349fdf72df808e701236ae7bb6a9e4228d05bf834005bf836100bebc603091ab9650bebc4025b68526807f158009b1afb657bf007fe7862d0b9fb6ab342d4bf7e6b01366ae700bf16d3b12cf153a12c57ceb12c24c7b12c33d3b12c9054a12c53d3b12cfb68bb65fb6bfb65bb687b623b6a002b78d0bb6a002b06da3b6ac7f83c90c7f80c80bc62bb60ba6d404611463a607bf06ffafb6d0546194648467b617bf068fa584b05449d4268db05f580333a68fb6139697b6902eb08054b44002958d15b42494610463b607bf053fa4146814678697bf04efa3a693b68002a4bd0a9eb00087b61d7e908329342a8bf1346414620203b627bf03dfa8146d7e907107bf038fa7b698145d5bf20214246fa69396a18467bf082fb4146814620207bf029fa7861d7e907107bf024fa7b698342d4bf202142462846d4bffa69396a7bf06dfb09f1200920305bf834300bebc4024b444bf83430536803445360fb6a9c4210da0134a642efd1d7e916897b6a34463b6262e76d42a5e7a0eb0908b2e700208146dee77c6bede7456fae5c0132f60702d50131013317e79442ccbf16460026ad5ded07f6d4013102330de7bb6b2246586d07f140016c307cf012fa034670b1124b0190009340f281120320104b1149fcf746ff2146b8696cf136f51de60246014600902046fff7c5fd012809d00a4b4ff4c57200930320054b0649fcf730ffe8e77b685c6009e6",
+          "sha256": "b54358477a2dc932be1b3fcb4736f8f2e87af9553e10066f707e034037f953a2",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a8ae5"
+    },
+    "RH_FW_FR_OUTLINE_DESTROY": {
+      "value": "0xc3a095d",
+      "source_value": "0xc3a0959",
+      "kind": "function",
+      "basis": "equal body; neighbouring anchors keep their relative function distance; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_outline_destroy",
+      "witnesses": [
+        {
+          "address": "0xc3a095c",
+          "size": 18,
+          "bytes": "80b5044b416800afd3f8040274f1eef780bd",
+          "sha256": "6ac84e11637264e040db330a7102d9041c67d764219dfc3a20313ec6fdcc0891",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a095d"
+    },
+    "RH_FW_FR_OUTLINE_EVENT": {
+      "value": "0xc398139",
+      "source_value": "0xc398135",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_outline_event",
+      "witnesses": [
+        {
+          "address": "0xc398138",
+          "size": 504,
+          "bytes": "b0b52ded048b8cb003890569c3f30e03232b04af0ed0242b1bd01f2b1dd00193754b4ff4e67200930220744b74490df0fbfd09e00120fff7ebf9d5e90831194428604900fdf714fc2037bd46bdec048bb0bd2868fff7a6fff6e72b792c68042b00f2b780dfe803f00349576587002046fff73cfba36a002be6d0626a12f001050cd040f235125f4b5f4901935f4b00935f4b03200df0c8fd0bf0c8fd42f001026262a26f03f1170107333f32db0822f03f0243f08043c4e9062284f8305013604ff0e042a36921f007015d60a369381d0b4443f8082ca3690b4443f8045c21620291a369cde9001301231a46eef700fb2946381deef7e8faa6e7eb6895ed020a5b4200ee903ab8eec00af8eee00a2046fff73ffa98e7eb6895ed020a5b4200ee903ab8eec00af8eee00a2046fff74ffa8ae7eb6895ed022a5b4202ee903aeb6995ed061a5b4201ee903a6b6995ed040a5b4200ee903af8eee22ab8eec22af8eee11ab8eec11af8eee00ab8eec00a2046fdf7acfb68e7d5ed047a6b69f8eee79a5b4207ee903af8eee78ad5ed027aeb68b8eee79a5b4207ee903ab8eee78a94f88010204601eb8101fdf762fb06212046fdf7e6f9f0ee680ab0ee690a2046fdf70ffaf0ee480ab0ee490a2046fdf708fa3ae701930f4b4ff4d9720949009303200d4b0df021fd0d4b40f2b3120193074b03490093084b4ce7",
+          "sha256": "94573483b90be52fe821c68380d2a055113a70dcde0995542e030858987b7c69",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc398139"
+    },
+    "RH_FW_FR_STYLE_ENABLED_SLOT": {
+      "value": "0x200bd0b4",
+      "source_value": "0x200bd0b4",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (12 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_style_refresh_enabled",
+      "witnesses": [
+        {
+          "address": "0xc382880",
+          "size": 8,
+          "bytes": "93f82830904600af",
+          "sha256": "311702f15ae457cc94aba93175b88872f510ac344fe1bcd1b22345de7263f3ba",
+          "kind": "data-reference",
+          "disassembly": "LDRB.W          R3, [R3,#(byte_200BD0B4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc382f5e",
+          "size": 8,
+          "bytes": "85f8283029f06ffa",
+          "sha256": "4bbcf782b282701a388763b94d136fcc87c601ae2a7fba299f9a7ec43a4fa068",
+          "kind": "data-reference",
+          "disassembly": "STRB.W          R3, [R5,#(byte_200BD0B4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc382f74",
+          "size": 8,
+          "bytes": "85f82830638e03f4",
+          "sha256": "ff78414aabbfea7a637e3234c3dd5b013611b90f0041e89712ee1063be74c874",
+          "kind": "data-reference",
+          "disassembly": "STRB.W          R3, [R5,#(byte_200BD0B4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3833ca",
+          "size": 8,
+          "bytes": "86f82850fff7a3ff",
+          "sha256": "3372f694dacebfd79c02a86099bb518367f33788679817b1eac682eaca8a6e4f",
+          "kind": "data-reference",
+          "disassembly": "STRB.W          R5, [R6,#(byte_200BD0B4 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_FR_SW_DISPATCH": {
+      "value": "0xc394815",
+      "source_value": "0xc394815",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_sw_dispatch",
+      "witnesses": [
+        {
+          "address": "0xc394814",
+          "size": 94,
+          "bytes": "2de9f041d0f8208004460e4600afb8f1000f22d10121304622f1fef7054618b94ff0ff30bde8f0813046f2f7e1f80028f6d00223eb6605f138032046a36066602562fef7d3fc03220120236ada66044bc4f82080c3f83801e4e70020e2e7",
+          "sha256": "2927bcc0a67c3c2e7c2e53b899e77bcb1ca970425c57f003021745c3080d782a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc394815"
+    },
+    "RH_FW_FR_VECTOR_DROP_SECOND_ARG": {
+      "value": "0x0",
+      "source_value": "0x0",
+      "kind": "abi",
+      "basis": "Exact same-model structural ABI; see audited native initializer/accessors.",
+      "witnesses": [
+        {
+          "address": "0xc69f75c",
+          "size": 36,
+          "bytes": "90b5044685b000af10220021384681f0cdfb044b394618687c6017f2f8fc1437bd4690bd",
+          "sha256": "79bd9014a520c395f373bfaba145ec7e6b6b33d7422f1945df8d9d50a8a378b0",
+          "kind": "function-body"
+        }
+      ]
+    },
+    "RH_FW_FR_VECTOR_SLOT": {
+      "value": "0x200d2170",
+      "source_value": "0x200d2170",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (5 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vector_cache_slot",
+      "witnesses": [
+        {
+          "address": "0xc69f6c0",
+          "size": 8,
+          "bytes": "144c02afbb60fa60",
+          "sha256": "fe7ddd7430ab1a59539965a7fb3e0131890057a18636a56afcf0861e09584f48",
+          "kind": "data-reference",
+          "disassembly": "LDR             R4, =dword_200D2170"
+        },
+        {
+          "address": "0xc69f6ca",
+          "size": 8,
+          "bytes": "22687b6062b907f1",
+          "sha256": "e2193ff63ba4bb6483605c3d0709f5cf0e3b4c976157827def0ea6ab57ae6a3c",
+          "kind": "data-reference",
+          "disassembly": "LDR             R2, [R4]"
+        },
+        {
+          "address": "0xc69f6e8",
+          "size": 8,
+          "bytes": "20600d4d2b6853b9",
+          "sha256": "b3e0da0238b44009be756b6dc0348505b16481674775294ef13f6e624be9ea2d",
+          "kind": "data-reference",
+          "disassembly": "STR             R0, [R4]"
+        },
+        {
+          "address": "0xc69f714",
+          "size": 8,
+          "bytes": "70210d2009e3690c",
+          "sha256": "b8859e2a54e64cfb73eaf91f0ca6883a0b6593a2042ae31f8c1e7b030759d7eb",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200D2170"
+        }
+      ]
+    },
+    "RH_FW_FR_VG_DISPATCH": {
+      "value": "0xc391355",
+      "source_value": "0xc391355",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vg_dispatch",
+      "witnesses": [
+        {
+          "address": "0xc391354",
+          "size": 120,
+          "bytes": "2de9f843d0f8208004460e4600afb8f1000f2fd10221304626f15ef2054620b190f87590b9f1020f06d0204608f092fa4ff0ff30bde8f883307d07f0d1ff0028f6d03046f5f734fb0028f1d005f13803c5f86c902046a36066602562fff700f803220120236ada66034bc4f82080c3f83801dfe70020dde7",
+          "sha256": "5db07934bcfb9965c709abfe599aada5bf460149bdd7234751246177d902ebdd",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc391355"
+    },
+    "RH_FW_FR_VG_SLOT": {
+      "value": "0x200d216c",
+      "source_value": "0x200d216c",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (2 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vector_draw_unit_slot",
+      "witnesses": [
+        {
+          "address": "0xc69f6ea",
+          "size": 8,
+          "bytes": "0d4d2b6853b90c4b",
+          "sha256": "04bd9f8440b3e9b32f91ca77140a2c981831b3606433c82c55c407790b069989",
+          "kind": "data-reference",
+          "disassembly": "LDR             R5, =dword_200D216C"
+        },
+        {
+          "address": "0xc69f6ec",
+          "size": 8,
+          "bytes": "2b6853b90c4b0d4e",
+          "sha256": "7371de129c5ea34ef2a332da370fad11409ab53c4767fba88817a7819baf81cf",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R5]"
+        },
+        {
+          "address": "0xc69f704",
+          "size": 8,
+          "bytes": "2c601437bd46f0bd",
+          "sha256": "c13772a5d990e81d862d0bd6d9ce80ed6a7ae70c8e001d2dabaad84024ca96ff",
+          "kind": "data-reference",
+          "disassembly": "STR             R4, [R5]"
+        },
+        {
+          "address": "0xc69f720",
+          "size": 8,
+          "bytes": "6c210d208cd00b20",
+          "sha256": "aa7ec4902af272fb46867b013cc2b5d0ace4654aa485594d6c739affe1fb3fdb",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200D216C"
+        }
+      ]
+    },
+    "RH_FW_HEADER_CACHE_CLASS": {
+      "value": "0x2ca14b08",
+      "source_value": "0x2ca14a00",
+      "kind": "data",
+      "basis": "read-only class object read by the images of the same two functions at the same instruction offsets as in the source",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_count_cache_class",
+      "witnesses": [
+        {
+          "address": "0x2ca14b08",
+          "size": 36,
+          "bytes": "a59c3a0c759d3a0c1f063a0c374a3a0c51433a0c95463a0ce5463a0c45783a0c4d063a0c",
+          "sha256": "b54ec9ce11f03a28f3835bbb6860e5da7c5699ae79de261bdb0c0c0efdf1e772",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc3a98e2",
+          "size": 8,
+          "bytes": "0748fef73af8c9f8",
+          "sha256": "2c524e67ffcbdc4607ed4da88b417398caaac932ca678f8e41350f9c0d97dfac",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA14B08"
+        },
+        {
+          "address": "0xc3a9900",
+          "size": 8,
+          "bytes": "084ba12c77d7b12c",
+          "sha256": "dae482a5545bc208a740934706d2919093cd222de88f520662c9a4307d15309e",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA14B08"
+        },
+        {
+          "address": "0xc3a99b0",
+          "size": 8,
+          "bytes": "8948fdf7d3ffc4f8",
+          "sha256": "6d104bc16a4de959fe1b8e6cc6e8642f156644d9a6f2d300676c9a8501d00516",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA14B08"
+        },
+        {
+          "address": "0xc3a9a62",
+          "size": 8,
+          "bytes": "5d48fdf77aff7060",
+          "sha256": "fc9b88249ab2ea1dea6612f9b8deedfc188c565bb1085c8d9c81925195060275",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA14B08"
+        }
+      ]
+    },
+    "RH_FW_HEADER_CACHE_SLOT": {
+      "value": "0x200bd1b8",
+      "source_value": "0x200bd1b8",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc38e314",
+          "size": 8,
+          "bytes": "d8f82c01d6f80ca0",
+          "sha256": "e78275baa6935ae3b440e507b0bf1c11a24c0e362622ed0a76c84ef557f4d681",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R0, [R8,#(dword_200BD1B8 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc38e358",
+          "size": 8,
+          "bytes": "d8f82c0129f176f4",
+          "sha256": "35d930e9030140653f76316ab9de1f0b9ddb0efb4010d51f03b2e0c1196c7e13",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R0, [R8,#(dword_200BD1B8 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc38e40c",
+          "size": 8,
+          "bytes": "d8f82c0129f10ff4",
+          "sha256": "7409d42da6e374c8e58b65ce6abe979ecd29d7d4f16ddd9666d7495e6f0a3004",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R0, [R8,#(dword_200BD1B8 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a37f8",
+          "size": 8,
+          "bytes": "d5f82c6100af48b9",
+          "sha256": "c465d96857d32897a494d564c173f3d608bbb7ae617ba58f552824a2b805a423",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R6, [R5,#(dword_200BD1B8 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_IMAGE_CACHE_CLASS": {
+      "value": "0x2ca14a88",
+      "source_value": "0x2ca14980",
+      "kind": "data",
+      "basis": "read-only class object read by the images of the same two functions at the same instruction offsets as in the source",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_size_cache_class",
+      "witnesses": [
+        {
+          "address": "0x2ca14a88",
+          "size": 36,
+          "bytes": "a59c3a0cdd9d3a0c1f063a0c374a3a0c51433a0c95463a0ce5463a0c45783a0c4d063a0c",
+          "sha256": "7df4bea49a0c1e6e3b96c3bc4656c912980a7e579706e15671a6e755d999c2fd",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc3a9982",
+          "size": 8,
+          "bytes": "9248fdf7eaffc4f8",
+          "sha256": "cda994b17f8a978411c2bd1c39aa026caf16669025e54d59b39db4e5b7c03c39",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA14A88"
+        },
+        {
+          "address": "0xc3a9bcc",
+          "size": 8,
+          "bytes": "884aa12cccc4b12c",
+          "sha256": "d66e67b1cc9497e6f6971dffbe315ea3e0a0b76ff07eaf2ba5a0052ca71f1364",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA14A88"
+        },
+        {
+          "address": "0xc69f6e2",
+          "size": 8,
+          "bytes": "0e4808f53af92060",
+          "sha256": "15b978341aee112fee8d76af2be130f04f85ca3b9e6c763004ae8b7fa0b1e11e",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA14A88"
+        },
+        {
+          "address": "0xc69f71c",
+          "size": 8,
+          "bytes": "884aa12c6c210d20",
+          "sha256": "e1f32a66ccc3e7365ea681a381457a2a546dee9e4a3f0803697315a8b6940d90",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA14A88"
+        }
+      ]
+    },
+    "RH_FW_IMAGE_CACHE_SLOT": {
+      "value": "0x200bd1b4",
+      "source_value": "0x200bd1b4",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc38ceec",
+          "size": 8,
+          "bytes": "d3f8280191462af1",
+          "sha256": "9c376f42f0ed16092cc8f004af1767f00c223cc7978fc478142111bf427f119e",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R0, [R3,#(dword_200BD1B4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc38e9fc",
+          "size": 8,
+          "bytes": "d3f8280120640db1",
+          "sha256": "c66bd0ec8371b755091ffe78d5f8cdb029600423f570bbfe8e8a872015c92c2c",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R0, [R3,#(dword_200BD1B4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc395c3e",
+          "size": 8,
+          "bytes": "d4f828319b687360",
+          "sha256": "59c033693c6fed6da5e05bd9998dacc0a8d4ca54b22299ed30abe37d442ab5b6",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R3, [R4,#(dword_200BD1B4 - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc395da6",
+          "size": 8,
+          "bytes": "d4f828313f359e68",
+          "sha256": "b7d4c138d523a448c226c9b3e2c1737a017aebddff47732c65d6f0333f0e4b33",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R3, [R4,#(dword_200BD1B4 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_IMAGE_GET_INFO": {
+      "value": "0xc38e44d",
+      "source_value": "0xc38e44d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_image_decoder_get_info",
+      "witnesses": [
+        {
+          "address": "0xc38e44c",
+          "size": 48,
+          "bytes": "b0b5044694b000af0d46381d4c21f1f701fe20463c61f8f7affc29463875381dfff746ff003818bf01205037bd46b0bd",
+          "sha256": "d4361f8acc28ed7fe5c1db512d477f4910fe7e07827ca494885a657ac78dc524",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc38e44d"
+    },
+    "RH_FW_IMAGE_OBJECT_CLASS": {
+      "value": "0x2ca12e7c",
+      "source_value": "0x2ca12d74",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2ca12e7c",
+          "size": 36,
+          "bytes": "0c2ba12cc9b43a0c5bbf3a0c4d2d3b0c000000006adeb12cd1070020d107002040060000",
+          "sha256": "146489b96742b5c698ffe2de1c10a3c25649d715002e54657457417d7f9c0b7d",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc3ae120",
+          "size": 8,
+          "bytes": "0448d3f7a5fa0446",
+          "sha256": "ab37cab646580ee49c705bf3e36b95fb36a6633b614361a4ea594d3b651ce681",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA12E7C"
+        },
+        {
+          "address": "0xc3ae134",
+          "size": 8,
+          "bytes": "7c2ea12c80b50021",
+          "sha256": "30bc8b71700c181d499c83da4cb168a17ee4fcb573d9a7d8a5c30084c4c40f41",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA12E7C"
+        },
+        {
+          "address": "0xc3b2d52",
+          "size": 8,
+          "bytes": "994804af0d460e89",
+          "sha256": "135fbe06e7678844a381437527be8410ec0579f86c81b54dca7f95c0a4223ed6",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA12E7C"
+        },
+        {
+          "address": "0xc3b2fb8",
+          "size": 8,
+          "bytes": "7c2ea12c182b7ff4",
+          "sha256": "35a6a8ce9a45cf059289c6b9e7260b9b0c680707fd2e5ef726ffbcbf7246b273",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA12E7C"
+        }
+      ]
+    },
+    "RH_FW_IMAGE_SET_SRC": {
+      "value": "0xc3b2b91",
+      "source_value": "0xc3b2b8d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_image_set_src",
+      "witnesses": [
+        {
+          "address": "0xc3b2b90",
+          "size": 384,
+          "bytes": "2de9f0430d468fb004af0446cff71dfb2846d4f70ff9032806460fd13db1584ba12200930220574b5749f3f7d1f82046f9f7e1f92c37bd46bde8f0832846391ddbf73cfc012814d0012e08d02b4618214e4a07f11000fbf706fe07f110054c4bac2200930220474b47490195f3f7b0f8dde7002e45d1fb88d9060ed5d5e9053203b152b9cde90132424bb822009303203c4b3d49f3f79cf8cce794f8603003f00303013b012b02d8606bf9f7c1f865633b8994f8602063647b8906f00306a3647b7922f07f029b0003f07c033343134384f86030204654f1f7f72046fbf771fce36c3bb9236db3f5807f03d1636db3f5807f02d02046cff748fb2046cff7a5fa98e7731edbb2012bd2d8d4f83480a84514d094f86030284603f00303013b012b88bf4ff00008f9f771f8002882d06063b8f1000f02d04046f9f77af8022eb7d100212046cdf708fc002180462046cdf70cfc002181462046cdf710fc6ff0604300220090cde9013229464b46424607f11000f5f715fe3b693b817b697b8197e7",
+          "sha256": "99a244927c2c1adc87db6cea081fb585704d18a81b2b423cb5ae08c472bd0eb0",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3b2b91"
+    },
+    "RH_FW_INVALIDATE_AREA": {
+      "value": "0xc382081",
+      "source_value": "0xc382081",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_inv_area",
+      "witnesses": [
+        {
+          "address": "0xc382080",
+          "size": 254,
+          "bytes": "2de9f0418cb08846044604af10b93c4b9c69e4b12046fff7cfffc0b194f83a5015f002050ed0374b4ff48c720293364b03200193354b36490093364b23f050fe21f050feb8f1000f05d1c4f85c822037bd46bde8f0812046c7e90455fff7a8fa0138b8612046fff7b3fa07f110060138f86132464146384621f010fc0028e6d094f83930022b0ed196e80f0004f13c0c8ce80f000123002233212046c4f85c32fff7c5fed3e73a4630212046fff7bffe0128ccd1d4f85c82a9b2884514d8b8f11f0f84bf0023c4f85c32d4f85c0288bf314604eb001098bf39463c30fdf7fbfad4f85c320133d6e704eb0111002238463c3121f081fc01350028ddd0a7e7",
+          "sha256": "2a58ff56f32fb4bcfa5e1b8f50250a4c24373782d77b5bcaac48db474fcca768",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc382081"
+    },
+    "RH_FW_MANAGER_PATH_LIST_HEAD_OFFSET": {
+      "value": "0x1c",
+      "source_value": "0x4",
+      "kind": "abi",
+      "basis": "Exact .179 add-path/resolver loads: uikit manager at +28; manager path-list head at +28.",
+      "witnesses": [
+        {
+          "address": "0xc490e54",
+          "size": 90,
+          "bytes": "f0b583b005460e46c46902afbcb905f592744ff480712046104a009605f124031df7bffcff2810d90d4b0190009340f2651202200b4b0c4914f768ff05e03046216890f207f920b9646820460437bd46f0bdab691c446468d8e7",
+          "sha256": "a33bc10bd71dbf071d4bb3cecc42c661fd17d5400cbc0adaeebc2eb33275eca4",
+          "kind": "function-body"
+        }
+      ]
+    },
+    "RH_LB_STYLE_SET": {
+      "value": "0xc383435",
+      "source_value": "0xc383435",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.lv_obj_set_local_style_prop",
+      "witnesses": [
+        {
+          "address": "0xc383434",
+          "size": 304,
+          "bytes": "2de9f04784b01e46044688460023458e02af7a60c5f30515ab4217d3638e013505f03f0565f30913638603f47c73002b44d13f4b40f2e32201933e4b03203e4900933e4b22f072fc20f072fce168d80001ebc30292f807c01cf0010f2cd05268c2f31702964227d10d583eb9404622f065f9830602d52046fef795fe414628467a6825f085f898b101234fead80216f47f0f03fa02f30bbf226962691a431a430cbf22616261314642462046fff7caf90837bd46bde8f0870133ade7e900e06828f096fe658ee060c5f30515013de0684feac509fdb908214844fcf7a7fd0c20d4f80ca0cdf7e8ff4af83500e36853f8350026f08dfce3684b44da7942f00102da71e3684b445a6866f317025a60e36853f83550a9e7a9f108030344d97900eb09028907d7d193e8030082e80300cde7",
+          "sha256": "ac5d1a40766a2740cc8cebc2efb03399ec25519a0333544e8aede0039a86e796",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc383435"
+    },
+    "RH_LB_OBJECT_EVENT_ADD": {
+      "value": "0xc37fbed",
+      "source_value": "0xc37fbed",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_object_event_add",
+      "witnesses": [
+        {
+          "address": "0xc37fbec",
+          "size": 38,
+          "bytes": "2de9f04180460c4615461e4600affff74afed8f8080033462a4621460c3024f05bf9bde8f081",
+          "sha256": "599ea5f86c9a8612b8301526d6480c43771ff4a66e215686100075ef1dae7f9b",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc37fbed"
+    },
+    "RH_LB_OBJECT_EVENT_REMOVE": {
+      "value": "0xc37fc33",
+      "source_value": "0xc37fc33",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc37fc32",
+          "size": 62,
+          "bytes": "2de9f041054680680e4600af98b10024d0f81080444501d100200ce021462846fff7deff48b10368b34206d121462846fff7deff0120bde8f0810134eae7",
+          "sha256": "0a0881f3bf438263211967761aa5dc17e547592ebecb702725e2284287f3f5ce",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_object_event_remove",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc37fc33"
+    },
+    "RH_LB_RECT_INIT": {
+      "value": "0xc38e03d",
+      "source_value": "0xc38e03d",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc38e03c",
+          "size": 186,
+          "bytes": "b0b5742100af0446f2f70cf8fef7b6f9c0f3072384f82100c0f3074084f8223084f82300fef7aaf9c0f3072384f82400c0f3074084f8253084f82600f6f7eafec0f30723ff2584f82a30022384f82900c0f3074084f82e3084f82b0084f82d50f6f7d8fec0f3072384f84400c0f3074084f8453084f84600f6f7ccfec0f3072384f85e300d4b84f85d006363b4f84c30c0f307406ff30c036fea13336fea033384f85f0084f8205084f83b5084f85c5084f87050a4f84c30b0bd",
+          "sha256": "ee8fa724993a662037349d1c043e900f8ec4269cbdc0a59ce5096d537d3c076c",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_rect_init",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc38e03d"
+    },
+    "RH_LB_RECT_DRAW": {
+      "value": "0xc38e47d",
+      "source_value": "0xc38e47d",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc38e47c",
+          "size": 1246,
+          "bytes": "2de9f04f93b00b6e05460c46164604af83b191f87020022a40f21c81012b40f01b81ca6e002a05dc4a6e1ab98b6e003b18bf012394f82020fa6094f83b20022a40f20c81226b003a18bf01227a6094f84c20022a40f20481a26c002a00f0038194f84d9089f02009c9f3401994f85c20022a40f2fa80626d003a18bf0122ba60fa68ff2a40f0fc8094f82f20520707d0002294f82e1004f12700914200f2e7804ff0010b002b49d0022231462846f6f7c5fbe26ed0f87080114682461830386015f0d0f9226e3868114615f0cbf9d4e91912386815f0d5f9c446a646bee80f00ace80f0038239ee807008ce80700c8f81430e3695146c8f81c3094f85f30b4f85d2088f82230a8f82020236e2846c8f82430e36ec8f8283094f8703088f83430636ec8f82c30a36ec8f8303098f835306bf3000388f83530f9f73cfafb68022b5dd996e80f0007f1280c8ce80f00a36c012b1bdd94f84c30fc2b17d9e369abb1024694f84d30c3f380010a44ba62fa6ac3f340010a44fa623a6bc3f3c001521a3a637a6b03f00103d21a7a63614600222846f6f753fbd0f87080824630214046f1f720fd4ff0300bff23c446a64688f82030c8f814b0bee80f00ace80f009ee807008ce80700c8f814b0e36904f12402c8f81c30b4f82130a8f8213094f8233088f8233008f1240307ca83e8070094f820305146284688f82030f9f7dbf97b68002b00f09380d4f830804046f8f79cfb012838d8404607f11c01fff7d9fe012840f0848094f83d30002b40f009813a8cc7e90a33013a3a637a8c07f12801013a7a6330460922009315f05bfa052207f12801f7e00023ede60123ebe60022f5e64ff0000902e7914600e7002207e702eb820c10f80cc0bcf1ff0f01d101320ce74ff0000b0ee7032850d00c2107f11c00f1f7a8fc4ff000086ff06043cde90138cdf800804346d4e90c1207f114001af001f97b69c7e90a88013b3b63bb690922013b7b6330464346cdf8008007f1280115f017fa042207f128012846f6f7aefad0f8708082464046f9f7d2fbc446a646bee80f00ace80f0064239ee807008ce80700c8f81430a36ba8f838301b0c88f83a30636bc8f82c30236bc8f81c3004238af8043051462846f9f744f9b9f1000f30d0012231462846f6f780fad0f87080a646c4468146bee80f00ace80f002c239ee807008ce80700c8f81430e3694946c8f81c30636c2846a8f820301b0c88f8223094f84c3088f82830a36cc8f8243094f84d2098f8293062f3040388f82930f9f710f9bb68002b4ed096e80f0007f1280888e80f00d4e915231a441146404615f058f8414601222846f6f73ffa626d00f11809066f11468046484615f04af8a26d4846114615f045f8b446a646bee80f00ace80f002c239ee807008ce8070047f6ff727361e3694146934218bf626d28461ebf9b18a26d9b18f361b4f84e2094f8503032840f2286f8223094f85c3086f82830636d736296f8293062f3040386f82930f9f7bef83c37bd46bde8f08f052231462846f6f7f9f9d0f8708082464046f8f753fac446a646bee80f00ace80f0070239ee807008ce80700c8f81430d4f830b05846f8f767fa01282cd158461df04efa98f84d30c8f81c0043f0400388f84d3094f83b3008f1200888f82c30a36ba8f828301b0c88f82a3094f83c3088f82b3094f83d2098f82d3062f3451388f82d30236cc8f8303007f11c0393e8070088e8070025e7c8f81cb0dae7",
+          "sha256": "2576e9d768f99b7dd959f4865a8216109320747eb102a2c2d00279d04748e431",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_rect_draw",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc38e47d"
+    },
+    "RH_LB_LIST_CLASS": {
+      "value": "0x2ca436ec",
+      "source_value": "0x2ca435bc",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2ca436ec",
+          "size": 36,
+          "bytes": "ecbba32cc527540c00000000000000000000000000000000d400000008020000c0051000",
+          "sha256": "ed076d2f7d178da71b043a83e1fe69b9899755fa8fd4e4d9dbc15b9c1efa484a",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc54240a",
+          "size": 8,
+          "bytes": "06483ff630f90446",
+          "sha256": "2b06b9ed321cb962de3eacbc97efed49d27ddc2c31453a8b782965db84cc4637",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA436EC"
+        },
+        {
+          "address": "0xc542424",
+          "size": 8,
+          "bytes": "ec36a42c98b500af",
+          "sha256": "4857a28d6edbdf21e8d99a7e4d9077364e17e80dbd049a5a0c2e1194afe0a50e",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA436EC"
+        }
+      ]
+    },
+    "RH_LB_BASE_CLASS": {
+      "value": "0x2ca3bbec",
+      "source_value": "0x2ca3bad4",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2ca3bbec",
+          "size": 36,
+          "bytes": "0c2ba12c29e8690ca3e6690c918e6a0c00000000574bb52c0000000000000000c0050000",
+          "sha256": "79c741d926f8b735f5fb5a077b76cd22eed53e4863be66cec7586bd40fa057f5",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc4fe0e6",
+          "size": 8,
+          "bytes": "c04a934240f09d80",
+          "sha256": "85315700f0d5a89353e8a0c6d2e57718df3be8f16eab7042ec9dfd65e52d06af",
+          "kind": "data-reference",
+          "disassembly": "LDR             R2, =off_2CA3BBEC"
+        },
+        {
+          "address": "0xc4fe3e8",
+          "size": 8,
+          "bytes": "ecbba32c18120c20",
+          "sha256": "163d1564117458684a6a444af5e03bcd8f4b90929f4eb52948a52459add2b2b6",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA3BBEC"
+        },
+        {
+          "address": "0xc5d8e7e",
+          "size": 8,
+          "bytes": "dff83480c5b265b1",
+          "sha256": "838a1cea793bc92d8ce34db631651a16c71a3a65708b485ded75558ae8f4777a",
+          "kind": "data-reference",
+          "disassembly": "LDR.W           R8, =off_2CA3BBEC"
+        },
+        {
+          "address": "0xc5d8eb4",
+          "size": 8,
+          "bytes": "ecbba32c80b400af",
+          "sha256": "f46b7135baa7fff3ac6819b22a0651c9e84f8211d2a0c8c63977f429b7abf4fa",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA3BBEC"
+        }
+      ]
+    },
+    "RH_LB_MAIN_ROOT_SLOT": {
+      "value": "0x200c5f10",
+      "source_value": "0x200c5f10",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc5422b6",
+          "size": 8,
+          "bytes": "0b4b00af186860b1",
+          "sha256": "fe19906b5eb964ccf2688e0b145aea718396ef9ec2189b9c8b83d3b654bdcacb",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C5F10"
+        },
+        {
+          "address": "0xc5422ba",
+          "size": 8,
+          "bytes": "186860b100213ef6",
+          "sha256": "03b530215559c5f8bc234eee7bd70691eea627c38bdfc20d02c6f85f9ad86ee4",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R3]"
+        },
+        {
+          "address": "0xc5422e4",
+          "size": 8,
+          "bytes": "105f0c2080b50068",
+          "sha256": "09eb6cf53c5b1a9584de544e9f66b5f1e75bf1b61bb774d7e68902c53873897b",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C5F10"
+        },
+        {
+          "address": "0xc547ac4",
+          "size": 8,
+          "bytes": "af4c8bb0af4b0620",
+          "sha256": "93bbac903ff5d9f7dae45f575fe3b20dc2c0a2632cf16a94b540ef23921c0d76",
+          "kind": "data-reference",
+          "disassembly": "LDR             R4, =dword_200C5F10"
+        }
+      ]
+    },
+    "RH_LB_MAIN_CACHE_SLOT": {
+      "value": "0x200c5f0c",
+      "source_value": "0x200c5f0c",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc547af4",
+          "size": 8,
+          "bytes": "a94b186808b13cf6",
+          "sha256": "56c5bfdf70c25c3abcd6f0e864bd252da8804dddfdb775d3391b347b13ee2ae0",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C5F0C"
+        },
+        {
+          "address": "0xc547af6",
+          "size": 8,
+          "bytes": "186808b13cf669fc",
+          "sha256": "5c7474d6aa55d999199f0a0b88f0aba6a23c0f59ddc27609103c981d682debe9",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R3]"
+        },
+        {
+          "address": "0xc547d9c",
+          "size": 8,
+          "bytes": "0c5f0c20885d0c20",
+          "sha256": "1e3f4bf7bf34384f0076055f2ef4e518cf5f670d63892e213b9310a6cd1551e0",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C5F0C"
+        },
+        {
+          "address": "0xc54819a",
+          "size": 8,
+          "bytes": "354e204600213af6",
+          "sha256": "4bfa0bfd1f875a28d1bff3fca715c484329eb1834e87d3e72012156089124706",
+          "kind": "data-reference",
+          "disassembly": "LDR             R6, =dword_200C5F0C"
+        }
+      ]
+    },
+    "RH_LB_MORE_ROOT_SLOT": {
+      "value": "0x200c5adc",
+      "source_value": "0x200c5adc",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc548808",
+          "size": 8,
+          "bytes": "574c94b0574b0620",
+          "sha256": "9ce609ab2d436b67faf9d983bd5f7647714790d068650691f915520e74ce8568",
+          "kind": "data-reference",
+          "disassembly": "LDR             R4, =dword_200C5ADC"
+        },
+        {
+          "address": "0xc54881a",
+          "size": 8,
+          "bytes": "236863b9534b534a",
+          "sha256": "753a8d26a87931f02ef8f2664f9a6fa6cb07f9b2d2ef3fb6f83b9116e15feb1b",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R4]"
+        },
+        {
+          "address": "0xc548842",
+          "size": 8,
+          "bytes": "20683bf6c4fd4e4b",
+          "sha256": "139893fe835c8a73b8920d435098bb9c0481f5dad5c056b34b50169b5801aba5",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R4]"
+        },
+        {
+          "address": "0xc54884a",
+          "size": 8,
+          "bytes": "24681b6833b90320",
+          "sha256": "72646443e65cc49881b8ee15f7de430a91ca84c992e38219fa63d4308a1889b6",
+          "kind": "data-reference",
+          "disassembly": "LDR             R4, [R4]"
+        }
+      ]
+    },
+    "RH_LB_MORE_CACHE_SLOT": {
+      "value": "0x200c5ad8",
+      "source_value": "0x200c5ad8",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc548838",
+          "size": 8,
+          "bytes": "514b186808b13bf6",
+          "sha256": "443e44fe9fb0434c372da20dc6857525a68e9048a445263bd887aac5554ac79b",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C5AD8"
+        },
+        {
+          "address": "0xc54883a",
+          "size": 8,
+          "bytes": "186808b13bf6c7fd",
+          "sha256": "440db98d4c4d3d372f1a7cb948319b6a23c48786ff6a84060ecb7bc7f17775d0",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R3]"
+        },
+        {
+          "address": "0xc548980",
+          "size": 8,
+          "bytes": "d85a0c20885d0c20",
+          "sha256": "123b3ca70d722a39b34baaa50adfd755b326b8d37829003b148571a7b6d5b13c",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C5AD8"
+        },
+        {
+          "address": "0xc548aba",
+          "size": 8,
+          "bytes": "264e204639f651fc",
+          "sha256": "c68ffa8b5eb04660bd35bbf37d82739fc20978c954fe7ff0cf6423f605dba440",
+          "kind": "data-reference",
+          "disassembly": "LDR             R6, =dword_200C5AD8"
+        }
+      ]
+    },
+    "RH_LB_CONTROL_PRESENTER_SLOT": {
+      "value": "0x200c5668",
+      "source_value": "0x200c5668",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc537f28",
+          "size": 8,
+          "bytes": "214b00af19688046",
+          "sha256": "7e2e8ebb11b5035c8c67db462e3d4bff415258aad7f76a1fd77a105f63dd1988",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C5668"
+        },
+        {
+          "address": "0xc537f2c",
+          "size": 8,
+          "bytes": "1968804600230922",
+          "sha256": "54af4d35ef4768f2f82729a1dffef3646270b695490a3ddfccfcb50863a1bd60",
+          "kind": "data-reference",
+          "disassembly": "LDR             R1, [R3]"
+        },
+        {
+          "address": "0xc537fb0",
+          "size": 8,
+          "bytes": "68560c2080b582b0",
+          "sha256": "62f1373c33ab33b9ee71e5c3228bfa9b37ed5740605e13fcd3dff6e47e2d9321",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C5668"
+        },
+        {
+          "address": "0xc53a34e",
+          "size": 8,
+          "bytes": "224e02af31684c6d",
+          "sha256": "78d73546ceb4d4f975bbe8423887d694a281aed7e0ce72358d81c52ca56d2904",
+          "kind": "data-reference",
+          "disassembly": "LDR             R6, =dword_200C5668"
+        }
+      ]
+    },
+    "RH_LB_NOTIFY_CONTAINER_SLOT": {
+      "value": "0x200c633c",
+      "source_value": "0x200c633c",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc5561cc",
+          "size": 8,
+          "bytes": "054b00af1c60054b",
+          "sha256": "d4ed80686a842e109324357744da2a6385d2c18873cfc12c0c3fa4aa214ac8ae",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C633C"
+        },
+        {
+          "address": "0xc5561d0",
+          "size": 8,
+          "bytes": "1c60054b1b7823b1",
+          "sha256": "f28d3a023019a125fe61f6c026a4f2e78300dba51b755fe1d1ce6c93b9441fcb",
+          "kind": "data-reference",
+          "disassembly": "STR             R4, [R3]"
+        },
+        {
+          "address": "0xc5561e4",
+          "size": 8,
+          "bytes": "3c630c2038630c20",
+          "sha256": "ed1a86abb751ff15b280d83e59e0f7f01b7a74b4d0a6a165cca24a1387e50b9a",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C633C"
+        },
+        {
+          "address": "0xc55673c",
+          "size": 8,
+          "bytes": "0a4b1b6833b1fff7",
+          "sha256": "1f585738b837fa25cbf6e459a5e01b6507366c62348692758b03ec4ba3d5c6a2",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C633C"
+        }
+      ]
+    },
+    "RH_LB_NOTIFY_LIST_SLOT": {
+      "value": "0x200c6240",
+      "source_value": "0x200c6240",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc55629e",
+          "size": 8,
+          "bytes": "044b186808b150f1",
+          "sha256": "36877e1ccbcfdfb3c5885677fb53859aef2feab1e79f85d43f9361322c2b91c5",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C6240"
+        },
+        {
+          "address": "0xc5562a0",
+          "size": 8,
+          "bytes": "186808b150f180fd",
+          "sha256": "6fdbc72535e74edc49d6d276a36049ecfac41388569e48c86bdb3662fddeee3b",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R3]"
+        },
+        {
+          "address": "0xc5562b0",
+          "size": 8,
+          "bytes": "40620c2098b5074c",
+          "sha256": "0380fee30ed97dedf0fc4a219a4ddddc31a9a57fd7aac9e86c3439ae01f0319d",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200C6240"
+        },
+        {
+          "address": "0xc557322",
+          "size": 8,
+          "bytes": "064b00af186838b1",
+          "sha256": "f484a7dea7f669056f16122b9c6e2da072a4ab84b4eb1173d8e678e264cc679b",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200C6240"
+        }
+      ]
+    },
+    "RH_LB_NOTIFY_LIST_CLASS": {
+      "value": "0x2ca3bbc8",
+      "source_value": "0x2ca3bab0",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2ca3bbc8",
+          "size": 36,
+          "bytes": "ecbba32c290a6a0c010b6a0cf9856a0c00000000514bb52c000000000000000040531000",
+          "sha256": "84b7eb3e3eb68924c0ecb00ecff9fdbe8da4f950b1aaf6cf1a71203fa9e13f4a",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc4fe228",
+          "size": 8,
+          "bytes": "734a93423ed16b4d",
+          "sha256": "9245e4cf5c273e1706cf09f0425a210a06b66be9f969766b0853e0d4418b4dc9",
+          "kind": "data-reference",
+          "disassembly": "LDR             R2, =off_2CA3BBC8"
+        },
+        {
+          "address": "0xc4fe3f8",
+          "size": 8,
+          "bytes": "c8bba32c8cd00b20",
+          "sha256": "8ad41599428d70dec78bdda4dd76835df09738fc8cbd9a4a53fe15464f2c2f6d",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA3BBC8"
+        },
+        {
+          "address": "0xc5cfefe",
+          "size": 8,
+          "bytes": "1a49006837f369ff",
+          "sha256": "4530a76b2755312f7a294e99dfb40dd8d82e7310d8b4831c9131ddbd80d45508",
+          "kind": "data-reference",
+          "disassembly": "LDR             R1, =off_2CA3BBC8"
+        },
+        {
+          "address": "0xc5cff68",
+          "size": 8,
+          "bytes": "c8bba32c67cdb82c",
+          "sha256": "757782ea23f44127d9588cbc73a427a80109f9ea33db88e8dd5dfe7ee5679a5e",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA3BBC8"
+        }
+      ]
+    },
+    "RH_LB_DISPLAY_EVENT_ADD": {
+      "value": "0xc3a3ec5",
+      "source_value": "0xc3a3ec1",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc3a3ec4",
+          "size": 68,
+          "bytes": "2de9f04182b0044600af0c201d4688461646adf709fb7860c0f800807b68c3e9015665682db9042201212046fff7c4fe25742046391d63f141f278680837bd46bde8f081",
+          "sha256": "30cf1d3b53c08390d55e3c9e1e01f786f96545e4acce92ce19c37e1554d074a2",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_event_list_add",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a3ec5"
+    },
+    "RH_LB_DISPLAY_EVENT_REMOVE": {
+      "value": "0xc381e67",
+      "source_value": "0xc381e67",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc381e66",
+          "size": 72,
+          "bytes": "2de9f8430d4616464ff00009d0f8e44200af00f53878013c002c02da4846bde8f8832146404622f03cf858b10368ab4208d14368b34205d12146404622f038f809f10109013ce7e7",
+          "sha256": "531393dfbbd67c7c66dc70ddc9728f05679499f3ca53dc7199afda43a0caede3",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_display_event_remove",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc381e67"
+    },
+    "RH_LB_LAYOUT_UPDATE": {
+      "value": "0xc383f01",
+      "source_value": "0xc383f01",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc383f00",
+          "size": 56,
+          "bytes": "b0b50d4d00af95f8683063b9012385f86830fdf781f8044694f8323013f0040202d185f86820b0bd23f00403204684f83230fff7c3feefe7",
+          "sha256": "324435ff22516191c749e69e1f7eb04a6ac5386551579c39e78d27ff9ed12148",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_layout_update",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc383f01"
+    },
+    "RH_LB_VISIBLE_AREA": {
+      "value": "0xc381d4d",
+      "source_value": "0xc381d4d",
+      "kind": "function",
+      "basis": "Complete 218-byte .177/.179 instruction/operand and ABI review; only six BL relocations change. All three changed callees are byte-identical complete leaves. This specific framework record is STATIC_RECOVERED with proof.static recovered; restricted/PENDING/not_probed retained.",
+      "witnesses": [
+        {
+          "address": "0xc381d4c",
+          "size": 218,
+          "bytes": "2de9f04188b0c36a0446db070d4600af5cd4fff75bf90646fff762f98046fff737ff86423ed1a06885f186f7024604f11c013846fdf7e9fc114621f0abfd3a462946284621f0c4fd804600283ed0204601222946fef772ff646807f11006bcb3d4f82cc01cf0010f30d104f11c031cf4801f0fcb86e80f0007d0a06885f15cf702460146304621f085fd012231462046fef754ff32462946284621f099fda8b16468dce74046fff72bff8642bbd04046fff786ff8642b6d04046fff741ff8642b1d04046fff75cff8642acd04ff0000840462037bd46bde8f081",
+          "sha256": "e30aae14dd706d25516ceffa6e321bf477de032ec34983eb09ae984708676a5d",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_visible_area",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc381d4d",
+      "comparison_177": {
+        "source_address": "0xc381d4c",
+        "target_address": "0xc381d4c",
+        "source_size": 218,
+        "target_size": 218,
+        "source_sha256": "bd0cc1f042f941a3335cc26df6c56162c108d773222770c1c52a985ae4c69319",
+        "target_sha256": "e30aae14dd706d25516ceffa6e321bf477de032ec34983eb09ae984708676a5d",
+        "instruction_count": 83,
+        "comparison": "Every instruction mnemonic and operand is identical except these six BL targets. No size, constant, branch-shape or field-offset differences.",
+        "changed_calls": [
+          {
+            "instruction": "0xc381d74",
+            "source_callee": "0xc907ba4",
+            "target_callee": "0xc907c84"
+          },
+          {
+            "instruction": "0xc381d86",
+            "source_callee": "0xc3a38dc",
+            "target_callee": "0xc3a38e0"
+          },
+          {
+            "instruction": "0xc381d90",
+            "source_callee": "0xc3a3918",
+            "target_callee": "0xc3a391c"
+          },
+          {
+            "instruction": "0xc381dc8",
+            "source_callee": "0xc907ba4",
+            "target_callee": "0xc907c84"
+          },
+          {
+            "instruction": "0xc381dd2",
+            "source_callee": "0xc3a38dc",
+            "target_callee": "0xc3a38e0"
+          },
+          {
+            "instruction": "0xc381de6",
+            "source_callee": "0xc3a3918",
+            "target_callee": "0xc3a391c"
+          }
+        ],
+        "callees": [
+          {
+            "source_address": "0xc907ba4",
+            "target_address": "0xc907c84",
+            "size": 10,
+            "sha256": "f365a6936184487a2e798a8b5fd4ba35d0a057d8053f8c92c58f2a81bd8670a3",
+            "comparison": "Byte-identical complete leaf body"
+          },
+          {
+            "source_address": "0xc3a38dc",
+            "target_address": "0xc3a38e0",
+            "size": 30,
+            "sha256": "33ea8abf2ed2878eda6ed427bd228f394c0543ad4867b61e364c639ca00b3180",
+            "comparison": "Byte-identical complete leaf body"
+          },
+          {
+            "source_address": "0xc3a3918",
+            "target_address": "0xc3a391c",
+            "size": 70,
+            "sha256": "66f6d509afd7e70b603a612b1a6380d96fdcb7de611ae9eb40af18eb4f488e16",
+            "comparison": "Byte-identical complete leaf body"
+          }
+        ],
+        "limitation": "Source .155 comparison changed size 222->218 and originally left the record CANDIDATE. Exact .177->.179 body/ABI review recovers only this record as STATIC_RECOVERED under EVID-RESOURCE-VISIBILITY-4179-001. Policy restricted, approval PENDING and device not_probed remain unchanged; no other candidate is changed."
+      },
+      "framework_static_proof": "recovered",
+      "framework_device_proof": "not_probed",
+      "framework_evidence_id": "EVID-RESOURCE-VISIBILITY-4179-001"
+    },
+    "RH_LB_GPU_FINISH": {
+      "value": "0xc91e66d",
+      "source_value": "0xc91e58d",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc91e66c",
+          "size": 94,
+          "bytes": "10b5174cd4f8003703f5df7354f823303bb9144b186808b32046bde81040fff733ba01224ff420612046fff776fca8b9fff7b4fc90b92046fff744fa70b92046fff722fa50b9d4f80037013303f00103c4f8003703f5df7344f8230010bd",
+          "sha256": "566f5d7dc2d19222bc4f3f7eddeb65a4fdab7d5b3882c1cf8fe77916a34fccb0",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_gpu_finish",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc91e66d"
+    },
+    "RH_LB_DCACHE_SYNC": {
+      "value": "0xc92e6d5",
+      "source_value": "0xc92e5f5",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc92e6d4",
+          "size": 20,
+          "bytes": "30b1012802d1034b01225a6300207047014bf9e7",
+          "sha256": "e151f6c922c49f59976e22d90c2488ec5ee0fce08ffe19d909002a796933cc84",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_dcache_sync",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc92e6d5"
+    },
+    "RH_LB_DCACHE_INVALIDATE": {
+      "value": "0xc7211e9",
+      "source_value": "0xc721249",
+      "kind": "function",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc7211e8",
+          "size": 8,
+          "bytes": "5ff800f015582700",
+          "sha256": "1c1b157c1c2bdd78f2f21b23e585316448b4d47d83e16f5f4b80e3c5b187e91a",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_dcache_invalidate",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc7211e9"
+    },
+    "RH_LB_SNAPSHOT_TAKE": {
+      "value": "0xc5f12ed",
+      "source_value": "0xc5f126d",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc5f12ec",
+          "size": 78,
+          "bytes": "b0b5134d00af2b689bb1124b1b68996c21b13f221048083157f55ffd286808f71ffb044640b904200c4b0d4a0d495ff523f800242046b0bd024612212868b1f0a1fb0128f6d0204601f3cafbf1e7",
+          "sha256": "03883dbf5df5da16a8481621fbfc0346d3b8f57f1746e61289b9f7966cc69e65",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.app_watchface_take_snapshot",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc5f12ed"
+    },
+    "RH_LB_SNAPSHOT_FREE": {
+      "value": "0xc8f2acd",
+      "source_value": "0xc8f29ed",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc8f2acc",
+          "size": 58,
+          "bytes": "80b500afa0b10d4b1a68904211d01a6d904210d0d3f8a020904209d10222502101fb023393f84c2022f0010283f84c2080bd0022f3e70122f1e7",
+          "sha256": "c733ded991f1df1859879f28a2aff42d0adba172334075a3d505da53883fb7f4",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.image_snapshot_release",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc8f2acd"
+    },
+    "RH_LB_DRAW_BUF_CREATE": {
+      "value": "0xc386c15",
+      "source_value": "0xc386c15",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc386c14",
+          "size": 178,
+          "bytes": "2de9f04f89b0814606af1c20884693461e463d6b2af090f8044608b325b931464046fff7d7fd05462b46324659464046fff7c8ffd9f800308246bbb91d4b0220009340f22d12cde9045acde902b61a4b1a49cdf804801ff079f8204625f0a6f8002420460c37bd46bde8f08f3146984703460028e2d066702268a4f8048002f47f4242f4401242f0190222600c4aa4f806b02581d2f8d85025b131467860a84705467b68c4e90453c4f80ca0c4f81890d7e7",
+          "sha256": "33b09efafbc49c3d93a9055b41964f46de05ff1512082bd25a87bcee8ee6b1e1",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.lv_draw_buf_create_ex",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc386c15"
+    },
+    "RH_LB_DRAW_BUF_HANDLERS": {
+      "value": "0x200bd18c",
+      "source_value": "0x200bd18c",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc38cfae",
+          "size": 8,
+          "bytes": "46480095f9f72ffe",
+          "sha256": "d96752be9ba877085449320b82863c8d74251d5706a1f4ae997d644047e55047",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =dword_200BD18C"
+        },
+        {
+          "address": "0xc38d0c8",
+          "size": 8,
+          "bytes": "8cd10b206d9db12c",
+          "sha256": "be191970aefcfdea9193a1211024a9c8f6f8bb60ddbffa38c01c44fa6fc07c7b",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200BD18C"
+        },
+        {
+          "address": "0xc399f84",
+          "size": 8,
+          "bytes": "7148ecf745fe0546",
+          "sha256": "48caafc11d7996a06a99ff46a257c05d31491512d2467a27051d40f3af507ebe",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =dword_200BD18C"
+        },
+        {
+          "address": "0xc39a14c",
+          "size": 8,
+          "bytes": "8cd10b20aeb3b12c",
+          "sha256": "6dd23994afb699d5e771492ae582f7b58729962de270ec57fad7a42473ffc235",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200BD18C"
+        }
+      ]
+    },
+    "RH_FW_OBJECT_STYLE_GET": {
+      "value": "0xc380165",
+      "source_value": "0xc380165",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_obj_get_style_prop",
+      "witnesses": [
+        {
+          "address": "0xc380164",
+          "size": 324,
+          "bytes": "2de9f04184b00e4600234ff00108018e00af41ea060c016916f47f067b604fead20308fa03f8436908bf0b4618ea030f0546144609d18d2c14d9424b5b6b002b3dd0234413f88e3c0ee061463b1dfff7fefa0128efd17b68bb60b8681037bd46bde8f081384b1b5d03f0010303b306b96d6885b95a2c4bd83c2c2bd83a2c1ed8212c36d8072c03d01c2c18d0052c16d16ff0604354e02b6918ea030fe8d022462846298e3b1dfff7d2fa0128e0d1d2e7002edfd1631e012bdcd82b680bb900233ee0012c0cbf9a69da690ab17a60c2e71b68f3e70123a4f13d02d2b293401b4a1a40e2b91a4a1a40fab95a2ce7d1194b26e00123a4f12202d2b29340164a1a406ab9164a134210d1342cd8d10f2317e06d2c06d86b2c11d85f3c012ccfd8ff230ee0742c0ad0762cc9d10023fb730c4b1a889b78ba81bb73fb688de74ff48073fb60f9e7",
+          "sha256": "f66a976309934008b4a78aea112c22b38ab68c7611a7f9d66e985f38c74fd67c",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc380165"
+    },
+    "RH_FW_OBJECT_STYLE_REFRESH": {
+      "value": "0xc382879",
+      "source_value": "0xc382879",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_obj_refresh_style",
+      "witnesses": [
+        {
+          "address": "0xc382878",
+          "size": 230,
+          "bytes": "2de9f84f384b044693f82830904600af002b56d0104601f47f0522f06dffb8f1ff0f064600f0040900f0020a02d010f0160f52d02046fff794fcb9f1000f19d0b5f5702f0ed06db100212046fdf709fddff898b0584505d000212046fdf7f8fc584514d100222d212046fdf759f92046fff700fbb5f5702f00d045b9b8f1ff0f21d124bbf20602d52046fef736fab8f1ff0f02d0baf1000f02d02046fff701fd2046fff75efcb8f1ff0f04d0f30708d516f0060f05d0b5f5803f02d02046fff77dffbde8f88fb9f1000fdad1dae760680028d7d0fff7cefad4e7b5f5702fd6d0002dcfd0d6e7",
+          "sha256": "c5611b9259f735df61017ac55f6ea38a4e794b48a7335d22770c438e568fdebb",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc382879"
+    },
+    "RH_FW_OBJECT_TREE_WALK": {
+      "value": "0xc38151d",
+      "source_value": "0xc38151d",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_obj_tree_walk",
+      "witnesses": [
+        {
+          "address": "0xc38151c",
+          "size": 128,
+          "bytes": "2de9f0410d461646044600afd8b91c4bdc68acb90220bde8f081d4f8b432324653f828002946fff7ebff08f10108d4f8d0324345f1d82046fef7e0f90446e8e74ff00008f3e71146a8470228e2d0012813d10020dfe741462046fff78bfd32462946fff7cdff0228d4d008f101082046fff791fd4045eed8ebe74ff00008f6e7",
+          "sha256": "56c3ba297460dfb5cbe1d9863c066b2974cb4700e3176f98c6fe49d2a13488b5",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc38151d"
+    },
+    "RH_FW_POSIX_CACHE_SIZE": {
+      "value": "0x200bd260",
+      "source_value": "0x200bd260",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc3a9b00",
+          "size": 8,
+          "bytes": "c4f8d4314b4ba5f1",
+          "sha256": "06208baf8f6ea950f754e515dcdb330b52810a8623ace559b881509fc85b48fc",
+          "kind": "data-reference",
+          "disassembly": "STR.W           R3, [R4,#(dword_200BD260 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_POSIX_DRIVER": {
+      "value": "0x200bd25c",
+      "source_value": "0x200bd25c",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc3a9ae8",
+          "size": 8,
+          "bytes": "514dc0e909363421",
+          "sha256": "7b077590ef9cf50924d2e25bcdaee12cfc8663ff1507b231d4bb17b92f625a67",
+          "kind": "data-reference",
+          "disassembly": "LDR             R5, =byte_200BD25C"
+        },
+        {
+          "address": "0xc3a9af8",
+          "size": 8,
+          "bytes": "84f8d0314ff48053",
+          "sha256": "93ec4acafe30057ae65baa5877730c5bc1668a51bcf680ed67ce45f31b1b8c9a",
+          "kind": "data-reference",
+          "disassembly": "STRB.W          R3, [R4,#(byte_200BD25C - 0x200BD08C)]"
+        },
+        {
+          "address": "0xc3a9c30",
+          "size": 8,
+          "bytes": "5cd20b20c1603a0c",
+          "sha256": "fb5db01c9ff0f20ce435e22a6bf96adbcac82a5d9f143c4725d417c41afbcb63",
+          "kind": "data-reference",
+          "disassembly": "DCD byte_200BD25C"
+        }
+      ]
+    },
+    "RH_FW_POSIX_OPEN": {
+      "value": "0xc3a60c1",
+      "source_value": "0xc3a60bd",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lvgl_posix_open",
+      "witnesses": [
+        {
+          "address": "0xc3a60c0",
+          "size": 102,
+          "bytes": "90b5012ac5b00b4604af26d0022a26d0032a0cbf072400244ff48071124a384608f089fb4ff4db72214638469cf796fd002816daa3f7c8f903687722cde902430a4b022000930a490a4b0197fff728fe002007f58277bd4690bd0624dce70124dae70130f5e7",
+          "sha256": "d06492e30657905a7e67036e8e12084ac7c70ba75ee9e5d52d1bf38b781bf0bd",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3a60c1"
+    },
+    "RH_FW_POSIX_OPEN_SLOT": {
+      "value": "0x200bd268",
+      "source_value": "0x200bd268",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc3a9b0a",
+          "size": 8,
+          "bytes": "c4f8dc314a4bc4f8",
+          "sha256": "4991d35ce88230218b1fb13dcf5f82e335f6919e7794b3e802718564d55f94a7",
+          "kind": "data-reference",
+          "disassembly": "STR.W           R3, [R4,#(dword_200BD268 - 0x200BD08C)]"
+        }
+      ]
+    },
+    "RH_FW_UIKIT_MANAGER_OFFSET": {
+      "value": "0x1c",
+      "source_value": "0x14",
+      "kind": "abi",
+      "basis": "Exact .179 add-path/resolver loads: uikit manager at +28; manager path-list head at +28.",
+      "witnesses": [
+        {
+          "address": "0xc492458",
+          "size": 152,
+          "bytes": "2de9f04385b0244b0e461b680146d3f81c9004af05464846fef7f0fc0146804630468ef215fe044670b9b02202201b4bcde9015800931a491a4b13f765fc20460437bd46bde8f08309f1180012f7b1f8044628468ef2e0fe00f10108404619f767fc42462946206074f014f730468ef2d3fe00f10108404619f75afc42463146606074f007f7084bc12200930420cde90156044b0249d0e7",
+          "sha256": "9bf7b22db573f6211b419d31d8c1852e41e4f1716bf7ecd234c27f1d56eee86e",
+          "kind": "function-body"
+        }
+      ]
+    },
+    "RH_FW_UIKIT_SLOT": {
+      "value": "0x200bd08c",
+      "source_value": "0x200bd08c",
+      "kind": "data",
+      "basis": "global ownership by access: the same accessor functions reference it (192 matched owners)",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_uikit_slot",
+      "witnesses": [
+        {
+          "address": "0xc3789b8",
+          "size": 8,
+          "bytes": "144de86cb0b96b6c",
+          "sha256": "f6415cc37d7c799688d3ebcec4b73f91800afabb1aee0931f443e9ec6671d305",
+          "kind": "data-reference",
+          "disassembly": "LDR             R5, =dword_200BD08C"
+        },
+        {
+          "address": "0xc378a0c",
+          "size": 8,
+          "bytes": "8cd00b20c4d00b20",
+          "sha256": "63d50bae5c31bc3cca999c695ff26571e574051489559ec35b769f95a44e232e",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200BD08C"
+        },
+        {
+          "address": "0xc37f5ea",
+          "size": 8,
+          "bytes": "234b9b690bb9f0bd",
+          "sha256": "bfe205cc395da18416c5145e909811d1e3a366219ea251001a25369f2fd8e980",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =dword_200BD08C"
+        },
+        {
+          "address": "0xc37f678",
+          "size": 8,
+          "bytes": "8cd00b2080b53f30",
+          "sha256": "8ebf6a36c2dc0c0dc4ac57456d097ff04e6fac00275c47fe61171bd3dc6f090d",
+          "kind": "data-reference",
+          "disassembly": "DCD dword_200BD08C"
+        }
+      ]
+    },
+    "RH_FW_VECTOR_CLASS": {
+      "value": "0x2ca6cca8",
+      "source_value": "0x2ca6cb78",
+      "kind": "data",
+      "basis": "read-only class object read at the same two instruction offsets (6 and 58) by the image of the source reader pair; its pointer field targets the image of the source pointee",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vector_label_class",
+      "witnesses": [
+        {
+          "address": "0x2ca6cca8",
+          "size": 36,
+          "bytes": "b459a12cb9f6690c85f7690c71396a0c0000000000000000000000000000000040070000",
+          "sha256": "ff49e477a3610f42d33ce7e6d77741573c57c6422adce6282904a26b16a81705",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc6a3456",
+          "size": 8,
+          "bytes": "0448def40af90446",
+          "sha256": "72c8edb82b09fa25446240e5ce610ae94c0c5f19378f0d389bafd1437aca0482",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA6CCA8"
+        },
+        {
+          "address": "0xc6a3468",
+          "size": 8,
+          "bytes": "a8cca62cb0b50446",
+          "sha256": "66e14b9e8f10eabf9a9380b49e4c24da322000e95cd8e51cd1ef3c065421e135",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA6CCA8"
+        },
+        {
+          "address": "0xc6a39aa",
+          "size": 8,
+          "bytes": "5748dcf495f843e0",
+          "sha256": "4d7d1cb44b6a771984013f58455de26e4e9de8490e908837407709b40ccc93c4",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =off_2CA6CCA8"
+        },
+        {
+          "address": "0xc6a3b08",
+          "size": 8,
+          "bytes": "a8cca62cb459a12c",
+          "sha256": "7eefc69e0875b868ac02446fc2883865d075a70b360296e471441b222ff60e2a",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA6CCA8"
+        }
+      ]
+    },
+    "RH_FW_VECTOR_COMPARE": {
+      "value": "0xc69e309",
+      "source_value": "0xc69e289",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vector_compare",
+      "witnesses": [
+        {
+          "address": "0xc69e308",
+          "size": 28,
+          "bytes": "80b542684b6800af9a4202d003d9012080bd0020fce74ff0ff30f9e7",
+          "sha256": "8a6a332f6dd85597cbd1529f0fd09270250c6893a2053cf90083114e55dc770f",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc69e309"
+    },
+    "RH_FW_VECTOR_DESTROY": {
+      "value": "0xc69f72d",
+      "source_value": "0xc69f6ad",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vector_destroy",
+      "witnesses": [
+        {
+          "address": "0xc69f72c",
+          "size": 46,
+          "bytes": "f8b58368044600af4bb100251426d4e902039d4204db0cf53dfb0023a360f8bd06fb05f3c058f8f4c3fc0135efe7",
+          "sha256": "a575005d0900a5eb16ba1c6393e0aa8da65541605ffcaf2b84c6e96596ca7544",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc69f72d"
+    },
+    "RH_FW_VECTOR_DROP": {
+      "value": "0xc69f75d",
+      "source_value": "0xc69f6dd",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.font_reload_vector_drop",
+      "witnesses": [
+        {
+          "address": "0xc69f75c",
+          "size": 36,
+          "bytes": "90b5044685b000af10220021384681f0cdfb044b394618687c6017f2f8fc1437bd4690bd",
+          "sha256": "79bd9014a520c395f373bfaba145ec7e6b6b33d7422f1945df8d9d50a8a378b0",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc69f75d"
+    },
+    "RH_CN_CLOCK": {
+      "value": "0xc34d45c",
+      "source_value": "0xc34d45c",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_realtime",
+      "witnesses": [
+        {
+          "address": "0xc34d45c",
+          "size": 88,
+          "bytes": "b0b584b000af04463846bbf135f1eff31180802383f311880f4a3d68d2e900315b197d68926841eb0501bd682a440b4daa4208dd02f1444202f5ca02013302f5585241f10001c4e90031a260c3b283f311881037bd46b0bd",
+          "sha256": "b49181c9f0b4ba400eec5b4b5c62b4edfccbadd6516d41cd8c14f650db75f763",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc34d45d"
+    },
+    "RH_CN_LOCALTIME": {
+      "value": "0xc34fcec",
+      "source_value": "0xc34fcec",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_localtime",
+      "witnesses": [
+        {
+          "address": "0xc34fcec",
+          "size": 24,
+          "bytes": "b0b50d46044600affff77eff2a4600212046fff783feb0bd",
+          "sha256": "a15529f993ca4f7afd3af9610364221d58c38d342ac177f5ce5fbecddac0fc5f",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc34fced"
+    },
+    "RH_CN_ROOT_CREATE": {
+      "value": "0xc382ff0",
+      "source_value": "0xc382ff0",
+      "kind": "function",
+      "basis": "equal body; 59/62 anchored callers call the target; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lvx_object_create",
+      "witnesses": [
+        {
+          "address": "0xc382ff0",
+          "size": 12,
+          "bytes": "80b5002100affff7ebff80bd",
+          "sha256": "f8a26a3ed6f9a577c1ba26a3453bbbaeda6df5001e330e540a5c8150213e374a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc382ff1"
+    },
+    "RH_CN_SIZE": {
+      "value": "0xc3836d2",
+      "source_value": "0xc3836d2",
+      "kind": "function",
+      "basis": "equal body; 57/59 anchored callers call the target; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lvx_object_set_size",
+      "witnesses": [
+        {
+          "address": "0xc3836d2",
+          "size": 22,
+          "bytes": "b0b50446154600affff7bdff29462046fff7ddffb0bd",
+          "sha256": "bf0c6a7ba917ae56df32a489f36d6f0afe1419701c5a95f28623e2420ddc6716",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3836d3"
+    },
+    "RH_CN_ROOT_STYLE": {
+      "value": "0xc502de8",
+      "source_value": "0xc502de0",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_root_style",
+      "witnesses": [
+        {
+          "address": "0xc502de8",
+          "size": 116,
+          "bytes": "f0b583b01b4e0446357800af2dbb1a48a7f624f8ff211848a5f6affc82f624f8c0f307237b71c0f30743bb71387179681148a5f693fcff210f48a5f6c1fc29460d48a5f6c7fc29460b48a5f64ffd29460948a9f67ffa0123337020460022064980f6d8f800222046034980f6abf90c37bd46f0bd",
+          "sha256": "f89659c7147727d01bea7195848c85f824372cb89bcb4d19141f08a39c906cca",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc502de9"
+    },
+    "RH_CN_IMAGE_CREATE": {
+      "value": "0xc3ae138",
+      "source_value": "0xc3ae134",
+      "kind": "function",
+      "basis": "equal body; 56/61 anchored callers call the target; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_image_create",
+      "witnesses": [
+        {
+          "address": "0xc3ae138",
+          "size": 12,
+          "bytes": "80b5002100affff7ebff80bd",
+          "sha256": "f8a26a3ed6f9a577c1ba26a3453bbbaeda6df5001e330e540a5c8150213e374a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3ae139"
+    },
+    "RH_CN_IMAGE_SOURCE": {
+      "value": "0xc3b2b90",
+      "source_value": "0xc3b2b8c",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_image_set_src",
+      "witnesses": [
+        {
+          "address": "0xc3b2b90",
+          "size": 384,
+          "bytes": "2de9f0430d468fb004af0446cff71dfb2846d4f70ff9032806460fd13db1584ba12200930220574b5749f3f7d1f82046f9f7e1f92c37bd46bde8f0832846391ddbf73cfc012814d0012e08d02b4618214e4a07f11000fbf706fe07f110054c4bac2200930220474b47490195f3f7b0f8dde7002e45d1fb88d9060ed5d5e9053203b152b9cde90132424bb822009303203c4b3d49f3f79cf8cce794f8603003f00303013b012b02d8606bf9f7c1f865633b8994f8602063647b8906f00306a3647b7922f07f029b0003f07c033343134384f86030204654f1f7f72046fbf771fce36c3bb9236db3f5807f03d1636db3f5807f02d02046cff748fb2046cff7a5fa98e7731edbb2012bd2d8d4f83480a84514d094f86030284603f00303013b012b88bf4ff00008f9f771f8002882d06063b8f1000f02d04046f9f77af8022eb7d100212046cdf708fc002180462046cdf70cfc002181462046cdf710fc6ff0604300220090cde9013229464b46424607f11000f5f715fe3b693b817b697b8197e7",
+          "sha256": "99a244927c2c1adc87db6cea081fb585704d18a81b2b423cb5ae08c472bd0eb0",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3b2b91"
+    },
+    "RH_CN_IMAGE_INFO": {
+      "value": "0xc38e44c",
+      "source_value": "0xc38e44c",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lv_image_decoder_get_info",
+      "witnesses": [
+        {
+          "address": "0xc38e44c",
+          "size": 48,
+          "bytes": "b0b5044694b000af0d46381d4c21f1f701fe20463c61f8f7affc29463875381dfff746ff003818bf01205037bd46b0bd",
+          "sha256": "d4361f8acc28ed7fe5c1db512d477f4910fe7e07827ca494885a657ac78dc524",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc38e44d"
+    },
+    "RH_CN_LABEL_CREATE": {
+      "value": "0xc3ab22c",
+      "source_value": "0xc3ab228",
+      "kind": "function",
+      "basis": "equal body; neighbouring anchors keep their relative function distance; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lvx_label_create",
+      "witnesses": [
+        {
+          "address": "0xc3ab22c",
+          "size": 24,
+          "bytes": "98b5014600af0448d6f71cfa04460021d7f780fe204698bd",
+          "sha256": "3ebe2c6d78e5ac7799ee9c4fea8dd9a35bbed23120b9dff56a936fddb6c2b588",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3ab22d"
+    },
+    "RH_CN_LABEL_TEXT": {
+      "value": "0xc3b38b0",
+      "source_value": "0xc3b38ac",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lvx_label_set_text",
+      "witnesses": [
+        {
+          "address": "0xc3b38b0",
+          "size": 114,
+          "bytes": "2de9f0410d4600af0446cef78efc05b9656b28466df3d4fc461c606ba8420bd194f86c301b0711d431462846f8f7a2fc6063d0b9bde8f08140b194f86c3013f0080803d1f8f764fac4f834803046f8f743fa60630028edd029465af1e5f694f86c3023f0080384f86c302046fff784fde0e7",
+          "sha256": "216db08f9b783958797b49681182ce8ed42d33364d58ef2b8e7b0e77479a32d1",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3b38b1"
+    },
+    "RH_CN_COLOR": {
+      "value": "0xc3839ae",
+      "source_value": "0xc3839ae",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_text_color",
+      "witnesses": [
+        {
+          "address": "0xc3839ae",
+          "size": 32,
+          "bytes": "1346002280b584b000afb981090cb973fa73fa685821fff736fd1037bd4680bd",
+          "sha256": "225f516e9bcc2a9d0920a35d4e0b836dc75bb267b81b435919351184718dec17",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3839af"
+    },
+    "RH_CN_TEXT_ALIGN": {
+      "value": "0xc383a10",
+      "source_value": "0xc383a10",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_text_align",
+      "witnesses": [
+        {
+          "address": "0xc383a10",
+          "size": 22,
+          "bytes": "80b582b0134600af0a465e21fff70afd0837bd4680bd",
+          "sha256": "a9e571a9606faa2b09e8767d05dc5861920874d4f2a25b5818c86fb4f7b75e7a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc383a11"
+    },
+    "RH_CN_FONT_STYLE": {
+      "value": "0xc3839e4",
+      "source_value": "0xc3839e4",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_text_font",
+      "witnesses": [
+        {
+          "address": "0xc3839e4",
+          "size": 22,
+          "bytes": "80b582b0134600af0a465a21fff720fd0837bd4680bd",
+          "sha256": "de444d98d030401545200ad64155bc0e73405277874879b58345aba368784206",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc3839e5"
+    },
+    "RH_CN_ALIGN": {
+      "value": "0xc38361c",
+      "source_value": "0xc38361c",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.lvx_object_align",
+      "witnesses": [
+        {
+          "address": "0xc38361c",
+          "size": 38,
+          "bytes": "f0b5044615461e4683b0002300af0a460a21fff701ff324629462046fff7d5ff0c37bd46f0bd",
+          "sha256": "72900812153e73ae8b204cb913d57e87b45bd24b148551e8509f10a877932f20",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc38361d"
+    },
+    "RH_CN_FONT_RESOLVE": {
+      "value": "0xc509354",
+      "source_value": "0xc50934c",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_font_resolve",
+      "witnesses": [
+        {
+          "address": "0xc509354",
+          "size": 28,
+          "bytes": "80b582b000af3a1d5a2176f605fa012814bf002078680837bd4680bd",
+          "sha256": "0738c29a031b973b22c971be7fcdbc7ef47036e6781ad5014804bd87c0c8c762",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc509355"
+    },
+    "RH_CN_FONT_CREATE": {
+      "value": "0xc495010",
+      "source_value": "0xc495008",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_font_create",
+      "witnesses": [
+        {
+          "address": "0xc495010",
+          "size": 266,
+          "bytes": "2de9f04f164680460c4689b002af07f1080508212846ebf61bf8c7f80880fe81bc81fff7e5fbbb680bb1bb8993b9374b9d2200930320364b364910f789fe364c364b6e2200930220354b3249019410f77ffe19e0334e15f76df933682946d869fff736f904460028e9d03368d3f81c90d9f824326bb92c4b4ff48b72009302202a4b2b4910f764fe20461c37bd46bde8f08f002695e803004ff0280b07f1100a8ae803005b68b342eeddd9f82422b86812687b600bfb062841468bf2edff7b68054600bb83460646d8f82430ab4203dc002ed9d0e661d7e7d8f82020514602eb451248467b603a61fff7f2f87b6840b1002e08bf0646bbf1000f01d0cbf81c0083460135e2e70136cde7",
+          "sha256": "ce61feedf380ebbdc31d7418fba84dfa8a687b61e42ee19487148eb477b92fff",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc495011"
+    },
+    "RH_CN_FONT_DESTROY": {
+      "value": "0xc492504",
+      "source_value": "0xc4924fc",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_font_destroy",
+      "witnesses": [
+        {
+          "address": "0xc492504",
+          "size": 80,
+          "bytes": "2de9f04182b0044602af50b9104b7922009302200f4b104913f720fcbd46bde8f0810e4b9842f9d0c5690d4e55b13368d3f81c802946ed69404683f089f1002df8d1e56133682146d86983f081f1e5e7",
+          "sha256": "bff5814fb065d9e422da3c0ad3bc63fb5927388ad4c845d2931a36e5871215d5",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc492505"
+    },
+    "RH_CN_WEEKDAY": {
+      "value": "0xc542d5c",
+      "source_value": "0xc542cdc",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_weekday",
+      "witnesses": [
+        {
+          "address": "0xc542d5c",
+          "size": 66,
+          "bytes": "98b50c4600af06280ed8dfe800f018040e10121416000b4805f6cefb10210346094a204608f6faf898bd0848f4e70848f2e70848f0e70848eee70848ece70848eae7",
+          "sha256": "0dca9b00cb9566fbaa939df4f4f1d88452f93d2d21895a3278daa8301b590244",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc542d5d"
+    },
+    "RH_CN_SNAPSHOT": {
+      "value": "0xc6a2a48",
+      "source_value": "0xc6a29c8",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_snapshot",
+      "witnesses": [
+        {
+          "address": "0xc6a2a48",
+          "size": 36,
+          "bytes": "f8b504460d46074e00af304687f4fefb294620460cf5e4fe0446304687f44efc2046f8bd",
+          "sha256": "f396b95dffc0c2e130bebe3a79bdc9d901fd3be45a9a8c6f5811fcdf06ee60d0",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc6a2a49"
+    },
+    "RH_CN_SNAPSHOT_FREE": {
+      "value": "0xc6a2aa4",
+      "source_value": "0xc6a2a24",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_snapshot_free",
+      "witnesses": [
+        {
+          "address": "0xc6a2aa4",
+          "size": 20,
+          "bytes": "98b5044600af20b100f5a0fe2046e3f403ff98bd",
+          "sha256": "1b8da3daa1c7fdbad624a20c6701a41313be4387ab19a5909f1e824aaa964ef2",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc6a2aa5"
+    },
+    "RH_CN_OBJECT_DELETE": {
+      "value": "0xc384488",
+      "source_value": "0xc384488",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_object_delete",
+      "witnesses": [
+        {
+          "address": "0xc384488",
+          "size": 136,
+          "bytes": "2de9f04182b090f83340054614f0100402af34d1fdf79dfed5f80480b8f1000f30d12846fcf7befd064640b3d0f8b842631b5c425c412846fcf774ffb8f1000f11d098f8335015f010050cd14046fff75bfb2a4625214046fbf75afb2a4627214046fbf755fb54b1074b542200930220064b074921f030fc0023c6f8b832bd46bde8f0812646d6e7",
+          "sha256": "be3a73adc4847fe939dfca08104bd5bb836ec6b71b649a6ba6a62614c148e708",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc384489"
+    },
+    "RH_CN_GPU_FINISH": {
+      "value": "0xc91e66c",
+      "source_value": "0xc91e58c",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc91e66c",
+          "size": 94,
+          "bytes": "10b5174cd4f8003703f5df7354f823303bb9144b186808b32046bde81040fff733ba01224ff420612046fff776fca8b9fff7b4fc90b92046fff744fa70b92046fff722fa50b9d4f80037013303f00103c4f8003703f5df7344f8230010bd",
+          "sha256": "566f5d7dc2d19222bc4f3f7eddeb65a4fdab7d5b3882c1cf8fe77916a34fccb0",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_gpu_finish",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc91e66d"
+    },
+    "RH_CN_CACHE_SYNC": {
+      "value": "0xc92e6d4",
+      "source_value": "0xc92e5f4",
+      "kind": "function",
+      "basis": "Unique exact 16-byte .177 entry anchor; complete .179 body and ABI reviewed with IDA.",
+      "witnesses": [
+        {
+          "address": "0xc92e6d4",
+          "size": 20,
+          "bytes": "30b1012802d1034b01225a6300207047014bf9e7",
+          "sha256": "e151f6c922c49f59976e22d90c2488ec5ee0fce08ffe19d909002a796933cc84",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_dcache_sync",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc92e6d5"
+    },
+    "RH_CN_CACHE_INVALIDATE": {
+      "value": "0xc7211e8",
+      "source_value": "0xc721248",
+      "kind": "function",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc7211e8",
+          "size": 8,
+          "bytes": "5ff800f015582700",
+          "sha256": "1c1b157c1c2bdd78f2f21b23e585316448b4d47d83e16f5f4b80e3c5b187e91a",
+          "kind": "function-body"
+        }
+      ],
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.background_dcache_invalidate",
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc7211e9"
+    },
+    "RH_CN_PREMULTIPLY": {
+      "value": "0xc9079f8",
+      "source_value": "0xc907918",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_premultiply",
+      "witnesses": [
+        {
+          "address": "0xc9079f8",
+          "size": 352,
+          "bytes": "2de9f04f89b0044602af70b14388d9070bd49a060dd44ff4fb720193504b51490093514b02209ef69ff11c37bd46bde8f08f4278d31f0d2b00f28b80dfe803f00707070789898989893489896d4bdbb2032b08bf4ff480764ff0000518bf434ad0f8108018bfd656b54217db0023a288e188013a3a616278c7e90233073a032a88bf01f1ff337b616388204643f00103638007f108017ef6b7f6c6e708eb85007df6d2f00135dfe70026b0f80690b0f804a0b0f808b0d0f81080b145d6d9002502e07df6c1f00135aa4508eb8500f8d8d8440136f1e74ff00008b0f80890b0f806b00669838809fb0b6a4fea5902c345bcd9002508e01af805100135c7e900237df6bcf0d7e90023ab4206eb4500f2d84e44924408f10108e9e70026b0f806a0b0f804b00389d0f81080b2459ed945464ff0000908e02846a9787b607df69ef07b68033509f10109cb45f4d898440136ebe7074b019200937d22064b064961e7",
+          "sha256": "a5eeb99447e8a81670ce7723a858d1d61f51d77a9e1b24731e69f16aaef4cde3",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc9079f9"
+    },
+    "RH_CN_INVALIDATE_BUF": {
+      "value": "0xc8b7800",
+      "source_value": "0xc8b7720",
+      "kind": "function",
+      "basis": "Exact .179 calendar symbol record, cross-checked in stock calendar generator.",
+      "symbol": "xiaomi-band-11-4.100.179.private_abi.calendar_draw_buf_invalidate",
+      "witnesses": [
+        {
+          "address": "0xc8b7800",
+          "size": 42,
+          "bytes": "90b585b0816900afca685ab100248288c388013a013bc7e90223c7e90044cb68394698471437bd4690bd",
+          "sha256": "50e7c092f35694108b639093146fe1abcc9a4ce449b4881071650b5778c342d6",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc8b7801"
+    },
+    "RH_CN_GENERATE": {
+      "value": "0xc5478f0",
+      "source_value": "0xc547870",
+      "kind": "function",
+      "basis": "mutually unique full-body anchor; known callees consistent",
+      "symbol": "xiaomi-band-11-4.100.179.calendar_icon_generate",
+      "witnesses": [
+        {
+          "address": "0xc5478f0",
+          "size": 414,
+          "bytes": "2de9f047ccb0664b062000af654a664908f630fdc822002107f16800d9f1fcfac821624a07f1680003f62efb07f1680091f13bff5e4b5b4a5e49062008f61afd07f1080005f692fd07f13c0107f1080008f6d4f900207c6dd7f848a03bf650fb7022814611463bf6bcfe4846bbf744fa484666f6e9fb504905466bf611f97022284611463bf6adfe2846b0f743ff284663f654fc8046284663f650fc10220646002107f11c00d9f1b7fa1022002107f12c00d9f1b1fa5346404a102107f11c0003f6e2fa2046002407f12c01fbf7cef9404607f11c016bf673ff304607f12c016bf66effbc80bc712246404679683bf6e6ff2246022140463cf612f83048c1f7b1fc2246014640463bf6f4ff22462223022140463bf60afe48f2ff233b803423bb702246304639683bf6c9ff2246022130463bf6f5ff2348c1f794fc2246014630463bf6d7ff22461123022130463bf6edfd122128465af1ffff044698b9144b104a1949032008f685fc48463cf614fd03200b4b0b4a154908f67cfc07f59877bd46bde8f08748463cf606fd204607f16801b0f70dfe20465bf10cf8eee7",
+          "sha256": "c23a08e43c41c67f8c505dc52d308557d0a204a1d29c123976545817db43023a",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc5478f1"
+    },
+    "RH_CN_FONT_DAY": {
+      "value": "0x200c45dc",
+      "source_value": "0x200c45dc",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc513108",
+          "size": 8,
+          "bytes": "57483b60f6f722f9",
+          "sha256": "787c1251d901bf458110bfb1653b4264e01d81a1f4f24806b34f0839a3a2483e",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =unk_200C45DC"
+        },
+        {
+          "address": "0xc513268",
+          "size": 8,
+          "bytes": "dc450c20cce9a32c",
+          "sha256": "43891d6e6f7f40c7a029c60f7680ec1b54b4c186ce8b37b46d32f7a461aac859",
+          "kind": "data-reference",
+          "disassembly": "DCD unk_200C45DC"
+        },
+        {
+          "address": "0xc51efb0",
+          "size": 8,
+          "bytes": "5948eaf7cff9574a",
+          "sha256": "142ba306aa86ae6a67bb2235e950bd7606e969f9f67181ff2bb472e19cc9adfe",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =unk_200C45DC"
+        },
+        {
+          "address": "0xc51f118",
+          "size": 8,
+          "bytes": "dc450c20c4ecb52c",
+          "sha256": "b7db9521d6c0057c84a3b83e61d7669f2e07f009c51b472a38265ed75b57abc0",
+          "kind": "data-reference",
+          "disassembly": "DCD unk_200C45DC"
+        }
+      ]
+    },
+    "RH_CN_FONT_WEEK": {
+      "value": "0x200c5af0",
+      "source_value": "0x200c5af0",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0xc547a26",
+          "size": 8,
+          "bytes": "2348c1f794fc2246",
+          "sha256": "e122c7cbb364d3e5f1c67a87cb2cdd82a9fe060ea659d9195b91294ebf91b6f5",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =unk_200C5AF0"
+        },
+        {
+          "address": "0xc547ab4",
+          "size": 8,
+          "bytes": "f05a0c20ed72b62c",
+          "sha256": "48071f97a8e151b9750aca3387688fed6484abc100d73613960975b83cbe800d",
+          "kind": "data-reference",
+          "disassembly": "DCD unk_200C5AF0"
+        },
+        {
+          "address": "0xc55ed96",
+          "size": 8,
+          "bytes": "2a49a4f79ef80022",
+          "sha256": "f929207a09bc77914951466e49802abcfb8058c60bdbbc1718a9933d87fd713b",
+          "kind": "data-reference",
+          "disassembly": "LDR             R1, =unk_200C5AF0"
+        },
+        {
+          "address": "0xc55ee40",
+          "size": 8,
+          "bytes": "f05a0c20e1d8b62c",
+          "sha256": "849e47bc862244f166adaef25cecc4e7c713405a7ad07535c79ea02a58bd3699",
+          "kind": "data-reference",
+          "disassembly": "DCD unk_200C5AF0"
+        }
+      ]
+    },
+    "RH_CN_FONT_NAME_DAY": {
+      "value": "0x2cbc66d7",
+      "source_value": "0x2cbc6578",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2cbc66d7",
+          "size": 14,
+          "bytes": "4d6953616e732d4d656469756d00",
+          "sha256": "555bb399144a7bc28c3c20cea655cf3781de5c7da0124b6623e02ccfee258ba7",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc7e6d14",
+          "size": 8,
+          "bytes": "5d48abf49ffb5d49",
+          "sha256": "f2f48e5fcc5ad48db4743b16428bbe1228ea67ef9f250e45aec640f44295d6bc",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =aMisansMedium; \"MiSans-Medium\""
+        },
+        {
+          "address": "0xc7e6e8c",
+          "size": 8,
+          "bytes": "d766bc2cf143bf2c",
+          "sha256": "498e262774c7b7e9a765d079f34b2cd0dbdbf065aca2e7665aedaf60c5e96c65",
+          "kind": "data-reference",
+          "disassembly": "DCD aMisansMedium"
+        },
+        {
+          "address": "0xca6f564",
+          "size": 8,
+          "bytes": "d766bc2c2f54bc2c",
+          "sha256": "59a1bd248bdb58a45d6bd00a0e69a6a4282c0eec45f575b57a85ce1ac79740d1",
+          "kind": "data-reference",
+          "disassembly": "DCD aMisansMedium"
+        }
+      ]
+    },
+    "RH_CN_FONT_NAME_WEEK": {
+      "value": "0x2cbc66c7",
+      "source_value": "0x2cbc6568",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2cbc66c7",
+          "size": 16,
+          "bytes": "4d6953616e732d44656d69626f6c6400",
+          "sha256": "6781af0889996808c10b0f6ef81b6cf9b5c1bc5f15151bb23b068ee4869f4195",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc764244",
+          "size": 8,
+          "bytes": "264b3b60fb8823f0",
+          "sha256": "d4394ea09d00f7a26fd914b19d0d85513f956a83911726c24265e0c4f3378b7b",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =aMisansDemibold; \"MiSans-Demibold\""
+        },
+        {
+          "address": "0xc7642e0",
+          "size": 8,
+          "bytes": "c766bc2c382aa12c",
+          "sha256": "e2666940e528503061d88795ffd97a67a6eededd67102143f80a001471989e47",
+          "kind": "data-reference",
+          "disassembly": "DCD aMisansDemibold"
+        },
+        {
+          "address": "0xc7e6cfc",
+          "size": 8,
+          "bytes": "5f48abf4abfb5f49",
+          "sha256": "08acaaca763a0d424ef440a46a2c857757f8d7716d2d67ebfea4be37cb7aee85",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, =aMisansDemibold; \"MiSans-Demibold\""
+        },
+        {
+          "address": "0xc7e6e7c",
+          "size": 8,
+          "bytes": "c766bc2c6043bf2c",
+          "sha256": "9da40b52a3ebbdf1388542a86fbaf8a72c68e5903f3db53fef007ee000f0ffde",
+          "kind": "data-reference",
+          "disassembly": "DCD aMisansDemibold"
+        }
+      ]
+    },
+    "RH_CN_FONT_FALLBACK": {
+      "value": "0x2ca12a38",
+      "source_value": "0x2ca12930",
+      "kind": "data",
+      "basis": "Exact AP literal, initializer or accessor recovered with IDA; see witnesses and README.",
+      "witnesses": [
+        {
+          "address": "0x2ca12a38",
+          "size": 36,
+          "bytes": "3d62390c9560390c00000000100000000300000000ff01000827a12c0000000000000000",
+          "sha256": "9d92b1c817a05fff46c5b79b8a15167d74832cae0e1bf340233c9db1623a29f9",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc380252",
+          "size": 8,
+          "bytes": "194b26e00123a4f1",
+          "sha256": "eb1135f1903a88a7904fcff0fd8f387ff9f999e903bbeb11f96115ab99b52780",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =off_2CA12A38"
+        },
+        {
+          "address": "0xc3802b8",
+          "size": 8,
+          "bytes": "382aa12c8d000101",
+          "sha256": "4e051a24595defc50c359ddece6347a8b4b00d2e3e4d75081b7b10a2d5dc7185",
+          "kind": "data-reference",
+          "disassembly": "DCD off_2CA12A38"
+        },
+        {
+          "address": "0xc384fd6",
+          "size": 8,
+          "bytes": "bb4b9a4201f02183",
+          "sha256": "9897e61ad5cae2cc9a2edcaf7ce8f230d47b71c175a088f85f4e64e1c2af294d",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =off_2CA12A38"
+        },
+        {
+          "address": "0xc384ffe",
+          "size": 8,
+          "bytes": "b14bb14ac4e90633",
+          "sha256": "36c97895bde682f8018e572bf0f653fc47730b3e2d56783e70c1832a99af8056",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, =off_2CA12A38"
+        }
+      ]
+    },
+    "RH_CN_RECEIPT_GENERATE": {
+      "value": "0x47f0e92d",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc5478f0",
+          "bytes": "2de9f047",
+          "size": 4,
+          "sha256": "f1231a43486723ba9f8f321e7c7721e9cf5fab829d4319788572fe84e4bb067c"
+        }
+      ],
+      "source_value": "0x47f0e92d"
+    },
+    "RH_CN_RECEIPT_GENERATE_NEXT": {
+      "value": "0x4b66b0cc",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc5478f4",
+          "bytes": "ccb0664b",
+          "size": 4,
+          "sha256": "4f095153e5bdb5ffdb093f5c32333225dc7df8034db61fd25e8cad4728186506"
+        }
+      ],
+      "source_value": "0x4b66b0cc"
+    },
+    "RH_CN_RECEIPT_CLOCK": {
+      "value": "0xb084b5b0",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc34d45c",
+          "bytes": "b0b584b0",
+          "size": 4,
+          "sha256": "7ae1b7f747b68a788dd50f5f7d0c6590d1ea8d0dd0cc54d63b52c2d54562dca8"
+        }
+      ],
+      "source_value": "0xb084b5b0"
+    },
+    "RH_CN_RECEIPT_LOCALTIME": {
+      "value": "0x460db5b0",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc34fcec",
+          "bytes": "b0b50d46",
+          "size": 4,
+          "sha256": "e870477898290bf56e2b0accaf3846db508158ec31aca89d80cb5fef30d43a16"
+        }
+      ],
+      "source_value": "0x460db5b0"
+    },
+    "RH_CN_RECEIPT_SNAPSHOT": {
+      "value": "0x4604b5f8",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc6a2a48",
+          "bytes": "f8b50446",
+          "size": 4,
+          "sha256": "77a2f1d7b9775006bd0c6f0ffcd0d9b2322ae5cac76122ca9082374988df3d97"
+        }
+      ],
+      "source_value": "0x4604b5f8"
+    },
+    "RH_CN_RECEIPT_FONT_CREATE": {
+      "value": "0x4ff0e92d",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc495010",
+          "bytes": "2de9f04f",
+          "size": 4,
+          "sha256": "cfa045938b57940b57930f97cd7cdf3e1a8c3b1ddb72c2609b95b97c1b1921ed"
+        }
+      ],
+      "source_value": "0x4ff0e92d"
+    },
+    "RH_CN_RECEIPT_FONT_DESTROY": {
+      "value": "0x41f0e92d",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc492504",
+          "bytes": "2de9f041",
+          "size": 4,
+          "sha256": "90d0f4dca8b9cfa14674e9ea1f57cd8990bc17f089a15557bb19199796fb4535"
+        }
+      ],
+      "source_value": "0x41f0e92d"
+    },
+    "RH_CN_RECEIPT_GPU_FINISH": {
+      "value": "0x4c17b510",
+      "kind": "receipt",
+      "witnesses": [
+        {
+          "address": "0xc91e66c",
+          "bytes": "10b5174c",
+          "size": 4,
+          "sha256": "1e38fbf966de11f4c41a93f278a0c21913ebf7091aca34b0d8b5b23b26c65e74"
+        }
+      ],
+      "source_value": "0x4c17b510"
+    },
+    "QA_SERVICE_SLOT": {
+      "value": "0x20084e74",
+      "source_value": "0x20084e74",
+      "kind": "data",
+      "basis": "Exact .179 app_install/lookup and initialized service table; see README.",
+      "witnesses": [
+        {
+          "address": "0x2cc50348",
+          "size": 4,
+          "bytes": "ccb5a32c",
+          "sha256": "07898de36697d8b751bd49f4c659fa648888c70526c3af5d63c83f220c320edc",
+          "kind": "startup-data-initializer",
+          "runtime_address": "0x20084e74"
+        },
+        {
+          "address": "0xc4f7304",
+          "size": 8,
+          "bytes": "db691349d3f8b030",
+          "sha256": "e970effe777d4cd810ed944412d4937a620dffd1dbaa84595bc79fa5d971fda9",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        },
+        {
+          "address": "0xc4f887e",
+          "size": 8,
+          "bytes": "db691048d3f8b030",
+          "sha256": "c9f299b0080ab3e769e74908706689e475d51917840e38ea9092f6ef7b2bb957",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        },
+        {
+          "address": "0xc4f88d2",
+          "size": 8,
+          "bytes": "db691048d3f8b030",
+          "sha256": "c9f299b0080ab3e769e74908706689e475d51917840e38ea9092f6ef7b2bb957",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        },
+        {
+          "address": "0xc4f9bb0",
+          "size": 8,
+          "bytes": "eb692246d3f8ac30",
+          "sha256": "7d2576f4913bd5cb18524bdb68ea9e3ca6432ab43ed70760d588fb3d295b45af",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R5,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        }
+      ]
+    },
+    "QA_REGISTRY_SLOT": {
+      "value": "0x20084e6c",
+      "source_value": "0x20084e6c",
+      "kind": "data",
+      "basis": "Exact .179 app_install/lookup and initialized service table; see README.",
+      "witnesses": [
+        {
+          "address": "0x2cc50340",
+          "size": 4,
+          "bytes": "00000000",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "kind": "startup-data-initializer",
+          "runtime_address": "0x20084e6c"
+        },
+        {
+          "address": "0xc5006f8",
+          "size": 8,
+          "bytes": "6061002840f0e781",
+          "sha256": "1df3ac321faefa08859827d201bcb6b569a40ed5edd8ee945a6e5f138ae39f95",
+          "kind": "data-reference",
+          "disassembly": "STR             R0, [R4,#(dword_20084E6C - 0x20084E58)]"
+        },
+        {
+          "address": "0xc69f9d4",
+          "size": 8,
+          "bytes": "686931f063fe0022",
+          "sha256": "bbb560f8d874835bb00b59574fe7a57c969b55e753f85bb01e39b0dc31c7c164",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R5,#(dword_20084E6C - 0x20084E58)]"
+        },
+        {
+          "address": "0xc6a5600",
+          "size": 8,
+          "bytes": "68692bf065fdeb69",
+          "sha256": "9abf6f75f6a93c9e57ef82a720372b955e919d3cc58ed2a0de197a3994efff27",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R5,#(dword_20084E6C - 0x20084E58)]"
+        },
+        {
+          "address": "0xc6a9876",
+          "size": 8,
+          "bytes": "68691e442b89ae81",
+          "sha256": "c912e7a032ae6b3dc0849fdf3b7b7cf6f71b7dffd1539d8ddf4fda84652ba91a",
+          "kind": "data-reference",
+          "disassembly": "LDR             R0, [R5,#(dword_20084E6C - 0x20084E58)]"
+        }
+      ]
+    },
+    "QA_SERVICE": {
+      "value": "0x2ca3b5cc",
+      "source_value": "0x2ca3b4b4",
+      "kind": "data",
+      "basis": "Exact .179 app_install/lookup and initialized service table; see README.",
+      "witnesses": [
+        {
+          "address": "0x2ca3b5cc",
+          "size": 36,
+          "bytes": "31e4690c13f9690ce1fa690cebfa690cf5fa690c5de4690c6de4690c7de4690cb1e4690c",
+          "sha256": "d30f28257a005b8fc3f7a1ff5d9e6d0557de06afcc8d82dfa5918a4a8f4189dc",
+          "kind": "data-object"
+        },
+        {
+          "address": "0xc4f7304",
+          "size": 8,
+          "bytes": "db691349d3f8b030",
+          "sha256": "e970effe777d4cd810ed944412d4937a620dffd1dbaa84595bc79fa5d971fda9",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        },
+        {
+          "address": "0xc4f887e",
+          "size": 8,
+          "bytes": "db691048d3f8b030",
+          "sha256": "c9f299b0080ab3e769e74908706689e475d51917840e38ea9092f6ef7b2bb957",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        },
+        {
+          "address": "0xc4f88d2",
+          "size": 8,
+          "bytes": "db691048d3f8b030",
+          "sha256": "c9f299b0080ab3e769e74908706689e475d51917840e38ea9092f6ef7b2bb957",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R3,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        },
+        {
+          "address": "0xc4f9bb0",
+          "size": 8,
+          "bytes": "eb692246d3f8ac30",
+          "sha256": "7d2576f4913bd5cb18524bdb68ea9e3ca6432ab43ed70760d588fb3d295b45af",
+          "kind": "data-reference",
+          "disassembly": "LDR             R3, [R5,#(off_20084E74 - 0x20084E58)]; off_2CA3B5CC"
+        }
+      ]
+    },
+    "QA_LOOKUP": {
+      "value": "0xc69faeb",
+      "source_value": "0xc69fa6b",
+      "kind": "function",
+      "basis": "Exact .179 app_install/lookup and initialized service table; see README.",
+      "symbol": "xiaomi-band-11-4.100.179.app_lookup_package",
+      "witnesses": [
+        {
+          "address": "0xc69faea",
+          "size": 10,
+          "bytes": "80b500af0bf00bf880bd",
+          "sha256": "a67024cd98157404fae905668a3cdf63c25e2411944f753d27b70b4d2df1d960",
+          "kind": "function-body"
+        }
+      ],
+      "framework_status": "STATIC_RECOVERED",
+      "framework_policy": "restricted",
+      "framework_approval_state": "PENDING",
+      "framework_callable_address": "0xc69faeb"
+    },
+    "QA_PACKAGE_OFFSET": {
+      "value": "0xc",
+      "source_value": "0xc",
+      "kind": "abi",
+      "basis": "Exact .179 app_install/lookup and initialized service table; see README.",
+      "witnesses": [
+        {
+          "address": "0xc6a9798",
+          "size": 406,
+          "bytes": "2de9f04782b088461646054602af002873d0c368002b70d0808a01f0eff800286bd1eb7d0bb90123eb752b7e0bb901232b765020a7f48efe0446d0b15021d6f443fc50222946204677f016fee868a8f484f8e060286910b1a8f47ff82061e86910b1a8f47af8e061286a10b1a8f475f82062494d2b685a68c4e900325a6814605c60a3680bb9454ba36006f102094fea89094846a7f45efea063002844d04a46002177f065fb0a20d4f838902ff09dffc9f80400a36b5a68002a35d04ff00009dff8e8a01e80a8f10408b14518db94f84830224623f0010384f84830ab8968691e442b89ae81e16801332b8127f00cff00221c20e16840f277febd46bde8f08758f8040fdaf80c309847a36bd8f8002009f1020143f82120a36b1169586827f0f3fe09f10109d0e7a36b5bb1586820b13ef260fe0022a36b5a60a06ba3f4d2f90023a363d4e900320bb9002ad5d01360626820465a600023c4e90033636a98470f4b00900f4a04200f49a6f42ffde06808b1a3f4b7f9206908b1a3f4b3f9e06908b1a3f4aff9206a08b1a3f4abf92046a3f4a8f9b1e7",
+          "sha256": "b8aeb0addf6487fd02425d5881336edd4ceb7d8a9bf67baa8ba7b0440176ff08",
+          "kind": "function-body"
+        }
+      ]
+    },
+    "QA_ICON_OFFSET": {
+      "value": "0x10",
+      "source_value": "0x10",
+      "kind": "abi",
+      "basis": "Exact .179 app_install/lookup and initialized service table; see README.",
+      "witnesses": [
+        {
+          "address": "0xc6a9798",
+          "size": 406,
+          "bytes": "2de9f04782b088461646054602af002873d0c368002b70d0808a01f0eff800286bd1eb7d0bb90123eb752b7e0bb901232b765020a7f48efe0446d0b15021d6f443fc50222946204677f016fee868a8f484f8e060286910b1a8f47ff82061e86910b1a8f47af8e061286a10b1a8f475f82062494d2b685a68c4e900325a6814605c60a3680bb9454ba36006f102094fea89094846a7f45efea063002844d04a46002177f065fb0a20d4f838902ff09dffc9f80400a36b5a68002a35d04ff00009dff8e8a01e80a8f10408b14518db94f84830224623f0010384f84830ab8968691e442b89ae81e16801332b8127f00cff00221c20e16840f277febd46bde8f08758f8040fdaf80c309847a36bd8f8002009f1020143f82120a36b1169586827f0f3fe09f10109d0e7a36b5bb1586820b13ef260fe0022a36b5a60a06ba3f4d2f90023a363d4e900320bb9002ad5d01360626820465a600023c4e90033636a98470f4b00900f4a04200f49a6f42ffde06808b1a3f4b7f9206908b1a3f4b3f9e06908b1a3f4aff9206a08b1a3f4abf92046a3f4a8f9b1e7",
+          "sha256": "b8aeb0addf6487fd02425d5881336edd4ceb7d8a9bf67baa8ba7b0440176ff08",
+          "kind": "function-body"
+        }
+      ]
+    },
+    "QA_FLASH_END": {
+      "value": "0xcd00000",
+      "source_value": "0xcd00000",
+      "kind": "abi",
+      "basis": "Conservative existing Band11 readability bound; exact .179 AP XIP [0x0c0c0000,0x0cc793c4) is contained, not a native function address.",
+      "witnesses": [
+        {
+          "address": "0xcc793c0",
+          "size": 4,
+          "bytes": "00000c28",
+          "sha256": "674559062a3d536a79eb910fdc59d024f05ecd7430d6b5ce5ee3d75a8b28bb3d",
+          "kind": "image-footer"
+        }
+      ]
+    },
+    "QA_APP_ROOT": {
+      "value": "\"/data/quickapp/app/\"",
+      "source_value": "\"/data/quickapp/app/\"",
+      "kind": "string",
+      "basis": "Native quickapp app root; preserved exact same-model path contract.",
+      "witnesses": [
+        {
+          "address": "0x2cb792e7",
+          "size": 20,
+          "bytes": "2f646174612f717569636b6170702f6170702f00",
+          "sha256": "80cf7c42a475ed8e049aad18f18cd323acdd126d1ccc465a0e82ee65f02bdabb",
+          "kind": "string"
+        }
+      ]
+    },
+    "RH_LB_MEMORY_BARRIER": {
+      "value": "__asm__ volatile(\"dsb sy\" ::: \"memory\")",
+      "kind": "compiler-expression",
+      "basis": "Unchanged architectural DSB SY; emits no firmware address."
+    }
+  },
+  "helpers": {
+    "0xc720f08": {
+      "address": "0xc720f08",
+      "witnesses": [
+        {
+          "address": "0xc720f08",
+          "size": 8,
+          "bytes": "5ff800f0adbf2600",
+          "sha256": "48d3c83fe6630c10116be94403d0ab43c505c55d715cfd03c300a75a128be6f0",
+          "kind": "function-body"
+        }
+      ],
+      "basis": "Exact .179 generator/callee body; zero/format/alignment/pixel helper selected by native call sites."
+    },
+    "0xc34af78": {
+      "address": "0xc34af78",
+      "witnesses": [
+        {
+          "address": "0xc34af78",
+          "size": 88,
+          "bytes": "0cb480b58ab0144b00afd9b1134a01393a61134a3862c7e9052300230022c7e9022300237962037007f13402396b07f108007a60fff772ff2837bd46bde8804002b07047074a3a61074ac7e9052300220023c7e90223e7e7",
+          "sha256": "740f40835a1e8a1c5448ccaca3bda3d92bac0ff08cf71a536adaf3ff16d8658b",
+          "kind": "function-body"
+        }
+      ],
+      "basis": "Exact .179 generator/callee body; zero/format/alignment/pixel helper selected by native call sites."
+    },
+    "0xc4f87fc": {
+      "address": "0xc4f8804",
+      "witnesses": [
+        {
+          "address": "0xc4f8804",
+          "size": 16,
+          "bytes": "002380b51a46092100af8af605ff80bd",
+          "sha256": "84fc7abe80f25acced4779de5fd176148f7f34a08605d6b1e2949d5b12213481",
+          "kind": "function-body"
+        }
+      ],
+      "basis": "Exact .179 generator/callee body; zero/format/alignment/pixel helper selected by native call sites."
+    },
+    "0xc384c40": {
+      "address": "0xc384c40",
+      "witnesses": [
+        {
+          "address": "0xc384c40",
+          "size": 52,
+          "bytes": "80b5c17800afff2903d019b90421fbf707fa80bd827812fb01f212128270427812fb01f212124270027812fb01f212120270eee7",
+          "sha256": "2ad2c363be9ad249b6ca72119760dbdd55795858206a1fa7aac3a4ed6535245a",
+          "kind": "function-body"
+        }
+      ],
+      "basis": "Exact .179 generator/callee body; zero/format/alignment/pixel helper selected by native call sites."
+    },
+    "0xc547a0e": {
+      "address": "0xc547a8e",
+      "kind": "function-end",
+      "basis": "IDA end of exact .179 calendar generator; half-open code interval [0xc5478f0,0xc547a8e)."
+    }
+  },
+  "unresolved": [],
+  "framework_dependency": {
+    "target_id": "xiaomi-band-11-4.100.179",
+    "minimum_revision": 2,
+    "correction": "background_visible_area callable_address=0xc381d4d, status=STATIC_RECOVERED, proof.static=recovered; evidence EVID-RESOURCE-VISIBILITY-4179-001 verdict STATIC_RECOVERED; generated veneer/Rust refreshed; restricted/PENDING/not_probed retained; other candidates unchanged"
+  }
+}

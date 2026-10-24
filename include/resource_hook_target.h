@@ -2,18 +2,22 @@
 #define RESOURCE_HOOK_TARGET_H
 
 /* Exact AP-image addresses, not a version-range ABI. Callable addresses carry
- * the Thumb bit. Default remains 4.100.139; .155 requires RH_TARGET_155; 10 Pro
- * 3.101.043 requires RH_TARGET_1043 and the matching Canopus target headers.
+ * the Thumb bit. Default remains 4.100.139; .155/.177/.179 require their
+ * respective RH_TARGET_* flag; 10 Pro 3.101.043 requires RH_TARGET_1043 and
+ * the matching Canopus target headers.
  * Static evidence and hardware gates:
  * targets/xiaomi-band-11-4.100.139/ui-reload-audit.md,
  * targets/xiaomi-band-11-4.100.155/ui-reload-audit.md, and
  * targets/xiaomi-band-10-pro-3.101.043/ui-reload-audit.md. */
-#if ((defined(RH_TARGET_177) && RH_TARGET_177) + \
+#if ((defined(RH_TARGET_179) && RH_TARGET_179) + \
+     (defined(RH_TARGET_177) && RH_TARGET_177) + \
      (defined(RH_TARGET_155) && RH_TARGET_155) + \
      (defined(RH_TARGET_1043) && RH_TARGET_1043)) > 1
 #error "Select exactly one Resource Hook target"
 #endif
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if defined(RH_TARGET_179) && RH_TARGET_179
+#include "resource_hook_target_179.h"
+#elif defined(RH_TARGET_177) && RH_TARGET_177
 #include "resource_hook_target_177.h"
 #else
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
@@ -203,9 +207,13 @@
 #define RH_FW_FONT_RESOLVE_PATH   0x0c490eddu
 #endif
 
-#endif /* .177 versus legacy targets */
+#endif /* .177/.179 versus legacy targets */
 /* Feature capability is exact-target based; never enable on .043. */
-#if defined(RH_TARGET_177) && RH_TARGET_177
+#if defined(RH_TARGET_179) && RH_TARGET_179
+#define RH_Q66_BACKGROUND 1
+#define RH_Q66_CALENDAR 1
+#include "resource_hook_q66_179.h"
+#elif defined(RH_TARGET_177) && RH_TARGET_177
 #define RH_Q66_BACKGROUND 1
 #define RH_Q66_CALENDAR 1
 #include "resource_hook_q66_177.h"

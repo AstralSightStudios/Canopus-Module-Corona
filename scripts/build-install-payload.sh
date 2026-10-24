@@ -7,7 +7,7 @@ TARGET_ID=${1:?usage: build-install-payload.sh target-id NEW-output-dir}
 OUT=${2:?usage: build-install-payload.sh target-id NEW-output-dir}
 [ "$#" -eq 2 ] || { printf 'Expected target-id and new output directory.\n' >&2; exit 1; }
 case "$TARGET_ID" in
-    xiaomi-band-11-4.100.177|xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043) ;;
+    xiaomi-band-11-4.100.179|xiaomi-band-11-4.100.177|xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043) ;;
     *) printf 'Unsupported target: %s\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 [ ! -e "$OUT" ] && [ ! -L "$OUT" ] || { printf 'Output already exists; use a new directory: %s\n' "$OUT" >&2; exit 1; }
@@ -36,6 +36,7 @@ python3 - "$ROOT" "$STAGE" "$TARGET_ID" <<'PY'
 from pathlib import Path
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -55,6 +56,8 @@ with tempfile.TemporaryDirectory(prefix='canopus-project-', dir=stage) as tempor
     if count != 1:
         raise ValueError('expected one [targets] table in Canopus.toml')
     (project / 'Canopus.toml').write_text(selected)
+    runpy.run_path(str(root / 'scripts/build_options.py'))['stage_resources'](
+        root, project, manifest, [target])
     artifact = project / 'build' / target / (module['id'] + '.elf')
     artifact.parent.mkdir(parents=True)
     shutil.copyfile(root / 'build' / target / artifact.name, artifact)
@@ -98,7 +101,7 @@ metadata = {
     "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi2",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",
     "module_build_id": "resource-hook-0.3.0", "font_reload": True,
-    "font_reload_device_status": ("NOT_PROBED" if sys.argv[2].endswith('4.100.177')
+    "font_reload_device_status": ("NOT_PROBED" if sys.argv[2].endswith(('4.100.177', '4.100.179'))
                                   else "USER_REPORTED_PASS"),
     "gpu_recovery": "UNSUPPORTED", "framework_restart_safety": "UNSUPPORTED",
     "automatic_ui_restart": False, "complete_cache_refresh": False,

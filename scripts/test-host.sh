@@ -54,9 +54,11 @@ CC="$CC" python3 "$ROOT/tests/test_p67_battery.py"
     "$ROOT/tests/test_module.c" -o "$ROOT/build/test_module_1043_diagnostics"
 "$ROOT/build/test_module_1043_diagnostics" --blur-diagnostics
 # Compile the actual shared transaction for each exact address selection.
-# Fonts and backgrounds are ordinary runtime features on all four targets.
-for target in 139 155 177 1043; do
-    if [ "$target" = 177 ]; then
+# Fonts and backgrounds are ordinary runtime features on all exact targets.
+for target in 139 155 177 179 1043; do
+    if [ "$target" = 179 ]; then
+        TARGET_DEFINE=-DRH_TARGET_179=1
+    elif [ "$target" = 177 ]; then
         TARGET_DEFINE=-DRH_TARGET_177=1
     elif [ "$target" = 1043 ]; then
         TARGET_DEFINE=-DRH_TARGET_1043=1
@@ -127,6 +129,7 @@ python3 "$ROOT/tests/test_build_delivery.py"
     -o "$ROOT/build/check-config"
 python3 "$ROOT/tests/test_config_cli.py"
 python3 "$ROOT/tests/test_target_receipts.py"
+python3 "$ROOT/tests/test_target_179.py"
 python3 "$ROOT/tests/test_quickapp_allowlist.py"
 python3 "$ROOT/tests/firmware_support_test.py"
 

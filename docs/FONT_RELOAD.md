@@ -1,7 +1,8 @@
 # Font hot reload
 
 Font hot reload is part of the default Resource Hook module for
-`xiaomi-band-11-4.100.139`, `xiaomi-band-11-4.100.155` and
+`xiaomi-band-11-4.100.139`, `xiaomi-band-11-4.100.155`,
+`xiaomi-band-11-4.100.177`, `xiaomi-band-11-4.100.179` and
 `xiaomi-band-10-pro-3.101.043`. There is no experimental compile option or
 registry-only fallback. No automatic page rebuild, GPU wait/reset or global
 cache drop is added.
@@ -13,10 +14,15 @@ recovers its 45 identities, including startup-copied PSRAM callbacks. Its face
 payload is 24 bytes rather than 28; vector key-drop takes the object in r1.
 These are explicit target contracts, not a blanket relocation delta.
 
+The [.179 target record](../targets/xiaomi-band-11-4.100.179/README.md)
+pins its AP hash and individually mapped font/cache identities. Its adapter is
+static recovery only: **NOT_PROBED**, with no inherited device acceptance or
+framework API approval from earlier targets.
+
 ## Device acceptance
 
 The user reports that font reload has passed physical-device acceptance on
-**all three supported firmware targets** and requests its promotion to the
+**the three legacy targets .139 / .155 / .043** and requests its promotion to the
 ordinary build. Status: **USER_REPORTED_PASS** for the normal font-reload
 workflow. This is a user report, not an independently instrumented GPU, OOM,
 restart or endurance test. No per-target artifact hashes or step-by-step

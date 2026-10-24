@@ -12,6 +12,16 @@
 #define QA_ICON_OFFSET 12u
 #define QA_APP_ROOT "/data/app/"
 #define QA_FLASH_END 0x0cde8190u
+#elif defined(RH_TARGET_179) && RH_TARGET_179
+/* Exact .179 DATA initializer and package registry; see target address map. */
+#define QA_SERVICE_SLOT 0x20084e74u
+#define QA_REGISTRY_SLOT 0x20084e6cu
+#define QA_SERVICE 0x2ca3b5ccu
+#define QA_LOOKUP 0x0c69faebu
+#define QA_PACKAGE_OFFSET 12u
+#define QA_ICON_OFFSET 16u
+#define QA_APP_ROOT "/data/quickapp/app/"
+#define QA_FLASH_END 0x0cd00000u
 #elif defined(RH_TARGET_177) && RH_TARGET_177
 #define QA_SERVICE_SLOT 0x20084e74u
 #define QA_REGISTRY_SLOT 0x20084e6cu

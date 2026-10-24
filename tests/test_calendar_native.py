@@ -30,10 +30,17 @@ if not SDK_DEFAULT.exists():
 SDK = Path(os.environ.get('CANOPUS_ROOT', SDK_DEFAULT))
 TARGET = os.environ.get('RH_CALENDAR_TARGET', '177')
 AP = Path(os.environ.get('RH_CALENDAR_FIRMWARE', os.environ.get('RH_AP_' + TARGET,
-    str(SDK / ('fwbins/xiaomi-band-11-4.100.' + TARGET) / 'vela_ap.bin'))))
+    os.environ.get('RESOURCE_HOOK_FIRMWARE',
+        str(SDK / ('fwbins/xiaomi-band-11-4.100.' + TARGET) / 'vela_ap.bin')))))
 SHA = 'ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b'
 ADDRESS_MAP = {}
-if TARGET in ('139', '155'):
+if TARGET == '179':
+    target_root = ROOT / 'targets/xiaomi-band-11-4.100.179'
+    evidence = json.loads((target_root / 'address-map.json').read_text())
+    SHA = evidence['firmware_sha256']
+    ADDRESS_MAP = {int(source, 16): int(destination, 16)
+                   for source, destination in evidence['addresses'].items()}
+elif TARGET in ('139', '155'):
     evidence = json.loads((ROOT / ('targets/xiaomi-band-11-4.100.' + TARGET) /
         'background-calendar-evidence.json').read_text())
     SHA = evidence['ap_sha256']
@@ -57,6 +64,8 @@ class NativeCalendar(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not AP.exists():
+            if TARGET == '179':
+                raise RuntimeError('exact .179 AP unavailable; set RH_CALENDAR_FIRMWARE')
             raise unittest.SkipTest('exact selected AP unavailable; set RH_CALENDAR_FIRMWARE')
         cls.firmware = AP.read_bytes()
         if hashlib.sha256(cls.firmware).hexdigest() != SHA:
@@ -70,7 +79,7 @@ class NativeCalendar(unittest.TestCase):
             'int rh_platform_write(int f,const void *p,uint32_t n){(void)f;(void)p;(void)n;return -1;}\n'
             'void rh_platform_close(int f){(void)f;}\n')
         cls.images = {}
-        for target in ('177', '139', '155', '1043'):
+        for target in ('177', '179', '139', '155', '1043'):
             objs = []
             for path in [ROOT / 'src/calendar_native.c', ROOT / 'src/calendar_config.c', shim]:
                 obj = tmp / (target + '-' + path.stem + '.o')
@@ -379,7 +388,7 @@ class NativeCalendar(unittest.TestCase):
         self.assertEqual(self.trace, [])
 
     def test_all_targets_export_date_and_render_without_capability_probe(self):
-        for target in ('139', '155', '177', '1043'):
+        for target in ('139', '155', '177', '179', '1043'):
             with self.subTest(target=target):
                 self.machine(target)
                 self.assertIn('rh_calendar_native_date', self.symbols)

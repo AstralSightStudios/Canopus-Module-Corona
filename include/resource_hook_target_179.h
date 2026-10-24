@@ -1,0 +1,113 @@
+#ifndef RESOURCE_HOOK_TARGET_179_H
+#define RESOURCE_HOOK_TARGET_179_H
+
+/* Exact Xiaomi Band 11 4.100.179 AP identities.
+ * AP SHA256: 307adabe0ff61c77be73d045a8260e279cddd131c7a535a2678eb34199278a2b.
+ * See targets/xiaomi-band-11-4.100.179/address-map.json and README.md.
+ * STATIC_RECOVERED; physical device NOT_PROBED. Framework restricted APIs
+ * retain their existing policy and approval states.
+ * Pointer comparisons retain Thumb bits; helpers whose call wrapper adds
+ * the bit retain even entries. No whole-image relocation delta is used.
+ * Metrics destroy is the reviewed local empty callback at 0x0c39fcfc.
+ */
+
+#define RH_CALENDAR_BACKGROUND "/resource/app/perpetual_calendar/launcher_icon.bin"
+#define RH_CALENDAR_OUTPUT "/data/app/perpetual_calendar/calendar_icon.bin"
+#define RH_FW_CACHE_DROP 0x0c8b716bu
+#define RH_FW_CACHE_RELEASE 0x0c8b7c4du
+#define RH_FW_CALENDAR_GENERATE 0x0c5478f1u
+#define RH_FW_CALENDAR_LAUNCHER_SLOT 0x200c5d88u
+#define RH_FW_CALENDAR_PUBLISH 0x0c54781du
+#define RH_FW_DISPLAY_HEIGHT 0x0c381651u
+#define RH_FW_DISPLAY_SLOT 0x200bd0a4u
+#define RH_FW_DISPLAY_WIDTH 0x0c381631u
+#define RH_FW_FONT_ADD_PATH 0x0c492459u
+#define RH_FW_FONT_REMOVE_PATH 0x0c9031bdu
+#define RH_FW_FONT_RESOLVE_PATH 0x0c490e55u
+#define RH_FW_FONT_SET_PIXEL_SIZE 0x0c8b6f21u
+#define RH_FW_FR_ALLOC 0x0c3abd88u
+#define RH_FW_FR_CACHE_ACQUIRE 0x0c3a37c8u
+#define RH_FW_FR_CACHE_ACQUIRE_CREATE 0x0c3a7aa4u
+#define RH_FW_FR_CACHE_INIT 0x0c3a9d74u
+#define RH_FW_FR_CONTEXT_SLOT 0x200bd290u
+#define RH_FW_FR_DISPLAY_LIST 0x200bd094u
+#define RH_FW_FR_DRAW_SLOT 0x200bd1bcu
+#define RH_FW_FR_DROP_FACE_ID 0x0c39a38cu
+#define RH_FW_FR_FACE_COMPARE 0x0c3966edu
+#define RH_FW_FR_FACE_CREATE 0x0c39671du
+#define RH_FW_FR_FACE_DESTROY 0x0c396a8du
+#define RH_FW_FR_FACE_SIZE 28u
+#define RH_FW_FR_FREE 0x0c3abdc0u
+#define RH_FW_FR_FT_MUL_FIX 0x0c424274u
+#define RH_FW_FR_GLYPH_PENDING_FREE 0x0c399acbu
+#define RH_FW_FR_GLYPH_RELEASE 0x0c3a08fbu
+#define RH_FW_FR_GRADIENT_PENDING_FREE 0x0c395b39u
+#define RH_FW_FR_IMAGE_PENDING_FREE 0x0c395b49u
+#define RH_FW_FR_INITIALIZED_SLOT 0x200bd090u
+#define RH_FW_FR_LIST_REMOVE 0x0c3a4644u
+#define RH_FW_FR_METRICS 0x0c396ac5u
+#define RH_FW_FR_METRICS_COMPARE 0x0c39fd03u
+#define RH_FW_FR_METRICS_CREATE 0x0c3a5e1du
+#define RH_FW_FR_METRICS_DESTROY 0x0c39fcfdu
+#define RH_FW_FR_OUTLINE 0x0c3a7b71u
+#define RH_FW_FR_OUTLINE_COMPARE 0x0c39fd35u
+#define RH_FW_FR_OUTLINE_CREATE 0x0c3a8ae5u
+#define RH_FW_FR_OUTLINE_DESTROY 0x0c3a095du
+#define RH_FW_FR_OUTLINE_EVENT 0x0c398139u
+#define RH_FW_FR_STYLE_ENABLED_SLOT 0x200bd0b4u
+#define RH_FW_FR_SW_DISPATCH 0x0c394815u
+#define RH_FW_FR_VECTOR_DROP_SECOND_ARG 0
+#define RH_FW_FR_VECTOR_SLOT 0x200d2170u
+#define RH_FW_FR_VG_DISPATCH 0x0c391355u
+#define RH_FW_FR_VG_SLOT 0x200d216cu
+#define RH_FW_HEADER_CACHE_CLASS 0x2ca14b08u
+#define RH_FW_HEADER_CACHE_SLOT 0x200bd1b8u
+#define RH_FW_IMAGE_CACHE_CLASS 0x2ca14a88u
+#define RH_FW_IMAGE_CACHE_SLOT 0x200bd1b4u
+#define RH_FW_IMAGE_GET_INFO 0x0c38e44du
+#define RH_FW_IMAGE_OBJECT_CLASS 0x2ca12e7cu
+#define RH_FW_IMAGE_SET_SRC 0x0c3b2b91u
+#define RH_FW_INVALIDATE_AREA 0x0c382081u
+#define RH_FW_MANAGER_PATH_LIST_HEAD_OFFSET 28u
+#define RH_LB_STYLE_SET 0x0c383435u
+#define RH_LB_OBJECT_EVENT_ADD 0x0c37fbedu
+#define RH_LB_OBJECT_EVENT_REMOVE 0x0c37fc33u
+#define RH_LB_RECT_INIT 0x0c38e03du
+#define RH_LB_RECT_DRAW 0x0c38e47du
+#define RH_LB_LIST_CLASS 0x2ca436ecu
+#define RH_LB_BASE_CLASS 0x2ca3bbecu
+#define RH_LB_MAIN_ROOT_SLOT 0x200c5f10u
+#define RH_LB_MAIN_CACHE_SLOT 0x200c5f0cu
+#define RH_LB_MORE_ROOT_SLOT 0x200c5adcu
+#define RH_LB_MORE_CACHE_SLOT 0x200c5ad8u
+#define RH_LB_CONTROL_PRESENTER_SLOT 0x200c5668u
+#define RH_LB_NOTIFY_CONTAINER_SLOT 0x200c633cu
+#define RH_LB_NOTIFY_LIST_SLOT 0x200c6240u
+#define RH_LB_NOTIFY_LIST_CLASS 0x2ca3bbc8u
+#define RH_LB_DISPLAY_EVENT_ADD 0x0c3a3ec5u
+#define RH_LB_DISPLAY_EVENT_REMOVE 0x0c381e67u
+#define RH_LB_LAYOUT_UPDATE 0x0c383f01u
+#define RH_LB_VISIBLE_AREA 0x0c381d4du
+#define RH_LB_GPU_FINISH 0x0c91e66du
+#define RH_LB_DCACHE_SYNC 0x0c92e6d5u
+#define RH_LB_DCACHE_INVALIDATE 0x0c7211e9u
+#define RH_LB_MEMORY_BARRIER() __asm__ volatile("dsb sy" ::: "memory")
+#define RH_LB_SNAPSHOT_TAKE 0x0c5f12edu
+#define RH_LB_SNAPSHOT_FREE 0x0c8f2acdu
+#define RH_LB_DRAW_BUF_CREATE 0x0c386c15u
+#define RH_LB_DRAW_BUF_HANDLERS 0x200bd18cu
+#define RH_FW_OBJECT_STYLE_GET 0x0c380165u
+#define RH_FW_OBJECT_STYLE_REFRESH 0x0c382879u
+#define RH_FW_OBJECT_TREE_WALK 0x0c38151du
+#define RH_FW_POSIX_CACHE_SIZE 0x200bd260u
+#define RH_FW_POSIX_DRIVER 0x200bd25cu
+#define RH_FW_POSIX_OPEN 0x0c3a60c1u
+#define RH_FW_POSIX_OPEN_SLOT 0x200bd268u
+#define RH_FW_UIKIT_MANAGER_OFFSET 28u
+#define RH_FW_UIKIT_SLOT 0x200bd08cu
+#define RH_FW_VECTOR_CLASS 0x2ca6cca8u
+#define RH_FW_VECTOR_COMPARE 0x0c69e309u
+#define RH_FW_VECTOR_DESTROY 0x0c69f72du
+#define RH_FW_VECTOR_DROP 0x0c69f75du
+
+#endif

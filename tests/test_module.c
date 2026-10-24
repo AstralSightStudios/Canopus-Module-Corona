@@ -2668,6 +2668,8 @@ int main(int argc, char **argv) {
     assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-10-pro-3.101.043"));
+#elif defined(RH_TARGET_179) && RH_TARGET_179
+    assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.179"));
 #elif defined(RH_TARGET_177) && RH_TARGET_177
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.177"));
 #elif defined(RH_TARGET_155) && RH_TARGET_155

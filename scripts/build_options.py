@@ -1,6 +1,21 @@
 """Shared exact-target build options and resource feature metadata."""
 
+from pathlib import Path
+import shutil
+
 P67_TARGET = 'xiaomi-band-10-pro-3.101.043'
+
+
+def stage_resources(root, project, manifest, targets):
+    """Preserve manifest-relative resources in isolated packaging projects."""
+    resources = manifest.get('resources', {})
+    files = list(resources.get('files', []))
+    for target in targets:
+        files.extend(resources.get('targets', {}).get(target, []))
+    for relative in files:
+        destination = Path(project) / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(root) / relative, destination)
 
 
 def build_options(targets, environ):

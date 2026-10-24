@@ -7,6 +7,7 @@ import struct
 
 TARGET = "xiaomi-band-11-4.100.139"
 TARGETS = {
+    "xiaomi-band-11-4.100.179": "307adabe0ff61c77be73d045a8260e279cddd131c7a535a2678eb34199278a2b",
     "xiaomi-band-11-4.100.177": "ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b",
     TARGET: "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
     "xiaomi-band-11-4.100.155": "ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f",
