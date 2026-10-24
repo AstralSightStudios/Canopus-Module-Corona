@@ -19,7 +19,7 @@ static rh_manager_state_listener listener;
 static void *listener_cookie;
 static uint32_t width=212,height=520,move_from,move_to,moves,selected,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
 static int wake_count,close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
-static uint32_t refresh_count;
+static uint32_t refresh_count,applies;
 static uint32_t subscription_count;
 static canopus_timer_callback_t timer_callback;
 static int32_t timer_id;
@@ -53,6 +53,7 @@ static int32_t backend_apply(void *cookie,const struct canopus_ui_snapshot_v1 *s
             assert(!(s->visuals[i].flags&CANOPUS_UI_VISUAL_FLAG_VIRTUAL_CONTENT));
     }
     if(reject_apply) {reject_apply=0;return CANOPUS_UI_ERR_BACKEND;}
+    applies++;
     return 0;
 }
 static int32_t backend_control(void *cookie,uint32_t gen,uint32_t key,uint32_t op,int32_t a,int32_t b,void *out) {
@@ -222,6 +223,29 @@ int main(int argc,char **argv) {
     assert(moves==1 && move_from==0 && move_to==2 && released==1 && !timer_callback);
     event(10,CANOPUS_UI_EVENT_SCROLL,800,0,0,38000);assert(largest_y>32767);
     event(10,CANOPUS_UI_EVENT_SCROLL,801,0,0,0);
+    /* Overscroll must not rebuild. The firmware drives the bounce itself; a
+       replacement per sample re-issues a scroll position and cuts the spring,
+       and only the bottom edge is visible to the module because a negative
+       sample is rejected before dispatch. Both edges stay inside the window. */
+    {uint32_t before;
+        /* Reach the bottom, then feed samples from inside the bounce. The
+           firmware drives that spring; a replacement per sample re-issues a
+           scroll position and cuts it. Only the bottom edge is observable here
+           because a negative sample is rejected before dispatch. */
+        event(10,CANOPUS_UI_EVENT_SCROLL,802,0,0,41188);
+        before=applies;
+        event(10,CANOPUS_UI_EVENT_SCROLL,803,0,0,41300);
+        event(10,CANOPUS_UI_EVENT_SCROLL,804,0,0,41500);
+        event(10,CANOPUS_UI_EVENT_SCROLL,805,0,0,41632);
+        event(10,CANOPUS_UI_EVENT_SCROLL,806,0,0,41188);
+        assert(applies==before);
+        /* A sample that leaves the built window still rebuilds, so the list
+           keeps filling as the user scrolls away from the boundary. */
+        event(10,CANOPUS_UI_EVENT_SCROLL,807,0,0,0);
+        event(10,CANOPUS_UI_EVENT_SCROLL,808,0,0,40000);
+        assert(applies>before);
+        event(10,CANOPUS_UI_EVENT_SCROLL,809,0,0,0);
+    }
     /* Maximum-sized names/previews fill the arena. A captured row outside the
        window must remain present, and failed commits must never strand it. */
     dense_metadata=1;

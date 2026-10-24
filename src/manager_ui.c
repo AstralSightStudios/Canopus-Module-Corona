@@ -24,7 +24,10 @@ static struct {
     uint32_t route, width, height, content_height, row_width;
     int32_t scroll[ROUTES];
     uint32_t generation, reload_generation, subscribed, opened, wide, busy, render_failed;
-    uint32_t mix_index, count, first, shown, toast_id;
+    uint32_t mix_index, count, shown, toast_id;
+    /* Content span the committed tree actually builds. While the whole viewport
+       stays inside it the tree is reusable, so a scroll sample costs no rebuild. */
+    int32_t window_from, window_to, window_total, viewport;
     char detail_id[65], mix_key[256], mix_title[256], error[256], toast[256];
     int32_t wake_lock, edge_timer, hold_timer;
     uint32_t pressed, press_id, press_key, press_time, moved, drag, drag_from, drag_to;
@@ -243,12 +246,28 @@ static int build_home(struct canopus_ui_tree_v1 *t) {
 }
 static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height) {
     struct canopus_ui_visual_v1 v=CANOPUS_UI_VISUAL_DEFAULT;
+    int32_t maximum;
     if(total>0x7fffffffu) return CANOPUS_UI_ERR_CAPACITY;
+    /* The firmware owns the overscroll bounce. Echoing a sample from outside the
+       valid range back into the visual would make the host issue a position
+       write per sample and cut the spring short, so the stored offset stays
+       inside the range and only the built window decides whether to rebuild. */
+    maximum=(int32_t)total-height;if(maximum<0) maximum=0;
+    if(U.scroll[U.route]<0) U.scroll[U.route]=0;
+    else if(U.scroll[U.route]>maximum) U.scroll[U.route]=maximum;
+    U.viewport=height;U.window_total=(int32_t)total;U.window_from=U.window_to=0;
     TRY(component(t,KEY_SCROLL,CANOPUS_UI_NODE_SCROLL,"","",EV_SCROLL,ON));
     TRY(box(t,KEY_SCROLL,(int)U.width,height,0,0,0,0,-1,1));
     v.flags=CANOPUS_UI_VISUAL_FLAG_ABSOLUTE|CANOPUS_UI_VISUAL_FLAG_CLIP|CANOPUS_UI_VISUAL_FLAG_VIRTUAL_CONTENT;
     v.content_height=total;v.scroll_y=U.scroll[U.route];
     return U.ctx->ui->node_set_visual(t,KEY_SCROLL,&v);
+}
+/* True while the committed window already spans the visible part of the
+ * viewport, so a scroll sample needs no tree replacement. */
+static int window_covers(int32_t y) {
+    int32_t end=y+U.viewport;
+    if(end>U.window_total) end=U.window_total;
+    return y>=U.window_from && end<=U.window_to;
 }
 static int positioned(struct canopus_ui_tree_v1 *t,uint32_t key,int height,int32_t y) {
     /* The ABI stores absolute y in int16. Immediate TRANSLATE accepts int32;
@@ -309,7 +328,7 @@ static int build_list(struct canopus_ui_tree_v1 *t) {
     TRY(scroll_begin(t,U.count*ROW_STEP+32u,(int)U.content_height));
     first=(uint32_t)U.scroll[U.route]/ROW_STEP;
     if(first>=U.count) first=U.count-1;
-    U.first=first;U.shown=0;
+    U.shown=0;
     /* Commit the captured row before filling the ordinary window. Its exact
        strings and node are therefore reserved even after it leaves the view. */
     if(U.drag) TRY(build_resource_row(t,U.drag_from));
@@ -320,6 +339,12 @@ static int build_list(struct canopus_ui_tree_v1 *t) {
         if(rc) return rc;
         U.shown++;
     }
+    /* Rows sit on a fixed ROW_STEP grid, so the window covers exactly the
+       slots that were emitted; one extra step of slack absorbs a sample that
+       lands between two grid points without forcing a rebuild. */
+    U.window_from=(int32_t)first*ROW_STEP;
+    U.window_to=(int32_t)(first+U.shown)*ROW_STEP+ROW_STEP;
+    if(U.window_to>U.window_total) U.window_to=U.window_total;
     return U.ctx->ui->end(t);
 }
 static const char *detail_value(uint32_t field,char version[68]) {
@@ -346,6 +371,9 @@ static uint32_t text_height(const char *value,uint32_t width) {
 static int detail_segments(struct canopus_ui_tree_v1 *t,uint32_t *height) {
     static const char *const labels[]={"主题包","作者","版本","简介","适用设备","资源包 ID"};
     uint32_t field,segment=0,y=0;char version[68],chunk[181];
+    /* Segments are emitted in ascending y, so the first and last emitted ones
+       bound the committed window; a scroll inside that span needs no rebuild. */
+    int32_t window_from=0,window_to=0;int started=0;
     for(field=0;field<6;field++) {
         const char *value=detail_value(field,version);uint32_t offset=0,n=len(value),part=0;
         do {
@@ -368,10 +396,13 @@ static int detail_segments(struct canopus_ui_tree_v1 *t,uint32_t *height) {
                     TRY(U.ctx->ui->end(t));
                 }
                 U.shown++;
+                if(!started) {started=1;window_from=(int32_t)y;}
+                window_to=(int32_t)y+(int32_t)h;
             }
             y+=h+8;offset+=bytes;segment++;part++;
         } while(offset<n);
     }
+    if(t) {U.window_from=window_from;U.window_to=window_to;}
     *height=y+32;return 0;
 }
 static int build_detail(struct canopus_ui_tree_v1 *t) {
@@ -438,7 +469,7 @@ static int choice_card(struct canopus_ui_tree_v1 *t,uint32_t key,int height,int3
     return U.ctx->ui->node_set_visual(t,key,&v);
 }
 static int build_choices(struct canopus_ui_tree_v1 *t) {
-    struct rh_manager_option option;uint32_t i,total=32,first=0;int32_t y=0;int h;
+    struct rh_manager_option option;uint32_t i,total=32;int32_t y=0;int h;
     /* Options mix compact and preview heights. Walk the shared catalog, without
        allocating a duplicate choices array or assuming all rows are equal. */
     for(i=0;i<U.count;i++) {
@@ -446,10 +477,14 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
         if(total>0x7fffffffu-(uint32_t)h) return CANOPUS_UI_ERR_CAPACITY;total+=(uint32_t)h;
     }
     TRY(scroll_begin(t,total,(int)U.content_height));U.shown=0;
+    {
+    /* The window is a contiguous height range, not a row index: options mix
+       compact and preview heights, so an index would not describe the span. */
+    int32_t window_from=0,window_to=(int32_t)total;int started=0;
     for(i=0;i<U.count;i++) {
         uint32_t key=KEY_ROW+i*4u;
         TRY(rh_manager_data_option_get(U.data,U.mix_key,i,&option));h=option_height(&option);
-        if(y+h<=U.scroll[SELECT]) {y+=h;first=i+1;continue;}
+        if(y+h<=U.scroll[SELECT]) {y+=h;continue;}
         if(U.shown>=WINDOW) break;
         /* Worst case is an all-preview window: 4 nodes per row on top of the
            page, header, scroll and a possible toast. Stop before the bounded
@@ -457,6 +492,7 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
         if(t->_snapshot.node_count+4u>CANOPUS_UI_MAX_NODES) break;
         /* name + preview path + the checked/unchecked icon */
         if(len(option.name)+len(option.preview)+96u>string_room(t)) {if(U.shown) break;return CANOPUS_UI_ERR_CAPACITY;}
+        if(!started) {started=1;window_from=y;}
         if(option.preview[0]) {
             TRY(section(t,key));TRY(choice_card(t,key,160,y,24));
             TRY(image_path(t,key+1,option.preview,96,96,((int)U.row_width-96)/2,8));
@@ -471,9 +507,11 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
             TRY(choice_card(t,key,76,y,24));
             TRY(choice_mark(t,key+1,option.selected,y+22));
         }
-        y+=h;U.shown++;
+        y+=h;U.shown++;window_to=y;
     }
-    U.first=first;return U.ctx->ui->end(t);
+    U.window_from=window_from;U.window_to=window_to;
+    }
+    return U.ctx->ui->end(t);
 }
 static const char *transfer_error(uint8_t detail) {
     switch(detail) {
@@ -623,7 +661,7 @@ static void edge_tick(const struct canopus_context_v1 *ctx,int32_t timer,void *c
     if(target==metrics.y) return;
     if(!U.ctx->ui->control(U.ui,U.generation,KEY_SCROLL,CANOPUS_UI_CONTROL_SCROLL_TO,target,0,0)) {
         U.scroll[RESOURCES]=target;(void)update_drag();
-        if((uint32_t)target/ROW_STEP!=U.first) (void)render();
+        if(!window_covers(target)) (void)render();
     }
 }
 static int begin_drag(void) {
@@ -739,10 +777,15 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
 #ifdef RH_MANAGER_UI_TEST
         probe_state.scroll++;
 #endif
-        uint32_t first;U.scroll[U.route]=e->scroll_y;
+        U.scroll[U.route]=e->scroll_y;
         if(U.drag) (void)update_drag();else if(U.pressed && e->scroll_y!=U.start_scroll) {U.moved=1;clear_hold();}
-        first=(uint32_t)e->scroll_y/ROW_STEP;
-        if(U.route==SELECT || U.route==DETAIL || first!=U.first) return render();return 0;
+        /* Rebuild only when the sample leaves the committed window. Rebuilding
+           on every sample would recreate the tree (and re-issue a position
+           write) mid-gesture, which the native overscroll spring cannot
+           survive; the previous first-row test did that at a fixed stride that
+           the variable-height pages do not share. */
+        if(window_covers(e->scroll_y)) return 0;
+        return render();
     }
     if(e->type==CANOPUS_UI_EVENT_PRESS) {
         U.pressed=1;U.suppressed=0;U.press_id=event;U.press_key=e->key;U.press_time=e->time_ms;U.start_x=e->x;U.start_y=U.last_y=e->y;
