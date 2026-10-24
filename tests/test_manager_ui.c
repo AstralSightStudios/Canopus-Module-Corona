@@ -131,7 +131,9 @@ int rh_manager_data_option_get(struct rh_manager_data *d,const char *key,uint32_
     if(!i) {strcpy(o->id,"@default");strcpy(o->name,"默认");}
     else if(i==1) {strcpy(o->id,"@system");strcpy(o->name,"系统");}
     else {snprintf(o->id,65,"theme%u",i);strcpy(o->name,"测试主题");}
-    strcpy(o->preview,i==1?"/.rh_sys/system/icon.bin":"/data/canopus/m.corona/themes/theme1/icon.bin");o->selected=selected==i;return 0;
+    /* Index 2 keeps the compact shape: no preview file means no image row. */
+    if(i!=2) strcpy(o->preview,i==1?"/.rh_sys/system/icon.bin":"/data/canopus/m.corona/themes/theme1/icon.bin");
+    o->selected=selected==i;return 0;
 }
 int rh_manager_data_choose(struct rh_manager_data *d,const char *key,const char *choice) {(void)d;(void)key;selected=!strcmp(choice,"@system")?1:0;return 0;}
 int rh_manager_data_prepare_apply(struct rh_manager_data *d,const char *dir) {(void)d;prepared++;data_pending=1;assert(!strncmp(dir,"active/",7));return 0;}
@@ -263,6 +265,48 @@ int main(int argc,char **argv) {
     event(1002,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert_route(4);
     i=find_text("系统");event(ui.committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert(selected==1);
     i=find_text("系统");assert(ui.committed.nodes[i].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
+    /* Every option is a real card again. The compact rows carry the same
+       #262626/24px surface as the preview rows, and the page suppresses the
+       host's own (●) because it reserves that column for its own icon. */
+    {uint32_t compact=0;
+        /* The stub names every theme the same; take the third option's row. */
+        for(i=0;i<ui.committed.node_count;i++)
+            if(ui.committed.nodes[i].type==CANOPUS_UI_NODE_RADIO_ROW &&
+               ui.committed.layouts[i].height==76) {compact=i;break;}
+        assert(ui.committed.visuals[compact].background_rgb==0x262626);
+        assert(ui.committed.styles[compact].corner_radius==24);
+        assert(ui.committed.styles[compact].variant==CANOPUS_UI_VARIANT_PLAIN);
+        assert(ui.committed.layouts[compact].padding_left==14);
+        assert(ui.committed.layouts[compact].padding_right==13);
+        assert(ui.committed.layouts[compact].height==76);
+        /* The selected state is a 32px icon at the card's right edge, not the
+           host's synthesized glyph. */
+        {uint32_t mark=0,j;for(j=0;j<ui.committed.node_count;j++)
+            if(ui.committed.nodes[j].type==CANOPUS_UI_NODE_IMAGE &&
+               ui.committed.layouts[j].width==32) {mark=j;break;}
+         assert(mark!=0);
+         /* Vertical placement is the post-commit TRANSLATE path, which the
+            scroll assertions above already cover. */
+         {int row=(int)(width>=300?336:204);
+          assert(ui.committed.visuals[mark].x+32==(int)(width-row)/2+row-13);}}
+    }
+    /* The tall variant keeps one card: SECTION at 160 owns the preview image
+       and the label row, and the label row only carries the shared inset. */
+    {uint32_t preview=0;
+        for(i=0;i<ui.committed.node_count;i++)
+            if(ui.committed.nodes[i].type==CANOPUS_UI_NODE_RADIO_ROW &&
+               ui.committed.layouts[i].height==48) {preview=i;break;}
+        assert(preview!=0);
+        uint32_t card=ui.committed.nodes[preview].parent;
+        assert(card!=CANOPUS_UI_NO_NODE);
+        assert(ui.committed.nodes[card].type==CANOPUS_UI_NODE_SECTION);
+        assert(ui.committed.layouts[card].height==160);
+        assert(ui.committed.visuals[card].background_rgb==0x262626);
+        assert(ui.committed.styles[card].corner_radius==24);
+        assert(ui.committed.layouts[preview].padding_left==14);
+        assert(ui.committed.layouts[preview].padding_right==13);
+        assert(ui.committed.visuals[preview].background_rgb==0);
+    }
     host_back();assert_route(3);assert(!close_count);assert(ui.committed.visuals[find_key(10)].scroll_y==208);back();
     assert(!rh_manager_ui_show_receive());assert_route(5);assert(!wake_count);
     s.phase=RH_XFER_PHASE_RECEIVING;s.percent=68;assert(!rh_manager_set_transfer_state(&s));pump();assert(wake_count==1);

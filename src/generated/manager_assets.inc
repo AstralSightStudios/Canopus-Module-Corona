@@ -8,6 +8,8 @@ static const struct asset_record asset_records[RH_MANAGER_ASSET_COUNT] = {
     {"del.bin", 12736u},
     {"del-wide.bin", 26956u},
     {"none.bin", 124652u},
+    {"check.bin", 2636u},
+    {"uncheck.bin", 2636u},
     {"connect.bin", 158416u},
     {"choose.bin", 158416u},
     {"download.bin", 15436u},

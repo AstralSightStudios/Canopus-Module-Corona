@@ -30,8 +30,8 @@ static struct {
     uint32_t pressed, press_id, press_key, press_time, moved, drag, drag_from, drag_to;
     int32_t start_x, start_y, last_y, start_scroll, drag_delta;
     uint32_t delete_armed, delete_at, suppressed;
-    uint32_t position_count, position_keys[WINDOW+2];
-    int32_t position_y[WINDOW+2];
+    uint32_t position_count, position_keys[2*WINDOW+4];
+    int32_t position_y[2*WINDOW+4];
 } U = { .wake_lock=-1, .edge_timer=-1, .hold_timer=-1 };
 #ifdef RH_MANAGER_UI_TEST
 /* Compiled only into the emulator acceptance artifact. A long hold enters
@@ -253,7 +253,7 @@ static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height) 
 static int positioned(struct canopus_ui_tree_v1 *t,uint32_t key,int height,int32_t y) {
     /* The ABI stores absolute y in int16. Immediate TRANSLATE accepts int32;
        use it after commit, before returning to the display, for long catalogs. */
-    if(U.position_count>=WINDOW+2) return CANOPUS_UI_ERR_CAPACITY;
+    if(U.position_count>=2*WINDOW+4) return CANOPUS_UI_ERR_CAPACITY;
     U.position_keys[U.position_count]=key;U.position_y[U.position_count++]=y;
     return box(t,key,(int)U.row_width,height,((int)U.width-(int)U.row_width)/2,0,0,0,-1,0);
 }
@@ -385,6 +385,58 @@ static int build_detail(struct canopus_ui_tree_v1 *t) {
                         (int)U.content_height-(U.wide?90:88),!U.busy);
 }
 static int option_height(struct rh_manager_option *o) {return o->preview[0]?168:84;}
+/* The choice list mirrors the previous Vela page: every option is a #262626
+ * card with a 24px radius, a 14/13 side inset and an 8px gap. The tall variant
+ * stacks a centred preview above the labelled row; the compact variant is the
+ * row card itself. Rows are positioned through the post-commit TRANSLATE path
+ * (positioned) so catalogs beyond the int16 visual limit still work. */
+/* The label row inside a tall card: it sits under the 96px preview (top offset
+   8) and keeps the card's 14/13 inset, so name and mark line up with the Vela
+   footer. Its own placement is local to the card and needs no translation. */
+static int choice_style(struct canopus_ui_tree_v1 *t,uint32_t key) {
+    struct canopus_ui_style_v1 s=CANOPUS_UI_STYLE_DEFAULT;
+    struct canopus_ui_layout_v1 l=CANOPUS_UI_LAYOUT_DEFAULT;
+    struct canopus_ui_visual_v1 v=CANOPUS_UI_VISUAL_DEFAULT;
+    s.variant=CANOPUS_UI_VARIANT_PLAIN;
+    l.width=(int16_t)U.row_width;l.height=48;
+    l.padding_left=14;l.padding_right=13;
+    v.flags=CANOPUS_UI_VISUAL_FLAG_ABSOLUTE;v.x=0;v.y=104;
+    TRY(U.ctx->ui->node_set_layout(t,key,&l));
+    TRY(U.ctx->ui->node_set_style(t,key,&s));
+    return U.ctx->ui->node_set_visual(t,key,&v);
+}
+/* The trailing 32px check mark of the Vela list. It is a sibling of the card at
+ * scroll-content level so one coordinate rule covers both variants, and it is
+ * placed through the same post-commit TRANSLATE path as the cards. A missing
+ * asset drops only the icon, never the row, so a selection stays operable. */
+static int choice_mark(struct canopus_ui_tree_v1 *t,uint32_t key,uint8_t selected,int32_t y) {
+    const char *path;
+    if(rh_manager_asset_ensure(selected?RH_MANAGER_ASSET_CHECK:RH_MANAGER_ASSET_UNCHECK,&path)) return 0;
+    if(U.position_count>=2*WINDOW+4) return CANOPUS_UI_ERR_CAPACITY;
+    U.position_keys[U.position_count]=key;U.position_y[U.position_count++]=y;
+    return image_path(t,key,path,32,32,(int)(U.width-U.row_width)/2+(int)U.row_width-13-32,0);
+}
+/* One card: the row owns its own surface, so its box write must carry the size,
+ * the inset and the placement together (a second layout write would reset it). */
+static int choice_card(struct canopus_ui_tree_v1 *t,uint32_t key,int height,int32_t y,int radius) {
+    struct canopus_ui_style_v1 s=CANOPUS_UI_STYLE_DEFAULT;
+    struct canopus_ui_layout_v1 l=CANOPUS_UI_LAYOUT_DEFAULT;
+    struct canopus_ui_visual_v1 v=CANOPUS_UI_VISUAL_DEFAULT;
+    if(U.position_count>=2*WINDOW+4) return CANOPUS_UI_ERR_CAPACITY;
+    U.position_keys[U.position_count]=key;U.position_y[U.position_count++]=y;
+    l.width=(int16_t)U.row_width;l.height=(int16_t)height;
+    l.padding_left=14;l.padding_right=13;
+    v.flags=CANOPUS_UI_VISUAL_FLAG_ABSOLUTE|CANOPUS_UI_VISUAL_FLAG_BACKGROUND_RGB;
+    v.x=(int16_t)((U.width-U.row_width)/2);v.background_rgb=0x262626;
+    s.corner_radius=(int16_t)radius;
+    /* VARIANT_PLAIN suppresses the host's synthesized (●) glyph. The row keeps
+       the trailing column reserved, so the same key can paint the 32px check
+       icon there once the asset pass lands. */
+    s.variant=CANOPUS_UI_VARIANT_PLAIN;
+    TRY(U.ctx->ui->node_set_layout(t,key,&l));
+    TRY(U.ctx->ui->node_set_style(t,key,&s));
+    return U.ctx->ui->node_set_visual(t,key,&v);
+}
 static int build_choices(struct canopus_ui_tree_v1 *t) {
     struct rh_manager_option option;uint32_t i,total=32,first=0;int32_t y=0;int h;
     /* Options mix compact and preview heights. Walk the shared catalog, without
@@ -399,16 +451,25 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
         TRY(rh_manager_data_option_get(U.data,U.mix_key,i,&option));h=option_height(&option);
         if(y+h<=U.scroll[SELECT]) {y+=h;first=i+1;continue;}
         if(U.shown>=WINDOW) break;
-        if(len(option.name)+len(option.preview)+4>string_room(t)) {if(U.shown) break;return CANOPUS_UI_ERR_CAPACITY;}
+        /* Worst case is an all-preview window: 4 nodes per row on top of the
+           page, header, scroll and a possible toast. Stop before the bounded
+           snapshot is full instead of failing the whole commit. */
+        if(t->_snapshot.node_count+4u>CANOPUS_UI_MAX_NODES) break;
+        /* name + preview path + the checked/unchecked icon */
+        if(len(option.name)+len(option.preview)+96u>string_room(t)) {if(U.shown) break;return CANOPUS_UI_ERR_CAPACITY;}
         if(option.preview[0]) {
-            TRY(section(t,key));TRY(positioned(t,key,160,y));
-            {struct canopus_ui_style_v1 s=CANOPUS_UI_STYLE_DEFAULT;s.corner_radius=24;s.background=CANOPUS_UI_COLOR_SURFACE_ALT;TRY(U.ctx->ui->node_set_style(t,key,&s));}
-            TRY(image_path(t,key+1,option.preview,96,96,((int)U.row_width-96)/2,0));
-            TRY(component(t,key+2,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,ON|(option.selected?CANOPUS_UI_NODE_FLAG_SELECTED:0)));
-            TRY(box(t,key+2,(int)U.row_width,56,0,104,0,0,-1,0));TRY(U.ctx->ui->end(t));
+            TRY(section(t,key));TRY(choice_card(t,key,160,y,24));
+            TRY(image_path(t,key+1,option.preview,96,96,((int)U.row_width-96)/2,8));
+            TRY(component(t,key+2,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,
+                          ON|(option.selected?CANOPUS_UI_NODE_FLAG_SELECTED:0)));
+            TRY(choice_style(t,key+2));TRY(U.ctx->ui->end(t));
+            /* The mark follows the card so it stays a scroll-content sibling. */
+            TRY(choice_mark(t,key+3,option.selected,y+112));
         } else {
-            TRY(component(t,key,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,ON|(option.selected?CANOPUS_UI_NODE_FLAG_SELECTED:0)));
-            TRY(positioned(t,key,76,y));
+            TRY(component(t,key,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,
+                          ON|(option.selected?CANOPUS_UI_NODE_FLAG_SELECTED:0)));
+            TRY(choice_card(t,key,76,y,24));
+            TRY(choice_mark(t,key+1,option.selected,y+22));
         }
         y+=h;U.shown++;
     }

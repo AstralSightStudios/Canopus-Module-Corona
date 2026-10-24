@@ -36,6 +36,8 @@ files = [
     "build/manager-resources/del.bin",
     "build/manager-resources/del-wide.bin",
     "build/manager-resources/none.bin",
+    "build/manager-resources/check.bin",
+    "build/manager-resources/uncheck.bin",
     "build/manager-resources/connect.bin",
     "build/manager-resources/choose.bin",
     "build/manager-resources/download.bin",

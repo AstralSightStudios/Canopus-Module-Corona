@@ -307,10 +307,12 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
        - 按当前 `resource-order.json` 顺序，在 `@system` 分界线以上的激活主题中查找第一个接管该路径（或声明了该功能项 `mode == "image"`）的主题；若找到，则预览图设为该胜出主题的 `.bin` 文件路径；若 `@system` 以上无主题接管（或胜出模式为 `system`），则回退使用与「系统」选项相同的 `"/.rh_sys/..."` 预览图（若胜出模式为 `blur` 则无预览图）。
      - **「模糊」(`@blur`)**：仅在非日历的 4 个背景功能项中出现，无预览图，使用紧凑单选行。
      - **各候选主题**：按 `resource-order.json` 优先级排序，`.bin` 资源或 `mode == "image"` 背景展示对应主题包内的 `.bin` 预览图。
-3. **卡片与组件布局**：
-   - **带预览图项（高 `168px`）**：外层 `CANOPUS_UI_NODE_SECTION`（圆角 `24px`，底色 `#222222`），内含居中 `96×96` `CANOPUS_UI_NODE_IMAGE`（`image_fit = CANOPUS_UI_IMAGE_FIT_CONTAIN`）+ 底部 `CANOPUS_UI_NODE_RADIO_ROW`（显示选项名与 `(●)` / `(○)`）。
-   - **无预览图紧凑项（高 `84px`）**：`CANOPUS_UI_NODE_RADIO_ROW`（设圆角 `24px`、底色 `#222222` 与内边距）。
-   - **虚拟窗口容量**：带图项每项占 3 个节点（`SECTION` + `IMAGE` + `RADIO_ROW`），虚拟窗口设为 `WINDOW = 7`（`7 × 3 + 4 = 25 <= 32` 节点上限）。点击任意项立即写入 `resource-overrides.json` 并刷新选中态。
+3. **卡片与组件布局（对齐快应用原页）**：
+   - **所有选项共用一张卡片**：底色 `#262626`、圆角 `24px`、左右内缩 `14/13`，行间 `8px`，与 `mix-match.ux` 的 `.resource-choice` / `.choice-card` 一致。
+   - **带预览图项（高 `168px`）**：`CANOPUS_UI_NODE_SECTION` 作为卡片（`y` 偏移由提交后 `TRANSLATE` 施加），内含居中 `96×96` `CANOPUS_UI_NODE_IMAGE`（`image_fit = CANOPUS_UI_IMAGE_FIT_CONTAIN`，顶部偏移 `8`）+ 底部高 `48px` 的 `CANOPUS_UI_NODE_RADIO_ROW`。
+   - **无预览图紧凑项（高 `76px`）**：`CANOPUS_UI_NODE_RADIO_ROW` 自身就是卡片（圆角 `24px`、底色 `#262626`、内边距 `14/13`）。
+   - **选中标识**：右侧 `32px` 的 `check.bin` / `uncheck.bin`（由 `manager/src/common/images/true.png`、`false.png` 转出，走 `[resources]` 包资源），与快应用的 32px 勾选图一致；`RADIO_ROW` 用 `CANOPUS_UI_VARIANT_PLAIN` 关掉宿主合成的 `(●)`/`(○)` 文本，但保留其 44px 尾部列以便图标对齐。
+   - **虚拟窗口容量**：带图项每项占 4 个节点（`SECTION` + `IMAGE` + `RADIO_ROW` + 勾选图标），紧凑项占 2 个（`RADIO_ROW` + 图标）。位置表按 `2 × WINDOW + 4` 预留，供卡片与图标各自走一次提交后 `TRANSLATE`。点击任意项立即写入 `resource-overrides.json` 并刷新选中态。
 
 ```text
 ROUTE_MIX_MATCH (Band 11)                ROUTE_MIX_MATCH_SELECT (Band 11)
@@ -384,7 +386,7 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
   - 在 `rh_wrapper` 中添加 8 字节 `".rh_sys/"` 直通分支，供混搭微调预览原厂资源。
   - 暴露内部状态读取 `rh_module_get_status_snapshot` 与内部重载触发 `rh_module_request_reload` 及完成回调钩子。
 - **`src/manager_assets.c`**：
-  - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`connect.png`、`choose.png`、`download.png`、`error.png`、`succ.png`、`logo.png` 转为 LVGL v9 `.bin`，经 `Canopus.toml` 的 `[resources]` 作为 `.canopus` 包内资源（`resources/common/<name>.bin`）发布；安装时由包安装器解压到模块私有目录 `/data/canopus/m.corona/<name>.bin`。模块 ELF 不携带任何图片字节；运行时仅按名校验已解压文件的大小并返回绝对路径，图片由 UI 图片节点懒加载。
+  - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`true.png`、`false.png`、`connect.png`、`choose.png`、`download.png`、`error.png`、`succ.png`、`logo.png` 转为 LVGL v9 `.bin`，经 `Canopus.toml` 的 `[resources]` 作为 `.canopus` 包内资源（`resources/common/<name>.bin`）发布；安装时由包安装器解压到模块私有目录 `/data/canopus/m.corona/<name>.bin`。模块 ELF 不携带任何图片字节；运行时仅按名校验已解压文件的大小并返回绝对路径，图片由 UI 图片节点懒加载。`true.png` / `false.png` 分别生成 `check.bin` / `uncheck.bin`，供「选择来源」的选中标识使用。
 
 ### Step 2：C 语言移植 Manager 数据与配置生成层
 - **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。

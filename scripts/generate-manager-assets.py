@@ -32,6 +32,8 @@ ASSETS = [
     ('del', 'images/del.png'),
     ('del-wide', 'images/del-wide.png'),
     ('none', 'images/none.png'),
+    ('check', 'images/true.png'),
+    ('uncheck', 'images/false.png'),
     ('connect', 'images/connect.png'),
     ('choose', 'images/choose.png'),
     ('download', 'images/download.png'),
