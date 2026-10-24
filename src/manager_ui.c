@@ -252,8 +252,10 @@ static int build_home(struct canopus_ui_tree_v1 *t) {
     TRY(U.ctx->ui->end(t));
     TRY(row(t,40,"资源管理","",EV_RESOURCES));TRY(box(t,40,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?122:128,0,0,-1,0));
     TRY(row(t,41,"混搭微调","",EV_MIX));TRY(box(t,41,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?226:232,0,0,-1,0));
+    /* Bottom actions float 10px off the screen edge (the Band 11 content
+       viewport stops 8px short of it), mirroring the Vela page placement. */
     return image_button(t,U.wide?RH_MANAGER_ASSET_RELOAD_WIDE:RH_MANAGER_ASSET_RELOAD,EV_RELOAD,U.wide?324:150,U.wide?80:78,
-                        (int)U.content_height-(U.wide?90:88),!U.busy);
+                        (int)U.content_height-(U.wide?90:80),!U.busy);
 }
 static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height) {
     struct canopus_ui_visual_v1 v=CANOPUS_UI_VISUAL_DEFAULT;
@@ -414,17 +416,21 @@ static int detail_segments(struct canopus_ui_tree_v1 *t,uint32_t *height) {
         } while(offset<n);
     }
     if(t) {U.window_from=window_from;U.window_to=window_to;}
-    *height=y+32;return 0;
+    /* Trailing spacer mirrors the Vela detail page: at full scroll the last
+       card stops 10px above the floating delete action. */
+    *height=y+(U.wide?100:90);return 0;
 }
 static int build_detail(struct canopus_ui_tree_v1 *t) {
     uint32_t height;
     /* Long values exceed both a stock row and sometimes the whole arena.
        Chunk only at UTF-8 boundaries, preserving every byte across scrolling. */
     TRY(detail_segments(0,&height));
-    TRY(scroll_begin(t,height,(int)U.content_height-(U.wide?90:88)));U.shown=0;
+    /* The delete action floats over a full-height scroll like the Vela page:
+       cards pass beneath it and the trailing spacer clears the last card. */
+    TRY(scroll_begin(t,height,(int)U.content_height));U.shown=0;
     TRY(detail_segments(t,&height));TRY(U.ctx->ui->end(t));
     return image_button(t,U.wide?RH_MANAGER_ASSET_DELETE_WIDE:RH_MANAGER_ASSET_DELETE,EV_DELETE,U.wide?324:150,U.wide?80:78,
-                        (int)U.content_height-(U.wide?90:88),!U.busy);
+                        (int)U.content_height-(U.wide?90:80),!U.busy);
 }
 static int option_height(struct rh_manager_option *o) {return o->preview[0]?168:84;}
 /* The choice list mirrors the previous Vela page: every option is a #262626

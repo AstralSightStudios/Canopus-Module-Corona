@@ -153,7 +153,7 @@ struct rh_transfer_ui_state {
    - `CANOPUS_UI_NODE_ACTION_ROW`：`label = "资源管理"`，`detail = ""`，点击推入 `ROUTE_RESOURCES`。
    - `CANOPUS_UI_NODE_ACTION_ROW`：`label = "混搭微调"`，`detail = ""`，点击推入 `ROUTE_MIX_MATCH`。
 4. **底部重载按钮**：
-   - 居中 `LIST` 容器 + `IMAGE`（Band 11 为 `reload.bin` `150×78`，Band 10 Pro 为 `reload-wide.bin` `324×80`）。
+   - 居中 `LIST` 容器 + `IMAGE`（Band 11 为 `reload.bin` `150×78`，Band 10 Pro 为 `reload-wide.bin` `324×80`），距屏幕底 `10px`（Band 11 内容坐标 `y=364`，Band 10 Pro `y=334`），与详情页删除按钮同位。
    - 点击触发内部重载事务，完成后通过 `CANOPUS_UI_NODE_TOAST`（2000ms）提示结果。
 
 ```text
@@ -243,7 +243,7 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
      6. `资源包 ID`：`themeId`
    - 元数据长度超过系统双行项可显示宽度时，使用同字段标题的系统 SECTION/TEXT 分块完整展示；长说明与适用设备均可滚动，不截断原文。
 3. **底部删除按钮与 500ms 双击确认**：
-   - 列表末尾居中放置 `del.bin`（`150×78`）或 `del-wide.bin`（`324×80`）。
+   - `del.bin`（`150×78`）或 `del-wide.bin`（`324×80`）**悬浮于滚动列表之上**（复刻旧快应用 `position:absolute; bottom:10px`）：滚动视口铺满整个内容区（Band 11 `212×444` / Band 10 Pro `336×424`），按钮作为滚动容器之后的兄弟节点覆盖其上（Band 11 内容坐标 `y=364`，距屏幕底 `10px`；Band 10 Pro `y=334`）；滚动内容尾部保留 `90px`（Band 11）/ `100px`（Band 10 Pro）spacer，滚到底时末卡停在按钮上方 `10px`，滚动过程中卡片从按钮下方穿过。
    - 首次点击记录 `delete_first_tap_ms = ctx->time->monotonic_ms(ctx)`，弹出 `TOAST` `"双击删除"`。
    - `500ms` 内再次点击触发删除事务：
      - 检查 `mappings.tsv`、`resource-active-generations.json` 的 `protectedThemes` 及 `calendar.cfg` 是否引用了该 `themeId`；若正在使用，拒绝删除并弹 `TOAST` `"正在使用的资源包不能删除"`。
