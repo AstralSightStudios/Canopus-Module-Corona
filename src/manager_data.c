@@ -851,11 +851,17 @@ static int register_file(struct rh_manager_data *d,const struct pack *pack,uint3
     }
     return 0;
 }
-/* Directory handles are bounded by the original inventory depth limit (16),
- * not by file count. One path buffer and one dirent serve the complete walk. */
+static int remove_empty_directory(struct rh_manager_data *d,const char *path) {
+    int rc;
+    if(!canopus_services_has(d->ctx,CANOPUS_SVC_FS,2) || !d->ctx->fs->rmdir) return 0;
+    rc=d->ctx->fs->rmdir(d->ctx,path);
+    return rc==CANOPUS_SVC_ERR_NOTFOUND ? 0:rc;
+}
+/* Directory handles are bounded by the inventory depth (16), plus the
+ * installation generation when uninstalling a whole theme, not file count. */
 static int walk_theme(struct rh_manager_data *d,const char *id,const struct pack *pack,uint32_t theme,int deleting) {
-    void *dirs[17]; uint32_t offsets[17],depth=0,root_len; char absolute[256],path[256],base[256]; struct canopus_fs_dirent entry; struct canopus_fs_stat st; int rc=0;
-    if(package_base(d,id,base)||path_join(path,base,"/")) return -22;
+    void *dirs[18]; uint32_t offsets[18],depth=0,root_len; char absolute[256],path[256],base[256]; struct canopus_fs_dirent entry; struct canopus_fs_stat st; int rc=0;
+    if((deleting ? path_join(base,"themes/",id):package_base(d,id,base))||path_join(path,base,"/")) return -22;
     root_len=slen(path); offsets[0]=root_len; dirs[0]=d->ctx->fs->opendir(d->ctx,path); if(!dirs[0]) return -5;
     for(;;) {
         rc=d->ctx->fs->readdir(d->ctx,dirs[depth],&entry);
@@ -863,13 +869,17 @@ static int walk_theme(struct rh_manager_data *d,const char *id,const struct pack
             int close_rc=d->ctx->fs->closedir(d->ctx,dirs[depth]); dirs[depth]=0;
             if(rc<0 || close_rc<0) { if(rc>=0) rc=close_rc; break; }
             rc=0;
+            if(deleting) {
+                path[offsets[depth]-1u]=0;
+                rc=remove_empty_directory(d,path);if(rc)break;
+            }
             if(!depth) break; depth--; path[offsets[depth]]=0; continue;
         }
         if(equal(entry.name,".")||equal(entry.name,"..")) continue;
         if(!relative(entry.name)||entry.name[0]==0 || slen(entry.name)+offsets[depth]>=sizeof(path)) { rc=-22; break; }
         copy(path+offsets[depth],entry.name,slen(entry.name)+1u);
         if(entry.is_dir) {
-            uint32_t n=slen(path); if(depth==16u || n+1u>=sizeof(path)) { rc=RH_MANAGER_ERR_LIMIT; break; }
+            uint32_t n=slen(path); if(depth==(deleting ? 17u:16u) || n+1u>=sizeof(path)) { rc=RH_MANAGER_ERR_LIMIT; break; }
             path[n++]='/'; path[n]=0; depth++; offsets[depth]=n; dirs[depth]=d->ctx->fs->opendir(d->ctx,path); if(!dirs[depth]) { rc=-5; break; }
         } else if(deleting) {
             rc=d->ctx->fs->remove(d->ctx,path); if(rc) break;
@@ -1368,6 +1378,11 @@ static int cleanup_config_files(struct rh_manager_data *d,const char *current) {
             step=d->ctx->fs->remove(d->ctx,path);
             if(step && step!=CANOPUS_SVC_ERR_NOTFOUND && !first_error) first_error=step;
         }
+        if(!first_error) {
+            int step=remove_empty_directory(d,candidate);
+            /* Unknown files intentionally retain their directory. */
+            if(step && step!=CANOPUS_SVC_ERR_NOTEMPTY) first_error=step;
+        }
     }
     if(rc<0 && !first_error) first_error=rc;
     rc=d->ctx->fs->closedir(d->ctx,dir); if(rc<0 && !first_error) first_error=rc;
@@ -1462,9 +1477,8 @@ int rh_manager_data_complete_apply(struct rh_manager_data *d,int success) {
          * old generations intact. Only the matching published generation ACK
          * authorizes config and decoder backing-file retirement. */
         if(!rc) rc=cleanup_config_files(d,current);
-        /* Acknowledged refresh released the old decoder references. Reclaim
-         * obsolete overlay file bytes, retaining only empty directory shells
-         * unless a full remove_tree adapter is supplied. */
+        /* Acknowledged refresh released the old decoder references. FS v2
+         * removes drained overlay directories; FS v1 retains their shells. */
         if(!rc) { pending=dup(d,d->pending_protection); if(!pending) rc=-12; }
         if(!rc && parse(pending,slen(pending),&j)) rc=-22;
         if(!rc) rc=string_list(d,field(j,"protectedThemes"),&ids,&n,0);
@@ -1828,7 +1842,9 @@ int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
     if(!rc && find_id(protected_ids,n,id)>=0) rc=RH_MANAGER_ERR_ACTIVE;
     free_strings(d,protected_ids,n); if(rc) return fail(d,rc,rc==RH_MANAGER_ERR_ACTIVE ? "正在使用的资源包不能删除":"活动资源引用记录不可读取");
     d->busy=1;
-    if(package_base(d,id,relative_root)||path_join(absolute,d->root,relative_root)) { rc=-22; goto done; }
+    /* Uninstall owns the entire theme root, including superseded installation
+     * generations. Live and refresh references were checked before this walk. */
+    if(path_join(relative_root,"themes/",id)||path_join(absolute,d->root,relative_root)) { rc=-22; goto done; }
     {
         struct canopus_fs_stat st;
         rc=d->ctx->fs->stat(d->ctx,relative_root,&st);
@@ -1839,7 +1855,7 @@ int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
     if(rc) goto done;
     /* Preserve original partial-failure semantics: after an I/O failure no
      * success is reported; a damaged still-registered package remains visible.
-     * Empty shells are intentionally retained when only fs.remove is present. */
+     * FS v1 intentionally retains empty shells; FS v2 propagates rmdir errors. */
     for(i=0;i<d->override_count;i++) if(equal(d->overrides[i].choice,id)) { char *choice=dup(d,RH_MANAGER_DEFAULT); if(!choice) { rc=-12; goto done; } release(d,d->overrides[i].choice); d->overrides[i].choice=choice; }
     for(i=0;i<5;i++) if(d->features[i] && equal(d->features[i],id)) { char *choice=dup(d,RH_MANAGER_DEFAULT); if(!choice) { rc=-12; goto done; } release(d,d->features[i]); d->features[i]=choice; }
     rc=save_overrides(d); if(rc) goto done;

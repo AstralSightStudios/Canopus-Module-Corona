@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,9 @@ static char sandbox[512];
 static int fail_write,fail_rename,fail_unlink,fail_close,alloc_budget=-1;
 static const char *fail_write_path,*fail_rename_path,*fail_stat_path,*fail_remove_path,*fail_sync_path;
 static int sync_fault_fd=-1;
+static const char *fail_rmdir_path;
+static int rmdir_error;
+static uint32_t rmdir_calls;
 static uint32_t directory_reads,file_syncs,open_directories;
 static uint32_t blocks,peak_blocks,live_bytes,peak_bytes;
 struct allocation_header { uint64_t bytes; uint64_t alignment; };
@@ -43,6 +47,14 @@ static int fs_close(const struct canopus_context_v1 *c,int fd) {(void)c;if(fd==s
 static int64_t fs_size(const struct canopus_context_v1 *c,int fd) {struct stat s;(void)c;return fstat(fd,&s)<0?-errno:s.st_size;}
 static int fs_sync(const struct canopus_context_v1 *c,int fd) {(void)c;file_syncs++;if(fd==sync_fault_fd)return -EIO;return fsync(fd)<0?-errno:0;}
 static int fs_remove(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(fail_unlink||(fail_remove_path&&!strcmp(p,fail_remove_path)))return -EIO;int rc=resolve(path,p);return rc?rc:(unlink(path)<0?-errno:0);}
+static int fs_rmdir(const struct canopus_context_v1 *c,const char *p) {
+    char path[1024];int rc;
+    assert(canopus_services_has(c,CANOPUS_SVC_FS,2));rmdir_calls++;
+    if(fail_rmdir_path&&!strcmp(p,fail_rmdir_path))return rmdir_error;
+    rc=resolve(path,p);if(rc)return rc;
+    if(rmdir(path)==0)return 0;
+    return errno==ENOTEMPTY ? CANOPUS_SVC_ERR_NOTEMPTY:-errno;
+}
 static int fs_rename(const struct canopus_context_v1 *c,const char *a,const char *b) {char x[1024],y[1024];(void)c;if(fail_rename||(fail_rename_path&&!strcmp(b,fail_rename_path)))return -EIO;int rc=resolve(x,a);if(!rc)rc=resolve(y,b);return rc?rc:(rename(x,y)<0?-errno:0);}
 static int fs_stat(const struct canopus_context_v1 *c,const char *p,struct canopus_fs_stat *o) {char path[1024];struct stat s;(void)c;if(fail_stat_path&&!strcmp(p,fail_stat_path))return -EIO;int rc=resolve(path,p);if(rc)return rc;if(stat(path,&s)<0)return -errno;o->size=(uint32_t)s.st_size;o->is_dir=(uint8_t)S_ISDIR(s.st_mode);return 0;}
 static int fs_exists(const struct canopus_context_v1 *c,const char *p) {struct canopus_fs_stat st;int rc=fs_stat(c,p,&st);return rc==-ENOENT?0:(rc?rc:1);}
@@ -60,7 +72,7 @@ static void *mem_alloc(const struct canopus_context_v1 *c,uint32_t n) {
     blocks++;live_bytes+=n;if(blocks>peak_blocks)peak_blocks=blocks;if(live_bytes>peak_bytes)peak_bytes=live_bytes;return p+1;
 }
 static void mem_free(const struct canopus_context_v1 *c,void *p) {(void)c;if(p){struct allocation_header *h=(struct allocation_header *)p-1;assert(blocks&&live_bytes>=h->bytes);blocks--;live_bytes-=(uint32_t)h->bytes;free(h);}}
-static const struct canopus_fs_obj fs={.open=fs_open,.read=fs_read,.write=fs_write,.close=fs_close,.size=fs_size,.sync=fs_sync,.remove=fs_remove,.rename=fs_rename,.stat=fs_stat,.exists=fs_exists,.mkdir=fs_mkdir,.opendir=fs_opendir,.readdir=fs_readdir,.closedir=fs_closedir,.get_data_path=fs_root};
+static const struct canopus_fs_obj fs={.open=fs_open,.read=fs_read,.write=fs_write,.close=fs_close,.size=fs_size,.sync=fs_sync,.remove=fs_remove,.rename=fs_rename,.stat=fs_stat,.exists=fs_exists,.mkdir=fs_mkdir,.opendir=fs_opendir,.readdir=fs_readdir,.closedir=fs_closedir,.get_data_path=fs_root,.rmdir=fs_rmdir};
 static const struct canopus_mem_obj mem={.alloc=mem_alloc,.free=mem_free};
 static const struct canopus_context_v1 ctx={.struct_size=sizeof(ctx),.fs=&fs,.mem=&mem};
 static void fixture(const char *name,const char *data) {int fd=fs_open(&ctx,name,CANOPUS_FS_WRITE);assert(fd>=0);assert(write(fd,data,strlen(data))==(ssize_t)strlen(data));assert(!close(fd));}
@@ -530,4 +542,53 @@ static void test_damaged_hash_reinstall(void) {
     assert(rh_manager_data_find_hash(d,hash,id)==1);
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
-int main(void) {test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+static void test_versioned_directory_cleanup(void) {
+    for(unsigned scenario=0;scenario<5;scenario++) {
+        struct canopus_services_v1 svc={0};struct canopus_context_v1 versioned=ctx;
+        struct canopus_fs_obj current=fs;struct rh_manager_data *d=0;
+        void *legacy=0;uint32_t calls=rmdir_calls;
+        svc.group_version[CANOPUS_SVC_FS]=scenario==0 ? 1:2;versioned.services=&svc;
+        if(scenario==0) {
+            /* An actual v1-sized object: touching appended rmdir is an ASan error. */
+            legacy=malloc(offsetof(struct canopus_fs_obj,rmdir));assert(legacy);
+            memcpy(legacy,&fs,offsetof(struct canopus_fs_obj,rmdir));versioned.fs=legacy;
+        } else {if(scenario==2)current.rmdir=0;versioned.fs=&current;}
+        setup();assert(!fs_mkdir(&ctx,"themes/beta/nested"));fixture("themes/beta/nested/file.bin","B");
+        assert(!fs_mkdir(&ctx,"themes/beta/9"));fixture("themes/beta/9/old.bin","OLD");
+        assert(!rh_manager_data_create(&versioned,0,&d));
+        if(scenario>=3) {
+            fail_rmdir_path="themes/beta/nested";
+            rmdir_error=scenario==3 ? -EIO:CANOPUS_SVC_ERR_NOTEMPTY;
+            assert(rh_manager_data_delete(d,"beta")==rmdir_error);
+            assert(rh_manager_data_order_count(d)==3);
+            fail_rmdir_path=0;
+        }
+        assert(!rh_manager_data_delete(d,"beta"));
+        assert(!fs_exists(&ctx,"themes/beta/9/old.bin"));
+        if(scenario==0 || scenario==2) {
+            assert(rmdir_calls==calls && fs_exists(&ctx,"themes/beta")==1);
+        } else assert(rmdir_calls>calls && !fs_exists(&ctx,"themes/beta"));
+        rh_manager_data_destroy(d);free(legacy);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+    }
+}
+static void test_v2_config_and_overlay_cleanup(void) {
+    struct canopus_services_v1 svc={0};struct canopus_context_v1 versioned=ctx;
+    struct rh_manager_data *d=0;char path[160];
+    svc.group_version[CANOPUS_SVC_FS]=2;versioned.services=&svc;
+    setup();
+    for(unsigned i=0;i<260;i++){snprintf(path,sizeof(path),"themes/alpha/icons/v2-%03u.bin",i);fixture(path,"V2");}
+    assert(!rh_manager_data_create(&versioned,0,&d));
+    assert(!rh_manager_data_prepare_apply(d,"active/30"));fixture("active-config","active/30\n");assert(!rh_manager_data_complete_apply(d,1));
+    assert(fs_exists(&ctx,"themes/.active-30")==1);
+    assert(!fs_mkdir(&ctx,"active/28"));fixture("active/28/unknown.bin","KEEP");
+    assert(!fs_mkdir(&ctx,"active/29"));fixture("active/29/mappings.tsv","OLD");
+    assert(!rh_manager_data_move(d,2,0));
+    assert(!rh_manager_data_prepare_apply(d,"active/31"));fixture("active-config","active/31\n");assert(!rh_manager_data_complete_apply(d,1));
+    assert(!fs_exists(&ctx,"active/29")&&!fs_exists(&ctx,"active/30"));
+    assert(fs_exists(&ctx,"active/31/mappings.tsv")==1);
+    assert(fs_exists(&ctx,"active/28/unknown.bin")==1);
+    assert(!fs_exists(&ctx,"themes/.active-30"));
+    assert(fs_exists(&ctx,"themes/alpha/icons/x.bin")==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+}
+int main(void) {test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}

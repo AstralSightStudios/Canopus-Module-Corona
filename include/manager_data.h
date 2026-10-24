@@ -70,8 +70,9 @@ int rh_manager_data_choose(struct rh_manager_data *, const char *key, const char
  * references remain protected. Never implies refresh has completed. */
 int rh_manager_data_prepare_apply(struct rh_manager_data *, const char *config_dir);
 /* Success requires active-config still names the exact pending generation.
- * Then retires old canonical config trios and old overlay bytes, retaining
- * empty directory shells. Invalid/changed pointers leave protection intact. */
+ * Then retires old canonical config trios and old overlay bytes. FS v2 also
+ * removes drained directories; FS v1 retains empty shells. Invalid/changed
+ * pointers leave protection intact. */
 int rh_manager_data_complete_apply(struct rh_manager_data *, int success);
 int rh_manager_data_delete(struct rh_manager_data *, const char *id);
 /* Install a verified/extracted CRPack from staging/<owner-owned-name>. The ZIP

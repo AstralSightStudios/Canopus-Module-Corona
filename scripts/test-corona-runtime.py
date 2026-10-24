@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix="corona-runtime-") as work:
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr("corona.json", json.dumps(manifest))
         package.writestr("images/icon.bin", bytes(range(256)) * 32)
-    for mode in ("normal", "recovery", "cancel"):
+    for mode in ("normal", "recovery", "cancel", "legacy", "rmdir-failure"):
         sandbox = work / mode
         sandbox.mkdir()
         abandoned = sandbox / "staging/abandoned/nested"

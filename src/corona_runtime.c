@@ -16,11 +16,11 @@ static struct {
     uint32_t generation, attempt, archive_bytes;
     int extracted, preparing, registering;
     char staging[64], archive_path[256];
-    /* One directory iterator and scalar traversal state; empty shells remain
-     * until the SDK exposes a real directory removal primitive. */
+    /* One directory iterator and scalar traversal state; FS v2 removes
+     * drained directories in postorder, while FS v1 retains their shells. */
     void *cleanup_dir;
     char cleanup_path[256], cleanup_after[64], cleanup_best[64];
-    uint8_t cleanup_active, cleanup_best_dir, cleanup_validate;
+    uint8_t cleanup_active, cleanup_best_dir, cleanup_validate, cleanup_remove;
 } R = { .timer = -1 };
 
 static int catalog(void) {
@@ -42,8 +42,12 @@ static void cleanup_wake(void) {
      * file is eligible for garbage collection. */
     if(!R.catalog) return;
     R.cleanup_validate=1;
-    if(R.cleanup_active) return;
+    /* A just-released staging task may sort before our current cursor. Restart
+     * from the root so a directory skipped while protected is not stranded. */
+    if(R.cleanup_dir) (void)R.ctx->fs->closedir(R.ctx,R.cleanup_dir);
+    R.cleanup_dir=0;
     copy_text(R.cleanup_path,"staging");
+    R.cleanup_remove=0;
     R.cleanup_after[0]=R.cleanup_best[0]=0;
     R.cleanup_active=1;
 }
@@ -51,7 +55,7 @@ static void cleanup_step(void) {
     struct canopus_fs_dirent entry;
     char child[256];
     uint32_t n,i;
-    int rc;
+    int rc,closed;
     if(!R.cleanup_active) return;
     if(R.cleanup_validate) {
         R.cleanup_validate=0;
@@ -59,6 +63,19 @@ static void cleanup_step(void) {
             if(R.cleanup_dir) (void)R.ctx->fs->closedir(R.ctx,R.cleanup_dir);
             R.cleanup_dir=0;R.cleanup_active=0;return;
         }
+    }
+    if(R.cleanup_remove) {
+        /* Do not read the appended FS member on an older Supervisor. Keep
+         * staging itself: begin_install creates children below this root. */
+        if(canopus_services_has(R.ctx,CANOPUS_SVC_FS,2) && R.ctx->fs->rmdir) {
+            rc=R.ctx->fs->rmdir(R.ctx,R.cleanup_path);
+            if(rc<0 && rc!=CANOPUS_SVC_ERR_NOTFOUND) {R.cleanup_active=0;return;}
+        }
+        R.cleanup_remove=0;
+        n=length(R.cleanup_path);while(n && R.cleanup_path[n-1u]!='/') --n;
+        if(!n) {R.cleanup_active=0;return;}
+        copy_text(R.cleanup_after,R.cleanup_path+n);R.cleanup_path[n-1u]=0;
+        return;
     }
     if(!R.cleanup_dir) {
         R.cleanup_dir=R.ctx->fs->opendir(R.ctx,R.cleanup_path);
@@ -77,8 +94,8 @@ static void cleanup_step(void) {
         }
         return;
     }
-    (void)R.ctx->fs->closedir(R.ctx,R.cleanup_dir);R.cleanup_dir=0;
-    if(rc<0) {R.cleanup_active=0;return;}
+    closed=R.ctx->fs->closedir(R.ctx,R.cleanup_dir);R.cleanup_dir=0;
+    if(rc<0 || closed<0) {R.cleanup_active=0;return;}
     if(R.cleanup_best[0]) {
         n=length(R.cleanup_path);copy_text(child,R.cleanup_path);child[n++]='/';copy_text(child+n,R.cleanup_best);
         if(R.cleanup_best_dir) {copy_text(R.cleanup_path,child);R.cleanup_after[0]=0;}
@@ -87,11 +104,7 @@ static void cleanup_step(void) {
             copy_text(R.cleanup_after,R.cleanup_best);
         }
     } else if(!compare(R.cleanup_path,"staging")) R.cleanup_active=0;
-    else {
-        n=length(R.cleanup_path);while(n && R.cleanup_path[n-1u]!='/') --n;
-        if(!n) {R.cleanup_active=0;return;}
-        copy_text(R.cleanup_after,R.cleanup_path+n);R.cleanup_path[n-1u]=0;
-    }
+    else R.cleanup_remove=1;
 }
 static void abort_install(void *cookie) {
     (void)cookie;
@@ -164,7 +177,13 @@ static int cancel_install(void *cookie,const uint8_t hash[32]) {
     rc=catalog();
     if(rc)return rc==CANOPUS_SVC_ERR_NOMEM ? -8:-5;
     rc=rh_manager_data_install_cancel(R.catalog,hash);
-    if(rc>=0) {R.registering=0;return rc;}
+    if(rc>=0) {
+        R.registering=0;
+        /* An earlier install error already released the receiver's hook.
+         * Successful revocation must still rearm the journal-gated cleanup. */
+        if(!rc)abort_install(0);
+        return rc;
+    }
     return protocol_error(rc);
 }
 static int find_hash(void *cookie, const uint8_t hash[32]) {
@@ -236,6 +255,6 @@ void rh_connect_runtime_stop(void) {
     R.receiver = 0;
     abort_install(0);
     if(R.cleanup_dir) (void)R.ctx->fs->closedir(R.ctx,R.cleanup_dir);
-    R.cleanup_dir=0;R.cleanup_active=0;
+    R.cleanup_dir=0;R.cleanup_active=R.cleanup_remove=0;
     R.catalog=0;
 }
