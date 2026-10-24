@@ -312,7 +312,8 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
    - **带预览图项（高 `168px`）**：`CANOPUS_UI_NODE_SECTION` 作为卡片（`y` 偏移由提交后 `TRANSLATE` 施加），内含居中 `96×96` `CANOPUS_UI_NODE_IMAGE`（`image_fit = CANOPUS_UI_IMAGE_FIT_CONTAIN`，顶部偏移 `8`）+ 底部高 `48px` 的 `CANOPUS_UI_NODE_RADIO_ROW`。
    - **无预览图紧凑项（高 `76px`）**：`CANOPUS_UI_NODE_RADIO_ROW` 自身就是卡片（圆角 `24px`、底色 `#262626`、内边距 `14/13`）。
    - **选中标识**：右侧 `32px` 的 `check.bin` / `uncheck.bin`（由 `manager/src/common/images/true.png`、`false.png` 转出，走 `[resources]` 包资源），与快应用的 32px 勾选图一致；`RADIO_ROW` 用 `CANOPUS_UI_VARIANT_PLAIN` 关掉宿主合成的 `(●)`/`(○)` 文本，但保留其 44px 尾部列以便图标对齐。
-   - **虚拟窗口容量**：带图项每项占 4 个节点（`SECTION` + `IMAGE` + `RADIO_ROW` + 勾选图标），紧凑项占 2 个（`RADIO_ROW` + 图标）。位置表按 `2 × WINDOW + 4` 预留，供卡片与图标各自走一次提交后 `TRANSLATE`。点击任意项立即写入 `resource-overrides.json` 并刷新选中态。
+   - **虚拟窗口容量**：带图项每项占 5 个节点（`SECTION` + `LIST` 包装层 + `IMAGE` + `RADIO_ROW` + 勾选图标），紧凑项占 2 个（`RADIO_ROW` + 图标）。位置表按 `2 × WINDOW + 4` 预留，供卡片与图标各自走一次提交后 `TRANSLATE`。点击任意项立即写入 `resource-overrides.json` 并刷新选中态。
+   - **预览图点击承载**：裸 `IMAGE` 不可点击，预览图仿 §3.2 底部图片按钮套一层 `CANOPUS_UI_NODE_LIST` 包装层承载 `EV_CHOOSE+i`（松开且位移未超 `8px` 触发选择）；包装层、裸图片子节点与勾选图标的固件命中只报 `key`，由 `key → EV_CHOOSE+index` 兜底映射，整卡无死区，与快应用 `.choice-row` 整卡可点一致。
 
 ```text
 ROUTE_MIX_MATCH (Band 11)                ROUTE_MIX_MATCH_SELECT (Band 11)

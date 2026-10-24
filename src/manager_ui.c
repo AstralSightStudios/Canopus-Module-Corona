@@ -8,8 +8,8 @@
 #define TRY(call) do { int _r = (call); if (_r) return _r; } while (0)
 enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, RECEIVE, ROUTES };
 enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL,
-       EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000 };
-enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_TOAST=90, KEY_ROW=1000,
+       EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000, EV_CHOOSE=3000000 };
+enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_TOAST=90, KEY_ROW=1000, OPTION_SLOTS=5,
        ROW_STEP=104, WINDOW=7, EDGE=42, SLOP=8 };
 /* UI state is shared across routes. Catalog and metadata are never duplicated
  * into page models, and only a visible subset enters the bounded UI tree. */
@@ -499,25 +499,30 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
        compact and preview heights, so an index would not describe the span. */
     int32_t window_from=0,window_to=(int32_t)total;int started=0;
     for(i=0;i<U.count;i++) {
-        uint32_t key=KEY_ROW+i*4u;
+        uint32_t key=KEY_ROW+i*OPTION_SLOTS;
         TRY(rh_manager_data_option_get(U.data,U.mix_key,i,&option));h=option_height(&option);
         if(y+h<=U.scroll[SELECT]) {y+=h;continue;}
         if(U.shown>=WINDOW) break;
-        /* Worst case is an all-preview window: 4 nodes per row on top of the
-           page, header, scroll and a possible toast. Stop before the bounded
-           snapshot is full instead of failing the whole commit. */
-        if(t->_snapshot.node_count+4u>CANOPUS_UI_MAX_NODES) break;
+        /* Worst case is an all-preview window: OPTION_SLOTS nodes per row on
+           top of the page, header, scroll and a possible toast. Stop before
+           the bounded snapshot is full instead of failing the whole commit. */
+        if(t->_snapshot.node_count+OPTION_SLOTS>CANOPUS_UI_MAX_NODES) break;
         /* name + preview path + the checked/unchecked icon */
         if(len(option.name)+len(option.preview)+96u>string_room(t)) {if(U.shown) break;return CANOPUS_UI_ERR_CAPACITY;}
         if(!started) {started=1;window_from=y;}
         if(option.preview[0]) {
             TRY(section(t,key));TRY(choice_card(t,key,160,y,24));
-            TRY(image_path(t,key+1,option.preview,96,96,((int)U.row_width-96)/2,8));
-            TRY(component(t,key+2,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,
+            /* A bare image is never clickable, so the preview is wrapped in a
+               LIST that owns the pick event: the same event carrier as the
+               bottom image buttons (plan 3.2). */
+            TRY(component(t,key+1,CANOPUS_UI_NODE_LIST,"","",EV_CHOOSE+i,ON));
+            TRY(box(t,key+1,96,96,((int)U.row_width-96)/2,8,0,0,-1,1));
+            TRY(image_path(t,key+2,option.preview,96,96,0,0));TRY(U.ctx->ui->end(t));
+            TRY(component(t,key+3,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,
                           ON|(option.selected?CANOPUS_UI_NODE_FLAG_SELECTED:0)));
-            TRY(choice_style(t,key+2));TRY(U.ctx->ui->end(t));
+            TRY(choice_style(t,key+3));TRY(U.ctx->ui->end(t));
             /* The mark follows the card so it stays a scroll-content sibling. */
-            TRY(choice_mark(t,key+3,option.selected,y+112));
+            TRY(choice_mark(t,key+4,option.selected,y+112));
         } else {
             TRY(component(t,key,CANOPUS_UI_NODE_RADIO_ROW,option.name,"",EV_OPTION+i,
                           ON|(option.selected?CANOPUS_UI_NODE_FLAG_SELECTED:0)));
@@ -754,6 +759,16 @@ static int delete_tap(uint32_t when) {
     else toast(rc==RH_MANAGER_ERR_ACTIVE?"正在使用的资源包不能删除":rc==RH_MANAGER_ERR_INVALID?"资源包索引损坏，删除失败":"删除失败，请稍后重试");
     return render();
 }
+static int choose_option(uint32_t index) {
+    struct rh_manager_option option;
+    if(U.busy) return 0;
+#ifdef RH_MANAGER_UI_TEST
+    probe_state.pick++;
+#endif
+    TRY(rh_manager_data_option_get(U.data,U.mix_key,index,&option));
+    if(rh_manager_data_choose(U.data,U.mix_key,option.id)) {set_error("保存选择失败");toast("保存选择失败");U.error[0]=0;}
+    return render();
+}
 static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,
                     const struct canopus_ui_event_v1 *e,void *cookie) {
     uint32_t event=e->event_id;(void)ctx;(void)ui;(void)cookie;
@@ -771,6 +786,11 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
        !(event==EV_BACK && e->type==CANOPUS_UI_EVENT_ACTIVATE)) return render();
     if(U.route==RESOURCES && !event && e->key>=KEY_ROW && e->key-KEY_ROW<U.count)
         event=EV_ORDER+e->key-KEY_ROW;
+    /* The preview wrapper, its bare image child and the check marks report
+       only their keys with a zero event id. Map any key inside an option's
+       slot span to that option's pick, so the whole card stays operable. */
+    if(U.route==SELECT && !event && e->key>=KEY_ROW && (e->key-KEY_ROW)/OPTION_SLOTS<U.count)
+        event=EV_CHOOSE+(e->key-KEY_ROW)/OPTION_SLOTS;
 #ifdef RH_MANAGER_UI_TEST
     if(e->type==CANOPUS_UI_EVENT_LONG_PRESS && U.route==INDEX) {
         probe_state.cycle=0;return navigate(RECEIVE,0);
@@ -834,22 +854,16 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
         U.pressed=0;
         if(event==EV_RELOAD && click) return request_reload();
         if(event==EV_DELETE && click) return delete_tap(e->time_ms);
+        /* The preview wrapper is not a prefab row, so it never sees ACTIVATE;
+           its click is the release inside slop, like the image buttons. */
+        if(click && event>=EV_CHOOSE && U.route==SELECT) return choose_option(event-EV_CHOOSE);
         return 0;
     }
     if(e->type!=CANOPUS_UI_EVENT_ACTIVATE && e->type!=CANOPUS_UI_EVENT_VALUE_CHANGED) return 0;
     if(event==EV_BACK) return back();
     if(event==EV_RESOURCES) {U.scroll[RESOURCES]=0;return navigate(RESOURCES,1);}
     if(event==EV_MIX) {U.scroll[MIX]=0;return navigate(MIX,1);}
-    if(event>=EV_OPTION && U.route==SELECT) {
-        struct rh_manager_option option;
-        if(U.busy) return 0;
-#ifdef RH_MANAGER_UI_TEST
-        probe_state.pick++;
-#endif
-        TRY(rh_manager_data_option_get(U.data,U.mix_key,event-EV_OPTION,&option));
-        if(rh_manager_data_choose(U.data,U.mix_key,option.id)) {set_error("保存选择失败");toast("保存选择失败");U.error[0]=0;}
-        return render();
-    }
+    if(event>=EV_OPTION && event<EV_CHOOSE && U.route==SELECT) return choose_option(event-EV_OPTION);
     if(event>=EV_MIX_ITEM && event<EV_OPTION && U.route==MIX) {
         struct rh_manager_mix_item item;
         TRY(rh_manager_data_mix_get(U.data,event-EV_MIX_ITEM,&item));

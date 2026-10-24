@@ -17,7 +17,7 @@ static struct rh_module_status_snapshot status={.state=RH_MGR_STATE_RUNNING,.act
 static struct rh_transfer_ui_state transfer;
 static rh_manager_state_listener listener;
 static void *listener_cookie;
-static uint32_t width=212,height=520,move_from,move_to,moves,selected,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
+static uint32_t width=212,height=520,move_from,move_to,moves,selected,chooses,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
 static int wake_count,close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
 static uint32_t refresh_count,applies;
 static uint32_t subscription_count;
@@ -136,7 +136,7 @@ int rh_manager_data_option_get(struct rh_manager_data *d,const char *key,uint32_
     if(i!=2) strcpy(o->preview,i==1?"/.rh_sys/system/icon.bin":"/data/canopus/m.corona/themes/theme1/icon.bin");
     o->selected=selected==i;return 0;
 }
-int rh_manager_data_choose(struct rh_manager_data *d,const char *key,const char *choice) {(void)d;(void)key;selected=!strcmp(choice,"@system")?1:0;return 0;}
+int rh_manager_data_choose(struct rh_manager_data *d,const char *key,const char *choice) {(void)d;(void)key;chooses++;selected=!strcmp(choice,"@system")?1:0;return 0;}
 int rh_manager_data_prepare_apply(struct rh_manager_data *d,const char *dir) {(void)d;prepared++;data_pending=1;assert(!strncmp(dir,"active/",7));return 0;}
 int rh_manager_data_complete_apply(struct rh_manager_data *d,int success) {(void)d;assert(success);completed++;data_pending=0;return fail_complete?-5:0;}
 int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {(void)d;(void)id;deletes++;return fail_delete?RH_MANAGER_ERR_ACTIVE:0;}
@@ -330,6 +330,19 @@ int main(int argc,char **argv) {
         assert(ui.committed.layouts[preview].padding_left==14);
         assert(ui.committed.layouts[preview].padding_right==13);
         assert(ui.committed.visuals[preview].background_rgb==0);
+    }
+    /* The preview is wrapped in a clickable LIST (a bare image is not one),
+       and the whole card picks: the wrapper carries the event while its bare
+       image child and the check mark report only their keys, exactly as the
+       firmware hit test does. Each tap is one pick, never two. */
+    {uint32_t wrap=find_type(CANOPUS_UI_NODE_LIST,0),base=chooses;
+     uint32_t wkey=ui.committed.nodes[wrap].key;
+     assert(ui.committed.nodes[wrap].event_id!=0);
+     assert(ui.committed.nodes[wrap].parent==find_key(wkey-1));
+     tap(wkey,23000);assert(chooses==base+1 && selected==0);
+     tap(wkey+6,23100);assert(chooses==base+2 && selected==1);
+     tap(wkey+3,23200);assert(chooses==base+3 && selected==0);
+     assert(ui.committed.nodes[find_key(wkey+2)].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
     }
     host_back();assert_route(3);assert(!close_count);assert(ui.committed.visuals[find_key(10)].scroll_y==208);back();
     assert(!rh_manager_ui_show_receive());assert_route(5);assert(!wake_count);
