@@ -49,18 +49,11 @@
       "shot": "delete-prompt"
     },
     {
-      "tap": [
+      "double_tap": [
         168,
         430
       ],
-      "settle": 0.1
-    },
-    {
-      "tap": [
-        168,
-        430
-      ],
-      "settle": 0.2
+      "settle": 0.3
     },
     {
       "shot": "delete-protected"

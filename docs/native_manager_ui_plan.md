@@ -382,7 +382,7 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
   - 在 `rh_wrapper` 中添加 8 字节 `".rh_sys/"` 直通分支，供混搭微调预览原厂资源。
   - 暴露内部状态读取 `rh_module_get_status_snapshot` 与内部重载触发 `rh_module_request_reload` 及完成回调钩子。
 - **`src/manager_assets.c`**：
-  - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`connect.png`、`choose.png`、`download.png`、`error.png`、`succ.png`、`logo.png` 转为 LVGL v9 `.bin` 并在 UI 初始化时按需落盘到模块私有目录 `/data/canopus/m.corona/assets/`。
+  - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`connect.png`、`choose.png`、`download.png`、`error.png`、`succ.png`、`logo.png` 转为 LVGL v9 `.bin`，经 `Canopus.toml` 的 `[resources]` 作为 `.canopus` 包内资源（`resources/common/<name>.bin`）发布；安装时由包安装器解压到模块私有目录 `/data/canopus/m.corona/<name>.bin`。模块 ELF 不携带任何图片字节；运行时仅按名校验已解压文件的大小并返回绝对路径，图片由 UI 图片节点懒加载。
 
 ### Step 2：C 语言移植 Manager 数据与配置生成层
 - **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。

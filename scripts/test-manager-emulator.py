@@ -62,6 +62,8 @@ def arguments():
     parser.add_argument("--installer-dir", type=Path)
     parser.add_argument("--firmware-source", type=Path)
     parser.add_argument("--seed-dir", type=Path)
+    parser.add_argument("--seed-resources", action="store_true",
+                        help="manually place package resources into m.corona (fallback); default lets the install auto-extract them")
     parser.add_argument("--scenario", type=Path)
     parser.add_argument("--keep-device", action="store_true", help="preserve the dedicated emulator device after shutdown")
     parser.add_argument("--preflight", action="store_true", help="check tools, firmware and inputs without creating a device")
@@ -163,6 +165,41 @@ def relative_path(path):
     return value
 
 
+def place_package_resources(args, ui, package_copy):
+    """Mirror the installer's documented resource extraction into the module
+    data root. `.canopus` carries images under `resources/common/` and
+    `resources/<target_id>/`; install auto-extracts each to the module data
+    directory as one flat file (Canopus-Private scripts/emu/module_smoke.py).
+    The current AstroBox bridge stages only ELF+receipt and drops `resources/`,
+    so the harness delivers them exactly as that extraction would, letting the
+    module's resource resolution be validated independently of the sender."""
+    base = PurePosixPath("/canopus/m.corona")
+    prefixes = ("resources/common/", f"resources/{ui.P.target}/")
+    ui.ctl("fs", "mkdir", ui.P.device, "nand_data", "/canopus")
+    ui.ctl("fs", "mkdir", ui.P.device, "nand_data", str(base))
+    placed = 0
+    with tarfile.open(package_copy, "r:*") as package:
+        for member in package.getmembers():
+            name = member.name
+            if not member.isfile() or not name.startswith(prefixes):
+                continue
+            filename = name.rsplit("/", 1)[-1]
+            source = package.extractfile(member)
+            if source is None:
+                raise ValueError(f"package resource is not readable: {name}")
+            with source, tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(source.read())
+                tmp_path = tmp.name
+            try:
+                ui.ctl("fs", "put", ui.P.device, "nand_data", tmp_path, str(base / filename))
+            finally:
+                os.unlink(tmp_path)
+            placed += 1
+    if placed == 0:
+        raise ValueError("package declared no common/target resources to extract")
+    return placed
+
+
 def seed(args, ui):
     """Never modify a live LittleFS volume (Band 11 has no NSH)."""
     if not args.seed_dir:
@@ -195,13 +232,13 @@ def image_region(ui, path, crop):
     return b"".join(bytes(row[x0 * bpp:x1 * bpp]) for row in rows[y0:y1])
 
 
-def held_drag(ui, gesture, hold=0.8, duration=0.6):
+def held_drag(ui, gesture, hold=0.8, duration=0.6, repeat=1):
     """Hold before moving using MirageKit's local RFB pointer protocol.
 
     Mirage's linear swipe moves immediately and cannot reliably long-press.
     This connects only to the dedicated device's Unix socket.
     """
-    if len(gesture) != 4 or not (0 <= hold <= 10 and 0 < duration <= 10):
+    if len(gesture) != 4 or repeat not in (1, 2) or not (0 <= hold <= 10 and 0 < duration <= 10):
         raise ValueError("drag needs four coordinates and bounded hold/duration")
     info = ui.ctl("info", ui.P.device)
     did = next(line.split()[-1] for line in info.splitlines() if line.startswith("id:"))
@@ -237,27 +274,34 @@ def held_drag(ui, gesture, hold=0.8, duration=0.6):
         read(struct.unpack_from(">I", initial, 20)[0])
         if struct.unpack_from(">HH", initial) != ui.P.size:
             raise RuntimeError("Mirage VNC panel dimensions differ from target")
-        try:
-            client.sendall(struct.pack(">BBHH", 5, 1, x0, y0))
-            time.sleep(hold)
-            for step in range(1, 13):
-                x = round(x0 + (x1 - x0) * step / 12)
-                y = round(y0 + (y1 - y0) * step / 12)
-                client.sendall(struct.pack(">BBHH", 5, 1, x, y))
-                time.sleep(duration / 12)
-        finally:
-            client.sendall(struct.pack(">BBHH", 5, 0, x1, y1))
+        for press in range(repeat):
+            try:
+                client.sendall(struct.pack(">BBHH", 5, 1, x0, y0))
+                time.sleep(hold)
+                for step in range(1, 13):
+                    x = round(x0 + (x1 - x0) * step / 12)
+                    y = round(y0 + (y1 - y0) * step / 12)
+                    client.sendall(struct.pack(">BBHH", 5, 1, x, y))
+                    time.sleep(duration / 12)
+            finally:
+                client.sendall(struct.pack(">BBHH", 5, 0, x1, y1))
+            if press + 1 < repeat:
+                time.sleep(0.12)
 
 
 def scenario_steps(ui, scenario, shots, record):
     images = {}
     assertions = 0
     for step in scenario["steps"]:
-        operations = set(step) & {"tap", "swipe", "drag", "wait", "shot"}
+        operations = set(step) & {"tap", "double_tap", "swipe", "drag", "wait", "shot"}
         if len(operations) != 1:
             raise ValueError("scenario step needs exactly one operation")
         if "tap" in step:
             ui.tap(tuple(step["tap"]), step.get("settle", 0.6))
+        elif "double_tap" in step:
+            x, y = step["double_tap"]
+            held_drag(ui, [x, y, x, y], 0.08, 0.01, repeat=2)
+            time.sleep(step.get("settle", 0.6))
         elif "swipe" in step:
             gesture = step["swipe"]
             if len(gesture) != 4:
@@ -359,6 +403,13 @@ def main():
         ui.ctl("create", ui.P.device, "--firmware", firmware)
         created = True
         seed(args, ui)
+        if args.seed_resources:
+            record["resources_extracted"] = place_package_resources(args, ui, package_copy)
+            record["resources_via"] = "harness-seeded"
+        else:
+            # Rely on the real install auto-extracting resources/ into the
+            # module data dir (Canopus 26/27/28 -> /canopus/m.<id>/<name>).
+            record["resources_via"] = "install-autoextract"
         ui.prepare(args.work, installer, package_copy, shots)
         ui.open_module_page(shots)
         count = scenario_steps(ui, scenario, shots, record)

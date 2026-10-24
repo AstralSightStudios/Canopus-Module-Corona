@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
-"""Generate lossless LVGL v9 image assets from the existing Manager PNGs.
+"""Generate lossless LVGL v9 image resources from the existing Manager PNGs.
 
 Uses only Python's standard library. The pinned sources are noninterlaced RGBA8
-PNG files. Output is straight-alpha BGRA (I8 when its palette is lossless), with a
-12-byte LVGL v9 header and a
-4 KiB-window LZSS stream wrapped in binary base64 sextets (0x80..0xBF), decoded
-only when an image is first installed. This alphabet keeps encoded data words
-outside the target firmware address ranges without exempting data from scans.
-Run --check in CI to verify pixels, stream round trips and generated-file drift.
+PNG files. Each image becomes a standalone LVGL v9 ``.bin`` written under
+``build/manager-resources/`` and shipped as a ``.canopus`` package resource
+(``resources/common/<name>.bin``). At install the package extractor drops every
+resource into the module data root, so the module reads them by name and never
+carries image bytes inside the ELF.
+
+``src/generated/manager_assets.inc`` holds only the file names and byte lengths
+used at runtime to locate and sanity-check each extracted resource.
+
+Run --check in CI to verify pixels and generated-file drift.
 """
 import argparse
-from collections import defaultdict, deque
-import hashlib
 from pathlib import Path
 import struct
 import sys
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
+RESOURCE_DIR = ROOT / 'build/manager-resources'
 OUTPUT = ROOT / 'src/generated/manager_assets.inc'
 HEADER = struct.Struct('<BBHHHHH')
 ASSETS = [
@@ -121,150 +124,48 @@ def verify_image(image, width, height, rgba):
         raise ValueError('pixel or alpha mismatch')
 
 
-def compress(data):
-    # A tag below 128 starts tag+1 literal bytes. A tag >=128 starts a
-    # (tag&127)+3-byte match followed by little-endian (distance-1).
-    positions = defaultdict(deque)
-    out, literals, cursor = bytearray(), bytearray(), 0
-
-    def flush():
-        if literals:
-            out.append(len(literals) - 1)
-            out.extend(literals)
-            literals.clear()
-
-    while cursor < len(data):
-        key = data[cursor:cursor + 3]
-        candidates = positions[key]
-        while candidates and cursor - candidates[0] > 4096:
-            candidates.popleft()
-        length, distance = 0, 0
-        for previous in reversed(candidates):
-            candidate_length = 3
-            while candidate_length < 130 and cursor + candidate_length < len(data) and data[previous + candidate_length] == data[cursor + candidate_length]:
-                candidate_length += 1
-            if candidate_length > length:
-                length, distance = candidate_length, cursor - previous
-                if length == 130:
-                    break
-        if length >= 4 and len(key) == 3:
-            flush()
-            out.append(128 | (length - 3))
-            out.extend(struct.pack('<H', distance - 1))
-            count = length
-        else:
-            literals.append(data[cursor])
-            if len(literals) == 128:
-                flush()
-            count = 1
-        for position in range(cursor, cursor + count):
-            if position + 3 <= len(data):
-                queue = positions[data[position:position + 3]]
-                while queue and position - queue[0] > 4096:
-                    queue.popleft()
-                queue.append(position)
-        cursor += count
-    flush()
-    return bytes(out)
-
-
-def decompress(data, expected):
-    result, cursor = bytearray(), 0
-    while len(result) < expected:
-        tag = data[cursor]
-        cursor += 1
-        if tag < 128:
-            length = tag + 1
-            result.extend(data[cursor:cursor + length])
-            cursor += length
-        else:
-            distance, = struct.unpack_from('<H', data, cursor)
-            cursor += 2
-            distance += 1
-            length = (tag & 127) + 3
-            if distance > len(result) or len(result) + length > expected:
-                raise ValueError('invalid LZSS match')
-            for _ in range(length):
-                result.append(result[-distance])
-    if cursor != len(data) or len(result) != expected:
-        raise ValueError('incorrect LZSS stream length')
-    return bytes(result)
-
-
-def encode_storage(data):
-    # Three little-endian bytes become four tagged 6-bit values. No data byte
-    # can resemble the high byte of a current firmware/RAM address.
-    out = bytearray()
-    for cursor in range(0, len(data), 3):
-        word = int.from_bytes(data[cursor:cursor + 3].ljust(3, b'\0'), 'little')
-        out.extend(0x80 | ((word >> shift) & 63) for shift in (0, 6, 12, 18))
-    return bytes(out)
-
-
-def decode_storage(data, size):
-    if len(data) != ((size + 2) // 3) * 4:
-        raise ValueError('incorrect sextet stream size')
-    out = bytearray()
-    for cursor in range(0, len(data), 4):
-        word = 0
-        for index, digit in enumerate(data[cursor:cursor + 4]):
-            if not 0x80 <= digit <= 0xBF:
-                raise ValueError('incorrect sextet alphabet')
-            word |= (digit & 63) << (index * 6)
-        out.extend(word.to_bytes(3, 'little'))
-    if any(out[size:]):
-        raise ValueError('nonzero sextet padding')
-    return bytes(out[:size])
-
-
-def generate():
-    lines = ['/* Generated by scripts/generate-manager-assets.py; do not edit. */']
-    records, raw_total, stored_total = [], 0, 0
-    for index, (name, source) in enumerate(ASSETS):
+def build_resources():
+    """Return {filename: image_bytes} and the .inc metadata text."""
+    records, files, raw_total = [], {}, 0
+    for name, source in ASSETS:
         path = ROOT / 'manager/src/common' / source
         width, height, rgba = read_png(path)
         image = to_lvgl(width, height, rgba)
-        packed = compress(image)
-        stored = encode_storage(packed)
-        if decode_storage(stored, len(packed)) != packed:
-            raise ValueError(f'{name}: sextet round trip failed')
-        # Even unaligned words stay above 0x80000000. The verifier scans
-        # aligned LE32 words; checking every byte position is stricter.
-        if any(int.from_bytes(stored[i:i + 4], 'little') < 0x80000000
-               for i in range(len(stored) - 3)):
-            raise ValueError(f'{name}: unsafe stored word')
-        restored = decompress(decode_storage(stored, len(packed)), len(image))
-        if restored != image:
-            raise ValueError(f'{name}: compression round trip failed')
-        verify_image(restored, width, height, rgba)
-        # Alphabetic nibbles also keep ASCII hash words outside 0x34xx scratch.
-        digest = hashlib.sha256(image).hexdigest()[:12].translate(
-            str.maketrans('0123456789abcdef', 'ABCDEFGHIJKLMNOP'))
-        lines.append(f'/* {source}: {width}x{height}, straight-alpha BGRA. */')
-        lines.append(f'static const unsigned char asset_{index}[] = {{')
-        for offset in range(0, len(stored), 20):
-            lines.append('    ' + ','.join(f'0x{b:02x}' for b in stored[offset:offset + 20]) + ',')
-        lines.append('};')
-        records.append(f'    {{"{name}-{digest}.bin", asset_{index}, {len(packed)}u, {len(image)}u}},')
+        verify_image(image, width, height, rgba)
+        filename = f'{name}.bin'
+        files[filename] = image
+        records.append(f'    {{"{filename}", {len(image)}u}},')
         raw_total += len(image)
-        stored_total += len(stored)
+    lines = ['/* Generated by scripts/generate-manager-assets.py; do not edit. */']
     lines.extend(['static const struct asset_record asset_records[RH_MANAGER_ASSET_COUNT] = {', *records, '};', ''])
-    return '\n'.join(lines), raw_total, stored_total
+    return files, '\n'.join(lines), raw_total
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    content, raw_total, stored_total = generate()
+    files, content, raw_total = build_resources()
+    stale = OUTPUT.exists() and OUTPUT.read_text() != content
     if args.check:
-        if not OUTPUT.exists() or OUTPUT.read_text() != content:
-            print(f'{OUTPUT.relative_to(ROOT)} is stale; run {Path(__file__).name}', file=sys.stderr)
+        bad = []
+        for filename, image in files.items():
+            target = RESOURCE_DIR / filename
+            if not target.exists() or target.read_bytes() != image:
+                bad.append(str(target.relative_to(ROOT)))
+        if stale or bad:
+            if stale:
+                print(f'{OUTPUT.relative_to(ROOT)} is stale; run {Path(__file__).name}', file=sys.stderr)
+            for path in bad:
+                print(f'{path} is stale; run {Path(__file__).name}', file=sys.stderr)
             return 1
     else:
+        RESOURCE_DIR.mkdir(parents=True, exist_ok=True)
+        for filename, image in files.items():
+            (RESOURCE_DIR / filename).write_bytes(image)
         OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         OUTPUT.write_text(content)
-    print(f'{len(ASSETS)} assets verified: {raw_total:,} image bytes; {stored_total:,} encoded embedded bytes; 4,096-byte decode window')
+    print(f'{len(ASSETS)} resources verified: {raw_total:,} image bytes as .canopus package resources')
     return 0
 
 

@@ -24,3 +24,22 @@ include_dirs = ["include"]
 include = ["xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043"]
 [capabilities]
 required = []
+[resources]
+# LVGL v9 image resources shipped inside the .canopus package and extracted by
+# the installer into the module data root. Never embedded in the ELF.
+files = [
+    "build/manager-resources/status-running.bin",
+    "build/manager-resources/status-config-error.bin",
+    "build/manager-resources/status-unresponsive.bin",
+    "build/manager-resources/reload.bin",
+    "build/manager-resources/reload-wide.bin",
+    "build/manager-resources/del.bin",
+    "build/manager-resources/del-wide.bin",
+    "build/manager-resources/none.bin",
+    "build/manager-resources/connect.bin",
+    "build/manager-resources/choose.bin",
+    "build/manager-resources/download.bin",
+    "build/manager-resources/error.bin",
+    "build/manager-resources/succ.bin",
+    "build/manager-resources/logo.bin",
+]
