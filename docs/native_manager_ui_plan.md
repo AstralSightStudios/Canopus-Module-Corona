@@ -188,6 +188,7 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
    - **已安装主题行**：使用 `CANOPUS_UI_NODE_ACTION_ROW`（右侧带 `>` 箭头）：
      - `label`（主标题）：`manifest.name`（若 manifest 损坏则回退为 `themeId`）
      - `detail`（副标题）：合并显示 `"{author} · v{version} · {description}"`（无作者/版本时显示 `"资源包详情 · {description}"`，manifest 损坏时显示 `"corona.json 不可用 · 包信息不可用"`）
+     - 读取已安装包信息时优先 `corona.json`，缺失时才读取 `canora.json`，不额外探测或解析备用清单。列表和详情只读取元数据，不编译映射、背景、日历规则；规则校验留在混搭和应用路径。
      - 短按（未进入拖拽）推入 `ROUTE_RESOURCE_DETAIL`。
    - **系统样式分界行 (`@system`)**：使用 `CANOPUS_UI_NODE_STATUS_ROW`（无右侧箭头）：
      - `label`：`"系统样式"`

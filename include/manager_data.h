@@ -49,6 +49,8 @@ const char *rh_manager_data_root(const struct rh_manager_data *);
 uint32_t rh_manager_data_order_count(const struct rh_manager_data *);
 int rh_manager_data_order_get(struct rh_manager_data *, uint32_t index,
                               char id[65], struct rh_manager_metadata *);
+/* Reads installed display metadata without compiling mapping/calendar rules.
+ * corona.json wins; canora.json is used only when corona.json is absent. */
 int rh_manager_data_metadata(struct rh_manager_data *, const char *id,
                              struct rh_manager_metadata *);
 int rh_manager_data_move(struct rh_manager_data *, uint32_t from, uint32_t to);

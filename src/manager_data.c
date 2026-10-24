@@ -423,17 +423,17 @@ static int add_mapping(struct rh_manager_data *d,struct pack *p,struct json v,in
     p->maps[p->count++]=m; return 0;
 }
 static int calendar_text(struct rh_manager_data *,const struct pack *,struct text *,int);
-static int load_pack(struct rh_manager_data *d,const char *id,struct pack *p) {
-    char file[256],base[80]; struct json j,f,v; const char *cur=0; int rc,legacy; uint32_t i; int64_t number_value;
+static int load_pack_metadata(struct rh_manager_data *d,const char *id,struct pack *p,struct json *manifest) {
+    char file[256],base[80]; struct json j,f,v; const char *cur=0; int rc; int64_t number_value;
     zero(p,sizeof(*p)); if(!valid_id(id)) return -22;
     if(path_join(base,"themes/",id)||path_join(file,base,"/corona.json")) return -22;
+    /* Installed canonical metadata takes precedence. An unused legacy path
+     * must not make a readable package depend on another stat or parse. */
     rc=read_text(d,file,65536,&p->document,&j);
-    if(path_join(file,base,"/canora.json")) { free_pack(d,p); return -22; }
-    { struct canopus_fs_stat legacy_stat;
-      legacy=d->ctx->fs->stat(d->ctx,file,&legacy_stat); }
-    if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=read_text(d,file,65536,&p->document,&j);
-    else if(!rc && legacy==0) rc=-22;
-    else if(!rc && legacy!=CANOPUS_SVC_ERR_NOTFOUND) rc=legacy;
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) {
+        if(path_join(file,base,"/canora.json")) return -22;
+        rc=read_text(d,file,65536,&p->document,&j);
+    }
     if(rc) goto bad;
     if(*j.p!='{' || !jeq(field(j,"format"),"canopus-resource-pack") || integer(field(j,"formatVersion"),&number_value) || number_value!=1) { rc=-22; goto bad; }
     if(metadata_text(j,"themeId",p->meta.id,sizeof(p->meta.id),1,0)||!equal(p->meta.id,id)||
@@ -452,6 +452,13 @@ static int load_pack(struct rh_manager_data *d,const char *id,struct pack *p) {
         if(rc>=0) rc=put(p->meta.targets,sizeof(p->meta.targets),targets.p ? targets.p:"");
         release(d,targets.p); if(rc) goto bad;
     }
+    p->meta.available=1; if(manifest) *manifest=j; return 0;
+bad:
+    free_pack(d,p); return fail(d,rc,"资源包 corona.json 无效或不可读取");
+}
+static int load_pack(struct rh_manager_data *d,const char *id,struct pack *p) {
+    struct json j,f,v; const char *cur=0; int rc; uint32_t i;
+    rc=load_pack_metadata(d,id,p,&j); if(rc) return rc;
     f=field(j,"mappings"); cur=0; while((rc=next_array(f,&cur,&v))>0) { rc=add_mapping(d,p,v,0); if(rc) break; } if(rc<0) goto bad;
     f=field(j,"quickappIcons"); cur=0; if(f.p) { while((rc=next_array(f,&cur,&v))>0) { rc=add_mapping(d,p,v,1); if(rc) break; } if(rc<0) goto bad; }
     f=field(j,"backgrounds"); if(f.p) {
@@ -694,9 +701,19 @@ uint32_t rh_manager_data_order_count(const struct rh_manager_data *d) { return d
 int rh_manager_data_metadata(struct rh_manager_data *d,const char *id,struct rh_manager_metadata *out) {
     struct pack p; int rc; if(!d||!id||!out||find_id(d->ids,d->count,id)<0) return -22;
     zero(out,sizeof(*out)); put(out->id,sizeof(out->id),id); put(out->name,sizeof(out->name),id);
-    rc=load_pack(d,id,&p); if(!rc) { *out=p.meta; free_pack(d,&p); }
-    /* Unreadable metadata remains represented in resource rows and detail UI.
-     * Catalog and apply calls return the actual parse/I/O error instead. */
+    rc=load_pack_metadata(d,id,&p,0); if(!rc) { *out=p.meta; free_pack(d,&p); }
+    else if(d->ctx->log && d->ctx->log->warn) {
+        char message[96],digits[10]; uint32_t n,k=0,value=rc<0 ? 0u-(uint32_t)rc:(uint32_t)rc;
+        put(message,sizeof(message),"metadata "); n=slen(message);
+        put(message+n,sizeof(message)-n,id); n=slen(message);
+        put(message+n,sizeof(message)-n," rc="); n=slen(message);
+        if(rc<0) message[n++]='-';
+        do { digits[k++]=(char)('0'+value%10u); value/=10u; } while(value);
+        while(k) message[n++]=digits[--k]; message[n]=0;
+        d->ctx->log->warn(d->ctx,message);
+    }
+    /* Display reads metadata only; rule validation belongs to catalog/apply.
+     * Unreadable metadata remains represented in resource rows and detail UI. */
     return rc;
 }
 int rh_manager_data_order_get(struct rh_manager_data *d,uint32_t index,char id[65],struct rh_manager_metadata *out) {

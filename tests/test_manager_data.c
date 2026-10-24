@@ -13,7 +13,7 @@
 
 static char sandbox[512];
 static int fail_write,fail_rename,fail_unlink,fail_close,alloc_budget=-1;
-static const char *fail_write_path,*fail_rename_path;
+static const char *fail_write_path,*fail_rename_path,*fail_stat_path;
 static uint32_t blocks,peak_blocks,live_bytes,peak_bytes;
 struct allocation_header { uint64_t bytes; uint64_t alignment; };
 static int resolve(char out[1024],const char *p) {
@@ -42,7 +42,7 @@ static int64_t fs_size(const struct canopus_context_v1 *c,int fd) {struct stat s
 static int fs_sync(const struct canopus_context_v1 *c,int fd) {(void)c;return fsync(fd)<0?-errno:0;}
 static int fs_remove(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(fail_unlink)return -EIO;int rc=resolve(path,p);return rc?rc:(unlink(path)<0?-errno:0);}
 static int fs_rename(const struct canopus_context_v1 *c,const char *a,const char *b) {char x[1024],y[1024];(void)c;if(fail_rename||(fail_rename_path&&!strcmp(b,fail_rename_path)))return -EIO;int rc=resolve(x,a);if(!rc)rc=resolve(y,b);return rc?rc:(rename(x,y)<0?-errno:0);}
-static int fs_stat(const struct canopus_context_v1 *c,const char *p,struct canopus_fs_stat *o) {char path[1024];struct stat s;(void)c;int rc=resolve(path,p);if(rc)return rc;if(stat(path,&s)<0)return -errno;o->size=(uint32_t)s.st_size;o->is_dir=(uint8_t)S_ISDIR(s.st_mode);return 0;}
+static int fs_stat(const struct canopus_context_v1 *c,const char *p,struct canopus_fs_stat *o) {char path[1024];struct stat s;(void)c;if(fail_stat_path&&!strcmp(p,fail_stat_path))return -EIO;int rc=resolve(path,p);if(rc)return rc;if(stat(path,&s)<0)return -errno;o->size=(uint32_t)s.st_size;o->is_dir=(uint8_t)S_ISDIR(s.st_mode);return 0;}
 static int fs_exists(const struct canopus_context_v1 *c,const char *p) {struct canopus_fs_stat st;int rc=fs_stat(c,p,&st);return rc==-ENOENT?0:(rc?rc:1);}
 static int fs_mkdir(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;int rc=resolve(path,p);return rc?rc:(mkdir(path,0700)<0?-errno:0);}
 static void *fs_opendir(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(resolve(path,p))return 0;return opendir(path);}
@@ -108,8 +108,34 @@ static void test_faults(void) {
     assert(!fs_remove(&ctx,"resource-order.json"));
     for(i=0;i<30;i++) {alloc_budget=i;rc=rh_manager_data_create(&ctx,0,&d);alloc_budget=-1;if(!rc)rh_manager_data_destroy(d);else assert(rc==-12);assert(!blocks);}
     assert(!rh_manager_data_create(&ctx,0,&d));baseline=blocks;alloc_budget=0;rc=rh_manager_data_refresh(d);assert(rc==0||rc==-12);alloc_budget=-1;assert(blocks==baseline);assert(rh_manager_data_order_count(d)==3);
-    fixture("themes/alpha/canora.json",alpha);struct rh_manager_metadata meta;assert(rh_manager_data_metadata(d,"alpha",&meta)==-22);assert(!meta.available&&!strcmp(meta.name,"alpha"));
+    fixture("themes/alpha/corona.json","broken");struct rh_manager_metadata meta;assert(rh_manager_data_metadata(d,"alpha",&meta)==-22);assert(!meta.available&&!strcmp(meta.name,"alpha"));
     rh_manager_data_destroy(d);assert(!blocks);cleanup_dir(sandbox);
+}
+static void test_installed_metadata(void) {
+    struct rh_manager_data *d=0;struct rh_manager_metadata meta;uint32_t count;char *text;
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));
+    /* Reading installed metadata must not depend on an unused legacy stat. */
+    fail_stat_path="themes/alpha/canora.json";
+    assert(!rh_manager_data_metadata(d,"alpha",&meta));assert(meta.available&&!strcmp(meta.name,"主题 A"));
+    assert(!rh_manager_data_prepare_apply(d,"active/8"));
+    text=read_fixture("active/8/mappings.tsv");assert(strstr(text,"/resource/a/x.bin\tthemes/alpha/icons/x.bin"));free(text);
+    assert(!rh_manager_data_complete_apply(d,0));fail_stat_path=0;
+    /* Canonical installed metadata wins over a leftover legacy manifest. */
+    fixture("themes/alpha/canora.json",beta);
+    assert(!rh_manager_data_metadata(d,"alpha",&meta));assert(meta.available&&!strcmp(meta.name,"主题 A"));
+    assert(!rh_manager_data_refresh(d));assert(!rh_manager_data_prepare_apply(d,"active/9"));assert(!rh_manager_data_complete_apply(d,0));
+    /* A mapping error belongs to catalog/apply, not the metadata display. */
+    fixture("themes/alpha/corona.json","{\"format\":\"canopus-resource-pack\",\"formatVersion\":1,\"themeId\":\"alpha\",\"name\":\"Readable metadata\",\"author\":\"Alice\",\"mappings\":false}");
+    assert(!rh_manager_data_refresh(d));
+    assert(!rh_manager_data_metadata(d,"alpha",&meta));assert(meta.available&&!strcmp(meta.name,"Readable metadata")&&!strcmp(meta.author,"Alice"));
+    assert(rh_manager_data_mix_count(d,&count)==-22);assert(rh_manager_data_prepare_apply(d,"active/10")==-22);
+    /* Legacy-only installs work; a malformed canonical file is not masked. */
+    fixture("themes/alpha/canora.json",alpha);fixture("themes/alpha/corona.json","broken");
+    assert(rh_manager_data_metadata(d,"alpha",&meta)==-22&&!meta.available);
+    assert(!fs_remove(&ctx,"themes/alpha/corona.json"));assert(!rh_manager_data_refresh(d));
+    assert(!rh_manager_data_metadata(d,"alpha",&meta));assert(meta.available&&!strcmp(meta.name,"主题 A"));
+    assert(!rh_manager_data_prepare_apply(d,"active/11"));assert(!rh_manager_data_complete_apply(d,0));
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
 static void test_overlay(void) {
     struct rh_manager_data *d=0; char name[160],*text; uint32_t i;
@@ -266,4 +292,4 @@ static void test_failed_close_buffer_ownership(void) {
     assert(live_bytes==baseline);assert(fs_exists(&ctx,"themes/beta/x.bin")==1);
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
-int main(void) {test_core();test_apply_overlap();test_faults();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+int main(void) {test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
