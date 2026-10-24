@@ -37,8 +37,10 @@ struct rh_manager_data_hooks {
     void *cookie;
 };
 /* Creates one shared catalog; no page owns a copy. Caller destroys on unload.
- * Files are relative to fs.get_data_path. Missing registry is an empty install,
- * corrupt registry/order/overrides is an error, not an empty list. */
+ * Files are relative to fs.get_data_path. Before the first completed legacy
+ * import, refresh merges old quickapp packs without replacing registered IDs.
+ * Missing registry is an empty install; corrupt registry/order/overrides is an
+ * error, not an empty list. */
 int rh_manager_data_create(const struct canopus_context_v1 *,
                            const struct rh_manager_data_hooks *, struct rh_manager_data **);
 void rh_manager_data_destroy(struct rh_manager_data *);

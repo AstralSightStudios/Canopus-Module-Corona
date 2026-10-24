@@ -13,6 +13,7 @@
 
 static char sandbox[512];
 static int fail_write,fail_rename,fail_unlink,fail_close,alloc_budget=-1;
+static const char *fail_write_path,*fail_rename_path;
 static uint32_t blocks,peak_blocks,live_bytes,peak_bytes;
 struct allocation_header { uint64_t bytes; uint64_t alignment; };
 static int resolve(char out[1024],const char *p) {
@@ -31,7 +32,7 @@ static int resolve(char out[1024],const char *p) {
     return snprintf(out,1024,"%s/%s",sandbox,p)>=1024 ? -22:0;
 }
 static int fs_open(const struct canopus_context_v1 *c,const char *p,uint32_t f) {
-    char path[1024]; int rc;(void)c;rc=resolve(path,p);if(rc)return rc;
+    char path[1024]; int rc;(void)c;if((f&CANOPUS_FS_WRITE)&&fail_write_path&&!strcmp(p,fail_write_path))return -EIO;rc=resolve(path,p);if(rc)return rc;
     rc=open(path,(f&CANOPUS_FS_WRITE) ? O_WRONLY|O_TRUNC|O_CREAT:O_RDONLY,0600);return rc<0?-errno:rc;
 }
 static int fs_read(const struct canopus_context_v1 *c,int fd,void *p,uint32_t n) {(void)c;ssize_t rc=read(fd,p,n);return rc<0?-errno:(int)rc;}
@@ -40,7 +41,7 @@ static int fs_close(const struct canopus_context_v1 *c,int fd) {(void)c;int rc=c
 static int64_t fs_size(const struct canopus_context_v1 *c,int fd) {struct stat s;(void)c;return fstat(fd,&s)<0?-errno:s.st_size;}
 static int fs_sync(const struct canopus_context_v1 *c,int fd) {(void)c;return fsync(fd)<0?-errno:0;}
 static int fs_remove(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(fail_unlink)return -EIO;int rc=resolve(path,p);return rc?rc:(unlink(path)<0?-errno:0);}
-static int fs_rename(const struct canopus_context_v1 *c,const char *a,const char *b) {char x[1024],y[1024];(void)c;if(fail_rename)return -EIO;int rc=resolve(x,a);if(!rc)rc=resolve(y,b);return rc?rc:(rename(x,y)<0?-errno:0);}
+static int fs_rename(const struct canopus_context_v1 *c,const char *a,const char *b) {char x[1024],y[1024];(void)c;if(fail_rename||(fail_rename_path&&!strcmp(b,fail_rename_path)))return -EIO;int rc=resolve(x,a);if(!rc)rc=resolve(y,b);return rc?rc:(rename(x,y)<0?-errno:0);}
 static int fs_stat(const struct canopus_context_v1 *c,const char *p,struct canopus_fs_stat *o) {char path[1024];struct stat s;(void)c;int rc=resolve(path,p);if(rc)return rc;if(stat(path,&s)<0)return -errno;o->size=(uint32_t)s.st_size;o->is_dir=(uint8_t)S_ISDIR(s.st_mode);return 0;}
 static int fs_exists(const struct canopus_context_v1 *c,const char *p) {struct canopus_fs_stat st;int rc=fs_stat(c,p,&st);return rc==-ENOENT?0:(rc?rc:1);}
 static int fs_mkdir(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;int rc=resolve(path,p);return rc?rc:(mkdir(path,0700)<0?-errno:0);}
@@ -135,6 +136,90 @@ static void test_migration(void) {
     assert(rh_manager_data_delete(d,"alpha")==RH_MANAGER_ERR_ACTIVE);
     rh_manager_data_destroy(d); assert(!blocks); cleanup_dir(sandbox);
 }
+static void setup_legacy_merge(void) {
+    setup();assert(!fs_mkdir(&ctx,"legacy"));assert(!fs_mkdir(&ctx,"legacy/themes"));
+    assert(!fs_mkdir(&ctx,"legacy/themes/alpha"));fixture("legacy/themes/alpha/corona.json","OLD METADATA");
+    assert(!fs_mkdir(&ctx,"legacy/themes/alpha/icons"));fixture("legacy/themes/alpha/icons/x.bin","OLD A");
+    assert(!fs_mkdir(&ctx,"legacy/themes/gamma"));
+    fixture("legacy/themes/gamma/corona.json","{\"format\":\"canopus-resource-pack\",\"formatVersion\":1,\"themeId\":\"gamma\",\"name\":\"Imported\",\"mappings\":[{\"source\":\"/resource/g.bin\",\"destination\":\"g.bin\"}]}");
+    fixture("legacy/themes/gamma/g.bin","G");fixture("legacy/interconnect-themes.json","[\"alpha\",\"gamma\"]");
+    fixture("legacy/resource-order.json","{\"version\":1,\"order\":[\"gamma\",\"@system\",\"alpha\"]}");
+    fixture("legacy/resource-overrides.json","{\"version\":1,\"overrides\":{\"/resource/g.bin\":\"gamma\"}}");
+    fixture("legacy/mappings.tsv","OLD MAPPINGS");
+}
+static void test_migration_merge(void) {
+    struct rh_manager_data *d=0;struct rh_manager_metadata meta;char id[65],*text;
+    setup_legacy_merge();
+    fixture("resource-order.json","{\"version\":1,\"order\":[\"beta\",\"@system\",\"alpha\"]}");
+    fixture("resource-overrides.json","{\"version\":1,\"overrides\":{\"/resource/a/x.bin\":\"beta\"}}");
+    fixture("mappings.tsv","/resource/a/x.bin\tthemes/beta/x.bin\n");
+    assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==4);
+    assert(!rh_manager_data_metadata(d,"alpha",&meta)&&!strcmp(meta.name,"主题 A"));
+    assert(!rh_manager_data_metadata(d,"gamma",&meta)&&!strcmp(meta.name,"Imported"));
+    text=read_fixture("themes/alpha/icons/x.bin");assert(!strcmp(text,"A"));free(text);
+    text=read_fixture("themes/gamma/g.bin");assert(!strcmp(text,"G"));free(text);
+    text=read_fixture("interconnect-themes.json");assert(!strcmp(text,"[\"alpha\",\"beta\",\"gamma\"]"));free(text);
+    text=read_fixture("resource-overrides.json");assert(!strcmp(text,"{\"version\":1,\"overrides\":{\"/resource/a/x.bin\":\"beta\"}}"));free(text);
+    text=read_fixture("mappings.tsv");assert(!strcmp(text,"/resource/a/x.bin\tthemes/beta/x.bin\n"));free(text);
+    assert(!rh_manager_data_order_get(d,1,id,0)&&!strcmp(id,"beta"));
+    assert(!rh_manager_data_order_get(d,2,id,0)&&!strcmp(id,"@system"));
+    assert(!rh_manager_data_order_get(d,3,id,0)&&!strcmp(id,"alpha"));
+    assert(!rh_manager_data_delete(d,"gamma"));assert(!rh_manager_data_refresh(d));assert(rh_manager_data_order_count(d)==3);
+    rh_manager_data_destroy(d);assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==3);
+    assert(fs_exists(&ctx,"legacy/themes/gamma/g.bin")==1&&fs_exists(&ctx,"themes/gamma/g.bin")==0);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+static void test_migration_empty_native(void) {
+    struct rh_manager_data *d=0;char *text;
+    setup_legacy_merge();fixture("interconnect-themes.json","[]");
+    assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==3);
+    text=read_fixture("interconnect-themes.json");assert(!strcmp(text,"[\"alpha\",\"gamma\"]"));free(text);
+    assert(fs_exists(&ctx,"mappings.tsv")==0&&fs_exists(&ctx,"resource-overrides.json")==0);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+static void test_migration_retry(void) {
+    struct rh_manager_data *d=0;char *text;const char *failures[]={"copy","registry","marker"};
+    for(uint32_t i=0;i<3;i++) {
+        setup_legacy_merge();
+        if(!strcmp(failures[i],"copy")) fail_write_path="themes/gamma/g.bin";
+        else fail_rename_path=i==1?"interconnect-themes.json":"resource-legacy-imported";
+        assert(rh_manager_data_create(&ctx,0,&d)==-EIO);assert(!d&&!blocks&&!live_bytes);
+        assert(fs_exists(&ctx,"resource-legacy-imported")==0);
+        text=read_fixture("interconnect-themes.json");
+        assert(!strcmp(text,i==2?"[\"alpha\",\"beta\",\"gamma\"]":"[\"alpha\",\"beta\"]"));free(text);
+        fail_write_path=fail_rename_path=0;
+        assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==4);
+        text=read_fixture("themes/gamma/g.bin");assert(!strcmp(text,"G"));free(text);
+        assert(fs_exists(&ctx,"resource-legacy-imported")==1);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+    }
+}
+static void test_migration_fresh_retry(void) {
+    struct rh_manager_data *d=0;char *text;
+    setup_legacy_merge();assert(!fs_remove(&ctx,"interconnect-themes.json"));
+    fixture("resource-order.json","{\"version\":1,\"order\":[\"@system\"]}");
+    fail_write_path="resource-overrides.json.manager-tmp";
+    assert(rh_manager_data_create(&ctx,0,&d)==-EIO);assert(!d&&!blocks&&!live_bytes);
+    assert(fs_exists(&ctx,"resource-overrides.json")==0);
+    assert(fs_exists(&ctx,"interconnect-themes.json")==0);
+    fail_write_path=0;
+    assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==3);
+    text=read_fixture("resource-overrides.json");assert(!strcmp(text,"{\"version\":1,\"overrides\":{\"/resource/g.bin\":\"gamma\"}}"));free(text);
+    text=read_fixture("resource-order.json");assert(!strcmp(text,"{\"version\":1,\"order\":[\"gamma\",\"alpha\",\"@system\"]}"));free(text);
+    assert(fs_exists(&ctx,"resource-legacy-imported")==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+static void test_migration_invalid_registry(void) {
+    struct rh_manager_data *d=0;char *text;
+    const char *invalid[]={"broken","{}","[\"../alpha\"]","[\"alpha\",\"alpha\"]"};
+    for(uint32_t i=0;i<4;i++) {
+        setup_legacy_merge();fixture("legacy/interconnect-themes.json",invalid[i]);
+        assert(rh_manager_data_create(&ctx,0,&d)==-22);assert(!d&&!blocks&&!live_bytes);
+        text=read_fixture("interconnect-themes.json");assert(!strcmp(text,"[\"alpha\",\"beta\"]"));free(text);
+        assert(fs_exists(&ctx,"themes/gamma/g.bin")==0&&fs_exists(&ctx,"resource-legacy-imported")==0);
+        cleanup_dir(sandbox);
+    }
+}
 static void test_256_rules(void) {
     struct rh_manager_data *d=0; char *manifest=malloc(40000),path[160],*text; size_t used; uint32_t i,count;
     assert(manifest);setup();
@@ -181,4 +266,4 @@ static void test_failed_close_buffer_ownership(void) {
     assert(live_bytes==baseline);assert(fs_exists(&ctx,"themes/beta/x.bin")==1);
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
-int main(void) {test_core();test_apply_overlap();test_faults();test_overlay();test_migration();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+int main(void) {test_core();test_apply_overlap();test_faults();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}

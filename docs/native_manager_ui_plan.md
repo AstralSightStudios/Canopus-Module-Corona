@@ -389,12 +389,13 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
 - **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。
 - **原生存储与发布**：`get_data_path` 必须对应 `/data/canopus/m.corona/`；每次重载先写完整 `active/<generation>/{mappings.tsv,backgrounds.cfg,calendar.cfg}`，再由内部事务验证并发布 `active-config` 指针。指针内容为 `active/<非零规范 uint32>\n`。旧、新资源引用在刷新完成前共同受保护；只有匹配成功通知才能缩小保护范围。
 - **清理能力边界**：当前 SDK 没有目录删除接口。默认清理逐文件调用 `fs.remove`，成功后移除安装索引；空目录保留等待未来目录回收能力。文件删除、索引写入或清理失败均返回错误，不把失败显示为成功。
-- **旧存储导入**：保留旧快应用数据，复制到原生根后最后发布原生索引；导入不代表已应用，仍需内部重载事务。新传输的 `registry.*` 安装适配留待接收状态机实现。
+- **旧存储导入**：保留旧快应用数据，首次全量复制到原生根后最后发布原生索引；原生索引已存在时合并尚未登记的旧包，同名 ID 和已有原生配置保留。配置文件先复制到临时文件再 rename，失败可重试；完成标记 `resource-legacy-imported` 避免删除后复活，后续旧目录变化不持续同步。导入不代表已应用，仍需内部重载事务。框架目录枚举须按固件 `d_name +1` 解码，旧版 `+2` 会截掉首字节并阻断导入。新传输的 `registry.*` 安装适配留待接收状态机实现。
 
 ### Step 3：实现 6 路由原生 UI 视图与事件状态机
 - **`src/manager_ui.c`**：
   - 通过 `publish_native_app_stage` 的两个独立阶段登记 `ctx->ui->set_entry` 与 `ctx->launcher->set_entry`。
   - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT`、`ROUTE_RECEIVE` 的树构建与增量提交。
+  - 错误页保留标题返回，内部返回由模块消费；替换页面提交失败时恢复原路由、条目数和错误信息，连续返回不会因不可见的首页状态退出应用。仅首页的 `on_back` 允许框架关闭页面。配套 Supervisor 在 `.155` / `.179` / `.043` 的模块页面绑定系统右滑完成回调，复用相同层级；接管后阻止固件再次关闭页面，普通手势中间阶段不退栈。精确 ABI 静态证据见 Canopus `docs/investigations/native-system-back.md`。
   - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、双击删除计时、虚拟滚动窗口切换与 `scroll_y` 记忆恢复、常亮锁管理。
 
 ### Step 4：Host 测试与 Mirage 模拟器双端验收（`.043` & `.155`）

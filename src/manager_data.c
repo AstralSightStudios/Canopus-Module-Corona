@@ -527,31 +527,68 @@ static int migrate_legacy(struct rh_manager_data *d) {
     const char *legacy="/data/quickapp/files/ng.lst.corona/";
 #endif
     static const char *const files[]={"resource-order.json","resource-files.json","resource-overrides.json","resource-active-generations.json","mappings.tsv","backgrounds.cfg","calendar.cfg"};
-    char source[256],*index=0; struct json j; uint32_t i; char **ids=0; uint32_t count=0; int rc;
-    rc=read_text(d,"interconnect-themes.json",UINT32_MAX-1u,&index,&j);
-    if(rc!=CANOPUS_SVC_ERR_NOTFOUND) { release(d,index); return rc; }
-    if(path_join(source,legacy,"interconnect-themes.json")) return -22;
-    rc=read_text(d,source,UINT32_MAX-1u,&index,&j); if(rc==CANOPUS_SVC_ERR_NOTFOUND) return 0; if(rc) return rc;
+    static const char marker[]="resource-legacy-imported";
+    char source[256],target[256],temporary[256],*index=0,*native=0,*complete=0;
+    struct json j; struct text merged={0,0,0}; struct canopus_fs_stat st;
+    uint32_t i,native_count=0,count=0,added=0; char **ids=0,**native_ids=0; int rc,fresh;
+    rc=read_text(d,marker,2u,&complete,0);
+    if(!rc) { rc=equal(complete,"1\n") ? 0:-22; release(d,complete); return rc; }
+    if(rc!=CANOPUS_SVC_ERR_NOTFOUND) return rc;
+    rc=read_text(d,"interconnect-themes.json",UINT32_MAX-1u,&native,&j);
+    fresh=rc==CANOPUS_SVC_ERR_NOTFOUND;
+    if(!fresh && !rc) rc=string_list(d,j,&native_ids,&native_count,0);
+    if(!fresh && rc) goto done;
+    if(path_join(source,legacy,"interconnect-themes.json")) { rc=-22; goto done; }
+    rc=read_text(d,source,UINT32_MAX-1u,&index,&j);
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) { rc=0; goto done; }
+    if(rc) goto done;
     rc=string_list(d,j,&ids,&count,0); if(rc) goto done;
     rc=mkdir_ok(d,"themes"); if(rc) goto done;
-    if(path_join(source,legacy,"themes")) { rc=-22; goto done; }
-    /* Include materialized .active-* directories referenced by old config,
-     * not only package IDs. Copying keeps the source installation untouched. */
-    { struct canopus_fs_stat old_themes;
-      rc=d->ctx->fs->stat(d->ctx,source,&old_themes);
-      if(rc==CANOPUS_SVC_ERR_NOTFOUND && count==0u) rc=0;
-      else if(!rc) rc=old_themes.is_dir ? copy_directory(d,source,"themes",0):-20;
+    if(fresh) {
+        if(path_join(source,legacy,"themes")) { rc=-22; goto done; }
+        /* A first import also retains materialized .active-* resources needed
+         * by the old root configuration. Never rewrite the source install. */
+        rc=d->ctx->fs->stat(d->ctx,source,&st);
+        if(rc==CANOPUS_SVC_ERR_NOTFOUND && count==0u) rc=0;
+        else if(!rc) rc=st.is_dir ? copy_directory(d,source,"themes",0):-20;
+        for(i=0;!rc && i<sizeof(files)/sizeof(files[0]);i++) {
+            rc=d->ctx->fs->stat(d->ctx,files[i],&st);
+            if(!rc) continue;
+            if(rc!=CANOPUS_SVC_ERR_NOTFOUND) break;
+            if(path_join(source,legacy,files[i])||path_join(temporary,files[i],".manager-tmp")) { rc=-22; break; }
+            rc=copy_file(d,source,temporary);
+            if(!rc) rc=d->ctx->fs->rename(d->ctx,temporary,files[i]);
+            if(rc) (void)d->ctx->fs->remove(d->ctx,temporary);
+            if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=0;
+        }
+        if(!rc) rc=atomic_text(d,"interconnect-themes.json",index,slen(index));
+    } else {
+        /* Registered native packages win as a whole, including their metadata.
+         * Copy only new IDs; existing ordering, choices and active references
+         * belong to the native installation and must remain untouched. */
+        rc=append(d,&merged,"[");
+        for(i=0;!rc && i<native_count;i++) {
+            if(i) rc=append(d,&merged,",");
+            if(!rc) rc=quoted(d,&merged,native_ids[i]);
+        }
+        for(i=0;!rc && i<count;i++) {
+            if(find_id(native_ids,native_count,ids[i])>=0) continue;
+            if(path_join(target,"themes/",ids[i])||path_join(source,legacy,target)) { rc=-22; break; }
+            rc=copy_directory(d,source,target,0);
+            if(!rc && (native_count || added)) rc=append(d,&merged,",");
+            if(!rc) rc=quoted(d,&merged,ids[i]);
+            if(!rc) added++;
+        }
+        if(!rc) rc=append(d,&merged,"]");
+        /* No partially copied package is visible before registry publication. */
+        if(!rc && added) rc=atomic_text(d,"interconnect-themes.json",merged.p,merged.n);
     }
-    for(i=0;!rc && i<sizeof(files)/sizeof(files[0]);i++) {
-        if(path_join(source,legacy,files[i])) { rc=-22; break; }
-        rc=copy_file(d,source,files[i]); if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=0;
-    }
-    /* Registry is the migration commit marker. Failed copies can be retried;
-     * originals are never removed or rewritten. Config paths remain relative
-     * themes/... and expand against the native root in the ABI2 module. */
-    if(!rc) rc=atomic_text(d,"interconnect-themes.json",index,slen(index));
+    /* Written last so interrupted imports can retry. Once committed, deleting
+     * a migrated package must not resurrect it on refresh or next launch. */
+    if(!rc) rc=atomic_text(d,marker,"1\n",2u);
 done:
-    free_strings(d,ids,count); release(d,index); return rc;
+    free_strings(d,ids,count); free_strings(d,native_ids,native_count);
+    release(d,index); release(d,native); release(d,merged.p); return rc;
 }
 static int valid_choice(const char *s,int blur) { return equal(s,RH_MANAGER_DEFAULT)||equal(s,RH_MANAGER_SYSTEM)||(blur&&equal(s,RH_MANAGER_BLUR))||valid_id(s); }
 static int feature_index(const char *key) { uint32_t i; if(!prefix(key,"feature:")) return -1; for(i=0;i<5;i++) if(equal(key+8,feature_ids[i])) return (int)i; return -1; }

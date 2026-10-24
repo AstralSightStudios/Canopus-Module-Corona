@@ -18,7 +18,7 @@ static struct rh_transfer_ui_state transfer;
 static rh_manager_state_listener listener;
 static void *listener_cookie;
 static uint32_t width=212,height=520,move_from,move_to,moves,selected,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
-static int wake_count,close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata;
+static int wake_count,close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
 static uint32_t refresh_count;
 static uint32_t subscription_count;
 static canopus_timer_callback_t timer_callback;
@@ -110,9 +110,9 @@ int rh_manager_set_transfer_state(const struct rh_transfer_ui_state *s) {transfe
 int rh_manager_assets_install(const struct canopus_context_v1 *c) {(void)c;return 0;}
 int rh_manager_asset_ensure(enum rh_manager_asset a,const char **path) {(void)a;*path="/data/canopus/m.corona/assets/image.bin";return 0;}
 const char *rh_manager_asset_path(enum rh_manager_asset a) {(void)a;return "/data/canopus/m.corona/assets/image.bin";}
-int rh_manager_data_create(const struct canopus_context_v1 *c,const struct rh_manager_data_hooks *h,struct rh_manager_data **out) {(void)c;(void)h;*out=(struct rh_manager_data *)&context;return 0;}
+int rh_manager_data_create(const struct canopus_context_v1 *c,const struct rh_manager_data_hooks *h,struct rh_manager_data **out) {(void)c;(void)h;if(fail_create){*out=0;return -5;}*out=(struct rh_manager_data *)&context;return 0;}
 void rh_manager_data_destroy(struct rh_manager_data *d) {(void)d;}
-int rh_manager_data_refresh(struct rh_manager_data *d) {(void)d;refresh_count++;return data_pending?CANOPUS_SVC_ERR_BUSY:0;}
+int rh_manager_data_refresh(struct rh_manager_data *d) {(void)d;refresh_count++;return fail_refresh?-5:data_pending?CANOPUS_SVC_ERR_BUSY:0;}
 uint32_t rh_manager_data_order_count(const struct rh_manager_data *d) {(void)d;return 400;}
 int rh_manager_data_metadata(struct rh_manager_data *d,const char *id,struct rh_manager_metadata *out) {
     (void)d;memset(out,0,sizeof(*out));strcpy(out->id,id);strcpy(out->name,"测试主题");strcpy(out->author,"作者");strcpy(out->version,"1.2.0");strcpy(out->description,"这是一份原始主题简介");strcpy(out->targets,"测试设备");out->available=1;
@@ -169,6 +169,8 @@ static void event(uint32_t key,uint32_t type,uint32_t ms,int32_t x,int32_t y,int
 }
 static void activate_text(const char *s) {uint32_t i=find_text(s);event(ui.committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);}
 static void back(void) {event(2,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);}
+/* Match the real host: any unconsumed callback finishes the module page. */
+static void host_back(void) {if(entry->on_back(&context,&ui,0)) assert(!close_page(&context));}
 static void tap(uint32_t key,uint32_t time) {event(key,CANOPUS_UI_EVENT_PRESS,time,10,10,0);event(key,CANOPUS_UI_EVENT_RELEASE,time+5,10,10,0);}
 static void assert_route(uint32_t route) {assert(ui.committed.nodes[0].key==1+route*10000);}
 int main(int argc,char **argv) {
@@ -186,6 +188,18 @@ int main(int argc,char **argv) {
     assert(ui.committed.styles[find_key(20)].corner_radius==32);
     assert(ui.committed.visuals[find_key(24)].x==(height==480?186:133));
     assert(ui.committed.visuals[find_key(24)].y==(height==480?-7:1));
+    /* Initial import errors must leave both return paths usable without a
+       data model. A failed home render must still consume the host's back. */
+    fail_create=1;
+    activate_text("资源管理");assert_route(1);find_text("读取资源包失败，请返回后重试。");
+    back();assert_route(0);assert(!close_count);
+    activate_text("资源管理");assert_route(1);host_back();assert_route(0);assert(!close_count);
+    activate_text("资源管理");assert_route(1);reject_apply=1;host_back();assert_route(1);assert(!close_count);
+    host_back();assert_route(0);assert(!close_count);
+    fail_create=0;
+    activate_text("资源管理");assert_route(1);
+    fail_refresh=1;back();activate_text("资源管理");assert_route(1);find_text("读取资源包失败，请返回后重试。");
+    host_back();assert_route(0);assert(!close_count);fail_refresh=0;
     /* CONTAIN images are native clickable viewports: use the child key,
        whose event_id remains zero, exactly as the firmware hit test does. */
     tap(31,100);assert(reloads==1 && prepared==1);assert(!strcmp(applied_dir,"active/2"));
@@ -224,6 +238,8 @@ int main(int argc,char **argv) {
     dense_metadata=0;event(10,CANOPUS_UI_EVENT_SCROLL,1700,0,0,0);
     event(1001,CANOPUS_UI_EVENT_PRESS,1900,20,120,0);event(1001,CANOPUS_UI_EVENT_RELEASE,1910,20,120,0);
     event(1001,CANOPUS_UI_EVENT_ACTIVATE,1911,20,120,0);assert_route(2);
+    host_back();assert_route(1);assert(!close_count);
+    event(1001,CANOPUS_UI_EVENT_ACTIVATE,1912,20,120,0);assert_route(2);
     /* Every byte in both values remains reachable; chunks are not shortened
        to fit the arena. The scroll walk also exercises variable-height fields. */
     for(i=0;i<12000;i+=50) {
@@ -247,7 +263,7 @@ int main(int argc,char **argv) {
     event(1002,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert_route(4);
     i=find_text("系统");event(ui.committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert(selected==1);
     i=find_text("系统");assert(ui.committed.nodes[i].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
-    back();assert_route(3);assert(ui.committed.visuals[find_key(10)].scroll_y==208);back();
+    host_back();assert_route(3);assert(!close_count);assert(ui.committed.visuals[find_key(10)].scroll_y==208);back();
     assert(!rh_manager_ui_show_receive());assert_route(5);assert(!wake_count);
     s.phase=RH_XFER_PHASE_RECEIVING;s.percent=68;assert(!rh_manager_set_transfer_state(&s));pump();assert(wake_count==1);
     i=find_type(CANOPUS_UI_NODE_PROGRESS,0);assert(ui.committed.values[i].value==68);
@@ -257,11 +273,14 @@ int main(int argc,char **argv) {
     s.phase=RH_XFER_PHASE_ERROR;s.detail=6;assert(!rh_manager_set_transfer_state(&s));pump();visible_copy("主题包完整性校验失败，请重新发送");
     s.phase=RH_XFER_PHASE_CANCELED;assert(!rh_manager_set_transfer_state(&s));pump();find_text("任务已取消");
     s.phase=RH_XFER_PHASE_RECEIVING;assert(!rh_manager_set_transfer_state(&s));pump();assert(wake_count==1);
+    host_back();assert_route(0);assert(!wake_count&&!close_count);
     entry->on_close(&context,0);assert(!wake_count);
     s.phase=RH_XFER_PHASE_INSTALLED;assert(!rh_manager_set_transfer_state(&s));pump();assert(!wake_count);
     assert(!rh_manager_ui_set_data_hooks(&hooks));assert(!rh_manager_ui_register(&context));assert(subscription_count==1);
     {struct rh_manager_data_hooks changed_hooks=hooks;changed_hooks.cookie=0;assert(rh_manager_ui_set_data_hooks(&changed_hooks)==CANOPUS_SVC_ERR_STATE);}
-    assert(!entry->on_open(&context,&ui,0));activate_text("资源管理");assert_route(1);entry->on_close(&context,0);
+    assert(!entry->on_open(&context,&ui,0));activate_text("资源管理");assert_route(1);
+    host_back();assert_route(0);assert(!close_count);
+    host_back();assert(close_count==1);
 #ifdef RH_MANAGER_UI_TEST
     assert(!entry->on_open(&context,&ui,0));
     event(20,CANOPUS_UI_EVENT_LONG_PRESS,50000,50,50,0);assert_route(5);
@@ -273,9 +292,9 @@ int main(int argc,char **argv) {
     }
     assert(transfer.phase==RH_XFER_PHASE_IDLE && !transfer.remote_connected && !wake_count);
     assert(probe_value("routes_mask")==63 && probe_value("phases_mask")==127);
-    /* The three intentional backend rejections above are latched even though
+    /* The four intentional backend rejections above are latched even though
        later renders recover. A clean emulator scenario expects zero. */
-    assert(probe_value("render_failures")==3);
+    assert(probe_value("render_failures")==4);
     assert(probe_value("idle_connected_seen")==1 && probe_value("received_68_seen")==1);
     assert(probe_value("render_error")==0 && probe_used<=256);
     entry->on_close(&context,0);

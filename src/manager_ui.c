@@ -204,8 +204,17 @@ static int load_route(uint32_t route,int refresh) {
     return rc;
 }
 static int navigate(uint32_t route,int refresh) {
+    uint32_t previous_route=U.route,previous_count=U.count;char previous_error[256];int rc;
+    copy(previous_error,sizeof(previous_error),U.error);
     cancel_gesture();U.delete_armed=0;U.toast[0]=0;U.route=route;
-    (void)load_route(route,refresh);sync_wake();return render();
+    (void)load_route(route,refresh);sync_wake();rc=render();
+    /* A rejected replacement leaves the old native page visible. Its route
+     * must still own the next back event instead of accidentally exiting. */
+    if(rc && U.ui->committed.nodes[0].key!=1u+route*10000u) {
+        U.route=previous_route;U.count=previous_count;
+        copy(U.error,sizeof(U.error),previous_error);sync_wake();
+    }
+    return rc;
 }
 static int build_home(struct canopus_ui_tree_v1 *t) {
     const char *title,*subtitle; char count[48]; uint32_t color,fg;
@@ -769,7 +778,11 @@ static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     sync_wake();rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
 }
 static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,void *cookie) {
-    (void)ctx;(void)ui;(void)cookie;return U.route==INDEX?1:back();
+    (void)ctx;(void)ui;(void)cookie;
+    if(U.route==INDEX) return 1;
+    /* The host interprets every nonzero result as permission to close the app.
+     * An internal pop owns this event even if its replacement tree fails. */
+    (void)back();return 0;
 }
 static void on_close(const struct canopus_context_v1 *ctx,void *cookie) {
     (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;U.delete_armed=0;sync_wake();
