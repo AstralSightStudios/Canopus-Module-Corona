@@ -250,8 +250,8 @@ static int build_home(struct canopus_ui_tree_v1 *t) {
     TRY(label_box(t,22,subtitle,U.wide?183:134,U.wide?34:32,14,54,
                   U.wide?(state==RH_MGR_STATE_RUNNING?24:26):(state==RH_MGR_STATE_RUNNING?17:state==RH_MGR_STATE_UNRESPONSIVE?21:24),fg));
     TRY(U.ctx->ui->end(t));
-    TRY(row(t,40,"资源管理","",EV_RESOURCES));TRY(box(t,40,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?122:128,0,0,-1,0));
-    TRY(row(t,41,"混搭微调","",EV_MIX));TRY(box(t,41,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?226:232,0,0,-1,0));
+    TRY(row(t,40,"资源管理","排序与管理资源包",EV_RESOURCES));TRY(box(t,40,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?122:128,0,0,-1,0));
+    TRY(row(t,41,"混搭微调","自由搭配资源样式",EV_MIX));TRY(box(t,41,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?226:232,0,0,-1,0));
     /* Bottom actions float 10px off the screen edge (the Band 11 content
        viewport stops 8px short of it), mirroring the Vela page placement. */
     return image_button(t,U.wide?RH_MANAGER_ASSET_RELOAD_WIDE:RH_MANAGER_ASSET_RELOAD,EV_RELOAD,U.wide?324:150,U.wide?80:78,
