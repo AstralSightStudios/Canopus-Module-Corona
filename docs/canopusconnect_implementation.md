@@ -1,6 +1,40 @@
 # CanopusConnect 精简协议的两端实现方案
 
-状态：实现计划，尚未修改 AstroBox / Canopus 的生产传输代码。对应[精简协议](canopusconnect_proto.md)和[消融实验](experiments/canopusconnect-ablation.md)。
+状态：设备端已接入生产构建并通过 host 验证；AstroBox 发送端仍按下文计划另行实现。设备端实现与实机验证边界见下节。对应[精简协议](canopusconnect_proto.md)和[消融实验](experiments/canopusconnect-ablation.md)。
+
+## 0. 设备端实现位置
+
+- `src/corona_connect.c`：12 字节帧解析、单个 4 KiB 接收缓冲、累计 ACK 与事件重试、控制屏障、租约和接收记录恢复、磁盘 SHA-256 校验。
+- `src/corona_archive.c`：不依赖系统 zlib 的分步 Store / Deflate ZIP 读取器，检查目录与本地头、CRC、路径和输出预算。
+- `src/manager_data.c`：manifest 与引用校验、不可变安装代次、哈希查询、安装恢复记录和 revision 分页 LIST；原生 UI 与接收器共用同一 catalog。
+- `src/corona_runtime.c`：串联接收、解压和登记，通过模块 owner 上的 10 ms 定时器推进；TIME v2 可用时启用后台定时器。页面关闭不撤销任务，安装成功不自动应用。
+- `src/module.c`：首次激活时启动接收器，初始激活失败时撤回 listener、timer 和临时工作区。
+
+验证入口：
+
+```sh
+sh scripts/test-corona-connect.sh
+sh scripts/test-corona-archive.sh
+sh scripts/test-manager-data.sh
+python3 scripts/test-corona-runtime.py
+```
+
+这些测试运行实际生产 C 源码和 SDK 适配器，不再只运行 `tests/protocol/canopusconnect_bench.c`。原型与离散事件模型继续保留作实验参考。
+
+当前边界：SDK 仍没有公开 `rmdir`，清理按有界步骤删除遗留 staging 文件，空目录壳保留；不能宣称已经物理回收目录。ZIP 路径单个组件受 SDK 目录枚举限制，最多 63 个 UTF-8 字节，超过返回 LIMIT；展开后的完整路径仍最多 255 字节。安装目录遍历深度最多 16 层，manifest 最多 64 KiB、256 条映射。manifest / schema 校验在一个有界步骤内完成，资源树遍历每步最多读一个目录项或同步一个文件，登记记录、注册表发布和排序刷新分别推进。
+
+后台定时器不保证 CPU 在息屏后一直唤醒。原生文件调用和 manifest / 登记事务的单次耗时仍须实机测量。尚未执行蓝牙实传、断电恢复、flash 延迟和设备堆峰值验收。ZIP 目录重复与重叠校验用固定 RAM、按条目回读实现，总体为 O(n²)，文件很多时安装总耗时需要测量。
+
+安装发布点是 v2 `interconnect-themes.json` 的原子替换，包含 revision、themeId、安装代次和原始 ZIP SHA；兼容旧数组索引。`registry-install.pending` 仅在完整校验与同步后写入，恢复后才能清理它引用的 staging；CANCEL 在发布前撤销该记录，发布后保持 INSTALLED。发布后的排序或接收记录保存错误不撤销安装结果。当前保留旧安装代次文件，引用保护继续沿用原生管理器的活动配置与刷新事务；旧代次物理回收仍需后续目录能力。
+
+下文的队列容量和吞吐数字是原实验基线：相邻 Canopus 当前已采用 16 槽 RX（分配失败回退 4 槽）、4 槽响应队列及每个 owner tick 最多处理 4 请求。新增 L2 修复在同一会话发送失败时保留明文队头，发送时使用独立副本，避免原厂发送接口原地加密后重试造成二次加密；会话失效才丢弃。该修复的 BT 栈帧增加 552 字节，设备栈余量尚未实测。不得将原 4 槽模型直接套用到新固件或据此增加手机窗口。
+
+已验证：
+
+- 接收器的实际生产代码在 ASan/UBSan 下通过正常上传、短写、检查点失败、双槽损坏、旧 token、nonce 重试、ACK BUSY / 未监听、HASH、ACTIVE 和登记提交后的终态恢复测试。
+- ZIP 读取器通过 223 个 ASan/UBSan 用例，覆盖 Store / Deflate、descriptor、恶意路径、重复与范围重叠、CRC、组件长度以及 I/O 故障。
+- 原生登记三目标 host 测试验证逐步 I/O 预算、提交前后恢复、取消撤销、提交后排序失败和损坏资源重装。
+- 完整 runtime 集成测试用真实 CRPack 验证接收到登记、UI apply 与安装交错、失败后重启恢复、CANCEL 与 journal 交错。当前小包场景模块动态分配峰值约 54.4 KiB，不包括固件队列、文件系统内部内存与调用栈，也不是设备堆上限保证。
 
 ## 1. 发送窗口的依据
 
@@ -145,7 +179,7 @@ L2 请求槽和事件槽属于 Supervisor 的已有常驻成本，不能算成�
 | 内容校验 | 完整 ZIP 的磁盘 SHA-256 + 解压 CRC | 保留内容身份和文件级检查，不逐片回读比较。 |
 | LIST | 固定一条记录 + revision | 最坏 422 字节，无大快照文件及对象。 |
 
-保持当前 owner 10 ms 参数时，窗口模型中同一精简方案 `RPC=1/2/3`、ACK 每 4 帧分别约为 `11.42 / 22.83 / 34.23 KiB/s`。这些只是明确假设下的离散事件模型，尚未修改实际手机和固件代码；不能作为预计真机速度向用户承诺。
+窗口模型中，owner 10 ms 且每 tick 单请求的原始基线下，同一精简方案 `RPC=1/2/3`、ACK 每 4 帧分别约为 `11.42 / 22.83 / 34.23 KiB/s`。这些只是明确假设下的离散事件模型，不能作为预计真机速度向用户承诺。
 
 将 owner 改为 5 / 2 ms 的单独实验有额外收益，但那是 Supervisor 调度变化，不是滑动窗口本身的收益。本轮只记录，不顺带修改固件调度。
 

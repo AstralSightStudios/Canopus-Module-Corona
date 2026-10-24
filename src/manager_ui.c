@@ -194,6 +194,17 @@ static int ensure_data(void) {
     if(!U.data) return rh_manager_data_create(U.ctx,&U.hooks,&U.data);
     return 0;
 }
+int rh_manager_ui_get_data(const struct canopus_context_v1 *ctx,struct rh_manager_data **out) {
+    int rc;
+    if(!ctx || !out || (U.ctx && U.ctx!=ctx)) return CANOPUS_SVC_ERR_STATE;
+    U.ctx=ctx;rc=ensure_data();
+    if(!rc) *out=U.data;
+    return rc;
+}
+void rh_manager_ui_reset_data(void) {
+    if(U.data)rh_manager_data_destroy(U.data);
+    U.data=0;U.count=0;
+}
 static int load_route(uint32_t route,int refresh) {
     int rc=0; U.error[0]=0;
     if(route==INDEX || route==RECEIVE) return 0;

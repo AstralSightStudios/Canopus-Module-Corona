@@ -15,6 +15,7 @@ sources = [
     "src/font_reload.c", "src/quickapp_icon.c",
     "src/manager_config_store.c", "src/manager_data.c",
     "src/manager_assets.c", "src/manager_ui.c",
+    "src/corona_connect.c", "src/corona_archive.c", "src/corona_runtime.c",
     "${CANOPUS_ROOT}/runtime/control/canopus_control.c",
 ]
 include_dirs = ["include"]

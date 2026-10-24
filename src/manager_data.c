@@ -23,12 +23,25 @@ struct override { char *key, *choice; };
 union pool_block { struct { uint32_t bytes, used; } value; uint64_t alignment; };
 struct pool_chunk { struct pool_chunk *next; uint32_t bytes; uint64_t alignment; };
 struct pool { struct pool_chunk *chunks; };
+struct installation { uint32_t generation; uint8_t hash[32], has_hash; };
+struct install_job {
+    char stage[256],target[256],id[65],path[256];
+    struct text registry,journal;
+    void *dirs[17];
+    uint32_t offsets[17],depth,root_len,total,phase;
+    uint8_t sync_pending;
+};
 struct rh_manager_data {
     const struct canopus_context_v1 *ctx;
     struct pool *pool;
     struct rh_manager_data_hooks hooks;
     char root[256];
     char **ids, **order;
+    struct installation *installations; /* Parallel to ids; generation 0 is legacy. */
+    struct install_job *install_job;
+    uint32_t revision;
+    const char *validation_base; /* Owner-only staging override during validation. */
+    const char *validation_target; /* Final path length, even before directory rename. */
     uint32_t count, order_count;
     struct path_item *paths;
     uint32_t path_count;
@@ -162,8 +175,10 @@ static int source_valid(const char *s) {
 static int directory_source(const char *s) { uint32_t n=slen(s); return n && !prefix(s,"@quickapp-icon/") && s[n-1u]=='/'; }
 static int is_bin(const char *s) { uint32_t n=slen(s); return n>=4u && equal(s+n-4u,".bin"); }
 static int reserved(const char *s) { return equal(s,"corona.json")||equal(s,"canora.json")||prefix(s,"corona.json/")||prefix(s,"canora.json/"); }
+static int package_base(struct rh_manager_data *d,const char *id,char out[256]);
 static int destination_valid(struct rh_manager_data *d,const char *id,const char *s) {
-    return relative(s) && !reserved(s) && slen(d->root)+7u+slen(id)+1u+slen(s)<=255u;
+    char base[256];
+    return relative(s) && !reserved(s) && !(d->validation_target ? put(base,256,d->validation_target):package_base(d,id,base)) && slen(d->root)+slen(base)+1u+slen(s)<=255u;
 }
 
 /* A span parser avoids a DOM/token allocation proportional to manifest fields.
@@ -365,6 +380,68 @@ static int string_list(struct rh_manager_data *d,struct json j,char ***out,uint3
 static int serialize_ids(struct rh_manager_data *d,struct text *t,char **ids,uint32_t n) {
     uint32_t i; int rc=append(d,t,"["); for(i=0;!rc && i<n;i++) { if(i) rc=append(d,t,","); if(!rc) rc=quoted(d,t,ids[i]); } return rc ? rc:append(d,t,"]");
 }
+static int unsigned_text(struct rh_manager_data *d,struct text *t,uint32_t value) {
+    char buf[10],rev[10]; uint32_t n=0,i=0;
+    do { rev[n++]=(char)('0'+value%10u); value/=10u; } while(value);
+    while(n) buf[i++]=rev[--n]; return append_n(d,t,buf,i);
+}
+static int package_base(struct rh_manager_data *d,const char *id,char out[256]) {
+    char digits[12],reverse[10],parent[80]; uint32_t n=0,i=0,generation=0; int index;
+    if(d->validation_base) return put(out,256,d->validation_base);
+    index=find_id(d->ids,d->count,id);
+    if(index>=0 && d->installations) generation=d->installations[index].generation;
+    if(path_join(parent,"themes/",id)) return -22;
+    if(!generation) return put(out,256,parent);
+    do { reverse[n++]=(char)('0'+generation%10u); generation/=10u; } while(generation);
+    digits[i++]='/'; while(n) digits[i++]=reverse[--n]; digits[i]=0;
+    return path_join(out,parent,digits);
+}
+static int parse_hash(struct json j,uint8_t hash[32]) {
+    char encoded[65]; uint32_t i; int high,low;
+    if(decoded(j,encoded,sizeof(encoded),0)||slen(encoded)!=64u) return -22;
+    for(i=0;i<32u;i++) { high=hex(encoded[i*2u]); low=hex(encoded[i*2u+1u]); if(high<0||low<0) return -22; hash[i]=(uint8_t)((high<<4)|low); }
+    return 0;
+}
+static int registry_parse(struct rh_manager_data *d,struct json j) {
+    const char *cursor=0; struct json entry,hash; char *id=0; int rc; int64_t value; uint32_t count=0;
+    d->revision=1u;
+    if(!j.p) return -22;
+    if(*j.p=='[') return string_list(d,j,&d->ids,&d->count,0);
+    if(integer(field(j,"version"),&value)||value!=2 || integer(field(j,"revision"),&value)||value<=0||value>UINT32_MAX) return -22;
+    d->revision=(uint32_t)value;
+    j=field(j,"themes"); if(!j.p || *j.p!='[') return -22;
+    while((rc=next_array(j,&cursor,&entry))>0) {
+        struct installation install; zero(&install,sizeof(install));
+        rc=json_text(d,field(entry,"id"),&id,64u); if(rc) break;
+        if(!valid_id(id)||find_id(d->ids,d->count,id)>=0 || integer(field(entry,"generation"),&value)||value<0||value>UINT32_MAX) { rc=-22; break; }
+        install.generation=(uint32_t)value; hash=field(entry,"sha256");
+        if(hash.p) { if(!install.generation || parse_hash(hash,install.hash)) { rc=-22; break; } install.has_hash=1; }
+        else if(install.generation) { rc=-22; break; }
+        count=d->count;
+        rc=grow(d,(void **)&d->ids,count,count+1u,sizeof(*d->ids)); if(rc) break;
+        rc=grow(d,(void **)&d->installations,count,count+1u,sizeof(*d->installations)); if(rc) break;
+        d->ids[count]=id; d->installations[count]=install; d->count++; id=0;
+    }
+    release(d,id); return rc<0 ? rc:0;
+}
+/* The registry is the sole publication point for ids, generations, hashes and
+ * revision. A directory rename alone never makes an installation visible. */
+static int registry_text(struct rh_manager_data *d,struct text *out,uint32_t revision,const char *remove_id,const char *install_id,uint32_t generation,const uint8_t hash[32]) {
+    uint32_t i,at=0; int rc=append(d,out,"{\"version\":2,\"revision\":");
+    if(!rc) rc=unsigned_text(d,out,revision); if(!rc) rc=append(d,out,",\"themes\":[");
+    for(i=0;!rc && i<=d->count;i++) {
+        const char *id; struct installation install; char encoded[65]; uint32_t k;
+        if(i==d->count) { if(!install_id) break; id=install_id; zero(&install,sizeof(install)); install.generation=generation; install.has_hash=1; copy(install.hash,hash,32u); }
+        else { id=d->ids[i]; if((remove_id&&equal(id,remove_id))||(install_id&&equal(id,install_id))) continue; zero(&install,sizeof(install)); if(d->installations) install=d->installations[i]; }
+        if(at++) rc=append(d,out,","); if(!rc) rc=append(d,out,"{\"id\":"); if(!rc) rc=quoted(d,out,id);
+        if(!rc) rc=append(d,out,",\"generation\":"); if(!rc) rc=unsigned_text(d,out,install.generation);
+        if(!rc && install.has_hash) { for(k=0;k<32u;k++) { encoded[k*2u]="0123456789abcdef"[install.hash[k]>>4]; encoded[k*2u+1u]="0123456789abcdef"[install.hash[k]&15u]; } encoded[64]=0;
+            rc=append(d,out,",\"sha256\":"); if(!rc) rc=quoted(d,out,encoded); }
+        if(!rc) rc=append(d,out,"}");
+    }
+    if(!rc) rc=append(d,out,"]}"); return rc;
+}
+static int recover_install(struct rh_manager_data *d);
 static void free_pack(struct rh_manager_data *d,struct pack *p) {
     uint32_t i; for(i=0;i<p->count;i++) { release(d,p->maps[i].source); release(d,p->maps[i].destination); }
     for(i=0;i<4;i++) release(d,p->images[i]); release(d,p->maps); release(d,p->document); zero(p,sizeof(*p));
@@ -424,9 +501,9 @@ static int add_mapping(struct rh_manager_data *d,struct pack *p,struct json v,in
 }
 static int calendar_text(struct rh_manager_data *,const struct pack *,struct text *,int);
 static int load_pack_metadata(struct rh_manager_data *d,const char *id,struct pack *p,struct json *manifest) {
-    char file[256],base[80]; struct json j,f,v; const char *cur=0; int rc; int64_t number_value;
+    char file[256],base[256]; struct json j,f,v; const char *cur=0; int rc; int64_t number_value;
     zero(p,sizeof(*p)); if(!valid_id(id)) return -22;
-    if(path_join(base,"themes/",id)||path_join(file,base,"/corona.json")) return -22;
+    if(package_base(d,id,base)||path_join(file,base,"/corona.json")) return -22;
     /* Installed canonical metadata takes precedence. An unused legacy path
      * must not make a readable package depend on another stat or parse. */
     rc=read_text(d,file,65536,&p->document,&j);
@@ -475,8 +552,12 @@ static int load_pack(struct rh_manager_data *d,const char *id,struct pack *p) {
     f=field(j,"launcherBackground"); if(f.p) {
         if(!p->backgrounds[0]) { rc=background(d,p,0,f); if(rc) goto bad; }
         else {
-            struct pack legacy_background; zero(&legacy_background,sizeof(legacy_background)); legacy_background.meta=p->meta;
-            rc=background(d,&legacy_background,0,f); release(d,legacy_background.images[0]); if(rc) goto bad;
+            uint8_t mode=p->backgrounds[0]; char *image=p->images[0];
+            /* Validate the redundant legacy spelling without a second 4 KiB
+             * pack on the installation owner's stack. Restore the winner. */
+            p->backgrounds[0]=0; p->images[0]=0;
+            rc=background(d,p,0,f); release(d,p->images[0]);
+            p->backgrounds[0]=mode; p->images[0]=image; if(rc) goto bad;
         }
     }
     p->calendar=field(j,"calendar");
@@ -484,7 +565,10 @@ static int load_pack(struct rh_manager_data *d,const char *id,struct pack *p) {
         struct text validation={0,0,0}; uint32_t bytes=0;
         rc=calendar_text(d,p,&validation,0); release(d,validation.p); if(rc) goto bad;
         for(i=0;i<p->count;i++) {
-            uint32_t line=slen(p->maps[i].source)+1u+7u+slen(id)+1u+slen(p->maps[i].destination)+1u;
+            char base[256]; uint32_t line;
+            if(d->validation_target) rc=put(base,sizeof(base),d->validation_target); else rc=package_base(d,id,base);
+            if(rc) goto bad;
+            line=slen(p->maps[i].source)+1u+slen(base)+1u+slen(p->maps[i].destination)+1u;
             if(line>32768u-bytes) { rc=RH_MANAGER_ERR_LIMIT; goto bad; } bytes+=line;
         }
     }
@@ -543,6 +627,7 @@ static int migrate_legacy(struct rh_manager_data *d) {
     if(rc!=CANOPUS_SVC_ERR_NOTFOUND) return rc;
     rc=read_text(d,"interconnect-themes.json",UINT32_MAX-1u,&native,&j);
     fresh=rc==CANOPUS_SVC_ERR_NOTFOUND;
+    if(!fresh && !rc && *j.p=='{') { rc=0; goto done; } /* Native v2 owns migration. */
     if(!fresh && !rc) rc=string_list(d,j,&native_ids,&native_count,0);
     if(!fresh && rc) goto done;
     if(path_join(source,legacy,"interconnect-themes.json")) { rc=-22; goto done; }
@@ -640,6 +725,7 @@ static void clear_data(struct rh_manager_data *d) {
     uint32_t i; clear_catalog(d); free_strings(d,d->ids,d->count); free_strings(d,d->order,d->order_count);
     for(i=0;i<d->override_count;i++) { release(d,d->overrides[i].key); release(d,d->overrides[i].choice); }
     release(d,d->overrides); for(i=0;i<5;i++) release(d,d->features[i]); release(d,d->pending_protection);
+    release(d,d->installations); d->installations=0;
     d->ids=d->order=0; d->count=d->order_count=d->override_count=0; d->overrides=0; d->pending_protection=0; zero(d->features,sizeof(d->features));
 }
 static int add_order(struct rh_manager_data *d,const char *s) {
@@ -651,11 +737,12 @@ static int save_order(struct rh_manager_data *d) {
 int rh_manager_data_refresh(struct rh_manager_data *d) {
     struct rh_manager_data next; char *doc=0,**stored=0; uint32_t stored_n=0,i; struct json j; int rc; int64_t version;
     if(!d) return -22; if(d->busy || d->pending_protection) return -16;
-    zero(&next,sizeof(next)); next.ctx=d->ctx; next.pool=d->pool; next.hooks=d->hooks; copy(next.root,d->root,sizeof(next.root));
+    zero(&next,sizeof(next)); next.ctx=d->ctx; next.pool=d->pool; next.hooks=d->hooks; next.revision=1u; copy(next.root,d->root,sizeof(next.root));
+    rc=recover_install(d); if(rc) return fail(d,rc,"安装提交恢复失败");
     rc=migrate_legacy(d); if(rc) return fail(d,rc,"快应用数据迁移失败，原数据已保留");
     rc=read_text(d,"interconnect-themes.json",UINT32_MAX-1u,&doc,&j);
     if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=0;
-    else if(!rc) rc=string_list(&next,j,&next.ids,&next.count,0);
+    else if(!rc) rc=registry_parse(&next,j);
     release(d,doc); doc=0; if(rc) goto bad;
     rc=read_text(d,"resource-order.json",UINT32_MAX-1u,&doc,&j);
     if(rc==CANOPUS_SVC_ERR_NOTFOUND) {
@@ -690,6 +777,7 @@ int rh_manager_data_create(const struct canopus_context_v1 *ctx,const struct rh_
 void rh_manager_data_destroy(struct rh_manager_data *d) {
     if(d) {
         const struct canopus_context_v1 *ctx=d->ctx; struct pool_chunk *chunk,*next;
+        rh_manager_data_install_abort(d);
         clear_data(d);
         for(chunk=d->pool->chunks;chunk;chunk=next) { next=chunk->next; ctx->mem->free(ctx,chunk); }
         ctx->mem->free(ctx,d->pool); ctx->mem->free(ctx,d);
@@ -766,8 +854,8 @@ static int register_file(struct rh_manager_data *d,const struct pack *pack,uint3
 /* Directory handles are bounded by the original inventory depth limit (16),
  * not by file count. One path buffer and one dirent serve the complete walk. */
 static int walk_theme(struct rh_manager_data *d,const char *id,const struct pack *pack,uint32_t theme,int deleting) {
-    void *dirs[17]; uint32_t offsets[17],depth=0,root_len; char absolute[256],path[256],base[80]; struct canopus_fs_dirent entry; struct canopus_fs_stat st; int rc=0;
-    if(path_join(base,"themes/",id)||path_join(path,base,"/")) return -22;
+    void *dirs[17]; uint32_t offsets[17],depth=0,root_len; char absolute[256],path[256],base[256]; struct canopus_fs_dirent entry; struct canopus_fs_stat st; int rc=0;
+    if(package_base(d,id,base)||path_join(path,base,"/")) return -22;
     root_len=slen(path); offsets[0]=root_len; dirs[0]=d->ctx->fs->opendir(d->ctx,path); if(!dirs[0]) return -5;
     for(;;) {
         rc=d->ctx->fs->readdir(d->ctx,dirs[depth],&entry);
@@ -914,8 +1002,8 @@ static int winner_for(struct rh_manager_data *d,const char *key,char id[65]) {
     return 0;
 }
 static int theme_preview(struct rh_manager_data *d,const char *key,const char *id,char out[256]) {
-    char relative_path[256],base[80],full[256],destination[256]; int rc=relative_destination(d,key,id,relative_path); out[0]=0; if(rc || !relative_path[0]) return rc;
-    if(path_join(base,"themes/",id)||path_join(full,base,"/")) return -22;
+    char relative_path[256],base[256],full[256],destination[256]; int rc=relative_destination(d,key,id,relative_path); out[0]=0; if(rc || !relative_path[0]) return rc;
+    if(package_base(d,id,base)||path_join(full,base,"/")) return -22;
     if(path_join(destination,full,relative_path)) return -22;
     if(path_join(out,d->root,destination)) return -22; return preview_valid(d,out);
 }
@@ -1012,9 +1100,9 @@ static int calendar_text(struct rh_manager_data *d,const struct pack *p,struct t
             const char *u; uint32_t code; if(decoded(entry,context_text,sizeof(context_text),0)) return -22;
             u=context_text; while(*u) { if(utf8(&u,context_text+slen(context_text),&code)||code<32u||(code>=127u && code<=159u)) return -22; }
             if(image) {
-                char base[80],full[256],path[256]; struct canopus_fs_stat st;
+                char base[256],full[256],path[256]; struct canopus_fs_stat st;
                 if(!destination_valid(d,p->meta.id,context_text)||!is_bin(context_text)) return -22;
-                if(path_join(base,"themes/",p->meta.id)||path_join(full,base,"/")||path_join(path,full,context_text)) return -22;
+                if(package_base(d,p->meta.id,base)||path_join(full,base,"/")||path_join(path,full,context_text)) return -22;
                 if(check_files) { rc=d->ctx->fs->stat(d->ctx,path,&st); if(rc || st.is_dir) return rc ? rc:-22; }
                 rc=append(d,t,path);
             } else { if(slen(context_text)>63u) return -22; rc=append(d,t,context_text); }
@@ -1053,7 +1141,7 @@ static int compile_mappings(struct rh_manager_data *d,struct compiled_mapping **
 }
 static int line_mapping(struct rh_manager_data *d,struct text *t,const char *source,const char *id,const char *destination) {
     int rc=append(d,t,source); if(!rc) rc=append(d,t,"\t");
-    if(!rc && id) { rc=append(d,t,"themes/"); if(!rc) rc=append(d,t,id); if(!rc) rc=append(d,t,"/"); }
+    if(!rc && id) { char base[256]; rc=package_base(d,id,base); if(!rc) rc=append(d,t,base); if(!rc) rc=append(d,t,"/"); }
     if(!rc) rc=append(d,t,destination); if(!rc) rc=append(d,t,"\n"); return rc;
 }
 static int overridden(struct rh_manager_data *d,const char *source) {
@@ -1112,15 +1200,15 @@ static int generate_mappings(struct rh_manager_data *d,struct compiled_mapping *
             if(!in_group) continue;
             rc=candidate_registration(d,path,&theme,&destination); if(rc<0) return rc; if(!rc) continue;
             {
-                char from[256],base[80],with_slash[80]; struct canopus_fs_stat st;
-                if(path_join(base,"themes/",d->ids[theme])||path_join(with_slash,base,"/")||path_join(from,with_slash,destination)) return -22;
+                char from[256],base[256],with_slash[256]; struct canopus_fs_stat st;
+                if(package_base(d,d->ids[theme],base)||path_join(with_slash,base,"/")||path_join(from,with_slash,destination)) return -22;
                 rc=d->ctx->fs->stat(d->ctx,from,&st); if(rc || st.is_dir || !st.size) return rc ? rc:-22;
             }
             if(!overlay) { rc=line_mapping(d,t,path->source,d->ids[theme],destination); if(rc) return rc; (*rules)++; }
             else {
-                char to[256],from[256],base[80],with_slash[80]; struct canopus_fs_stat st;
+                char to[256],from[256],base[256],with_slash[256]; struct canopus_fs_stat st;
                 rc=make_overlay_path(d,to,generation,group_count,path->source+root_len); if(rc) return rc;
-                if(path_join(base,"themes/",d->ids[theme])||path_join(with_slash,base,"/")||path_join(from,with_slash,destination)) return -22;
+                if(package_base(d,d->ids[theme],base)||path_join(with_slash,base,"/")||path_join(from,with_slash,destination)) return -22;
                 rc=d->ctx->fs->stat(d->ctx,from,&st); if(rc || st.is_dir || !st.size) return rc ? rc:-22;
                 rc=mkdir_parents(d,to); if(!rc) rc=copy_file(d,from,to); if(rc) return rc;
             }
@@ -1155,8 +1243,8 @@ static int generate_features(struct rh_manager_data *d,struct text *backgrounds,
         else {
             rc=load_pack(d,id,&p); if(rc) break;
             if(p.backgrounds[i]==3) {
-                char base[80],with_slash[80],path[256]; struct canopus_fs_stat st;
-                if(path_join(base,"themes/",id)||path_join(with_slash,base,"/")||path_join(path,with_slash,p.images[i])) rc=-22;
+                char base[256],with_slash[256],path[256]; struct canopus_fs_stat st;
+                if(package_base(d,id,base)||path_join(with_slash,base,"/")||path_join(path,with_slash,p.images[i])) rc=-22;
                 else { rc=d->ctx->fs->stat(d->ctx,path,&st); if(!rc && st.is_dir) rc=-22; if(!rc) rc=append(d,backgrounds,path); if(!rc) rc=append(d,backgrounds,"\n"); }
             } else rc=append(d,backgrounds,p.backgrounds[i]==2 ? "blur\n":"system\n");
             free_pack(d,&p);
@@ -1418,15 +1506,329 @@ static int remove_inventory_entry(struct rh_manager_data *d,const char *id) {
 done:
     release(d,doc); release(d,t.p); return rc;
 }
-int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
-    char **protected_ids=0; uint32_t n=0,i; int rc; struct text registry={0,0,0}; char relative_root[80],absolute[256];
-    if(!d||!id||!valid_id(id)||find_id(d->ids,d->count,id)<0) return -22;
+/* Strict sync is required for install records: UNSUPPORTED must not be
+ * interpreted as a durable registration. SDK lacks directory fsync, so the
+ * pending record bridges reset recovery across the directory/registry renames. */
+static int install_atomic(struct rh_manager_data *d,const char *path,const char *data,uint32_t size) {
+    char temporary[256]; uint32_t written=0; int fd,rc=0,step;
+    if(!d->ctx->fs->sync) return CANOPUS_SVC_ERR_UNSUPPORTED;
+    if(path_join(temporary,path,".manager-tmp")) return -22;
+    fd=d->ctx->fs->open(d->ctx,temporary,CANOPUS_FS_WRITE); if(fd<0) return fd;
+    while(written<size) { step=d->ctx->fs->write(d->ctx,fd,data+written,size-written); if(step<=0 || (uint32_t)step>size-written) { rc=step<0 ? step:-5; break; } written+=(uint32_t)step; }
+    if(!rc) rc=d->ctx->fs->sync(d->ctx,fd);
+    step=d->ctx->fs->close(d->ctx,fd); if(!rc && step<0) rc=step;
+    if(!rc) rc=d->ctx->fs->rename(d->ctx,temporary,path);
+    if(rc) (void)d->ctx->fs->remove(d->ctx,temporary); return rc;
+}
+static int staging_valid(const char *stage) {
+    return stage && prefix(stage,"staging/") && relative(stage) && stage[slen(stage)-1u]!='/' && slen(stage)>8u;
+}
+static int check_install_references(struct rh_manager_data *d,const char *id) {
+    char **ids=0; uint32_t n=0; int rc=protection_index(d,&ids,&n,0,0);
+    if(!rc) rc=live_references(d,&ids,&n);
+    if(!rc && find_id(ids,n,id)>=0) rc=RH_MANAGER_ERR_ACTIVE;
+    free_strings(d,ids,n); return rc;
+}
+/* One call consumes one readdir result OR syncs the previously discovered
+ * file. Directory depth and retained handles are bounded independently of
+ * file count; neither skipped dot entries nor EOF are drained in a loop. */
+static int validate_install_tree_step(struct rh_manager_data *d,struct install_job *job) {
+    struct canopus_fs_dirent entry; struct canopus_fs_stat st; uint32_t n,k; int rc,closed,fd;
+    if(job->sync_pending) {
+        fd=d->ctx->fs->open(d->ctx,job->path,CANOPUS_FS_READ); if(fd<0) return fd;
+        rc=d->ctx->fs->sync ? d->ctx->fs->sync(d->ctx,fd):CANOPUS_SVC_ERR_UNSUPPORTED;
+        closed=d->ctx->fs->close(d->ctx,fd); if(!rc && closed<0) rc=closed;
+        job->sync_pending=0; return rc;
+    }
+    rc=d->ctx->fs->readdir(d->ctx,job->dirs[job->depth],&entry);
+    if(rc) {
+        closed=d->ctx->fs->closedir(d->ctx,job->dirs[job->depth]); job->dirs[job->depth]=0;
+        if(rc<0 || closed<0) return rc<0 ? rc:closed;
+        if(!job->depth) return 1;
+        job->depth--; job->path[job->offsets[job->depth]]=0; return 0;
+    }
+    if(equal(entry.name,".")||equal(entry.name,"..")) return 0;
+    if(!entry.name[0]||!relative(entry.name)||directory_source(entry.name)||slen(entry.name)+job->offsets[job->depth]>=sizeof(job->path)) return -22;
+    for(k=0;entry.name[k];k++) if(entry.name[k]=='/') return -22;
+    if(equal(entry.name,"mappings.tsv")) return -22;
+    copy(job->path+job->offsets[job->depth],entry.name,slen(entry.name)+1u);
+    if(slen(d->root)+slen(job->target)+1u+slen(job->path+job->root_len)>255u) return RH_MANAGER_ERR_LIMIT;
+    rc=d->ctx->fs->stat(d->ctx,job->path,&st); if(rc || st.is_dir!=entry.is_dir) return rc ? rc:-22;
+    if(entry.is_dir) {
+        n=slen(job->path); if(job->depth==16u || n+1u>=sizeof(job->path)) return RH_MANAGER_ERR_LIMIT;
+        job->path[n++]='/'; job->path[n]=0; job->depth++; job->offsets[job->depth]=n;
+        job->dirs[job->depth]=d->ctx->fs->opendir(d->ctx,job->path); if(!job->dirs[job->depth]) return -5;
+    } else {
+        if(st.size>64u*1024u*1024u-job->total) return RH_MANAGER_ERR_LIMIT;
+        job->total+=st.size; job->sync_pending=1;
+    }
+    return 0;
+}
+static int validate_install_pack(struct rh_manager_data *d,const char *stage,const char *target,const char *id) {
+    struct pack *p; struct canopus_fs_stat a,b; struct text calendar={0,0,0}; char path[256]; uint32_t i; int rc,other;
+    if(path_join(path,stage,"/corona.json")) return -22; rc=d->ctx->fs->stat(d->ctx,path,&a);
+    if(path_join(path,stage,"/canora.json")) return -22; other=d->ctx->fs->stat(d->ctx,path,&b);
+    if(rc && rc!=CANOPUS_SVC_ERR_NOTFOUND) return rc; if(other && other!=CANOPUS_SVC_ERR_NOTFOUND) return other;
+    if((!rc && !other)||(rc && other)||(!rc && a.is_dir)||(!other && b.is_dir)) return -22;
+    p=alloc(d,sizeof(*p)); if(!p) return -12;
+    d->validation_base=stage; d->validation_target=target;
+    rc=load_pack(d,id,p);
+    if(!rc) {
+        for(i=0;!rc && i<p->count;i++) {
+            char base[256]; int directory=directory_source(p->maps[i].destination);
+            if(path_join(base,stage,"/")||path_join(path,base,p->maps[i].destination)) { rc=-22; break; }
+            if(directory) path[slen(path)-1u]=0;
+            rc=d->ctx->fs->stat(d->ctx,path,&a); if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=-22; if(!rc && ((directory && !a.is_dir)||(!directory && (a.is_dir||!a.size)))) rc=-22;
+        }
+        for(i=0;!rc && i<4u;i++) if(p->backgrounds[i]==3u) {
+            char base[256]; if(path_join(base,stage,"/")||path_join(path,base,p->images[i])) { rc=-22; break; }
+            rc=d->ctx->fs->stat(d->ctx,path,&a); if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=-22; if(!rc && (a.is_dir||!a.size)) rc=-22;
+        }
+        if(!rc) { rc=calendar_text(d,p,&calendar,1); if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=-22; }
+        free_pack(d,p);
+    }
+    release(d,p); release(d,calendar.p); d->validation_base=d->validation_target=0;
+    return rc;
+}
+static int recover_install(struct rh_manager_data *d) {
+    struct rh_manager_data candidate,current; struct json journal,registry,j; struct canopus_fs_stat st;
+    char *document=0,*committed=0,stage[256],id[65],target[256],parent[80];
+    uint32_t bytes; int rc,index,stage_exists,target_exists;
+    zero(&candidate,sizeof(candidate)); zero(&current,sizeof(current)); candidate.ctx=current.ctx=d->ctx; candidate.pool=current.pool=d->pool;
+    rc=read_text(d,"registry-install.pending",UINT32_MAX-1u,&document,&journal);
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) return 0; if(rc) return rc;
+    registry=field(journal,"registry");
+    if(decoded(field(journal,"stage"),stage,sizeof(stage),0)||!staging_valid(stage)||decoded(field(journal,"id"),id,sizeof(id),0)||!valid_id(id)) { rc=-22; goto done; }
+    rc=registry_parse(&candidate,registry); if(rc) goto done;
+    index=find_id(candidate.ids,candidate.count,id);
+    if(index<0 || !candidate.installations || !candidate.installations[index].has_hash) { rc=-22; goto done; }
+    rc=package_base(&candidate,id,target); if(rc) goto done;
+    rc=read_text(d,"interconnect-themes.json",UINT32_MAX-1u,&committed,&j);
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) { rc=0; current.revision=1u; }
+    else if(!rc) rc=registry_parse(&current,j);
+    if(rc) goto done; bytes=(uint32_t)(registry.e-registry.p);
+    /* registry.p is a span inside the journal rather than a NUL string. */
+    if(committed && slen(committed)==bytes) { uint32_t k; for(k=0;k<bytes;k++) if(committed[k]!=registry.p[k]) break; if(k==bytes) { rc=0; goto cleanup; } }
+    if(current.revision>candidate.revision) { rc=0; goto cleanup; } /* Retained cleanup record from an older committed revision. */
+    if(current.revision==UINT32_MAX || candidate.revision!=current.revision+1u) { rc=-5; goto done; }
+    rc=check_install_references(d,id); if(rc) goto done;
+    rc=d->ctx->fs->stat(d->ctx,stage,&st); stage_exists=!rc; if(rc && rc!=CANOPUS_SVC_ERR_NOTFOUND) goto done;
+    if(stage_exists && !st.is_dir) { rc=-22; goto done; }
+    rc=d->ctx->fs->stat(d->ctx,target,&st); target_exists=!rc; if(rc && rc!=CANOPUS_SVC_ERR_NOTFOUND) goto done;
+    if(target_exists && !st.is_dir) { rc=-22; goto done; }
+    if(stage_exists==target_exists) { rc=stage_exists ? CANOPUS_SVC_ERR_EXIST:-5; goto done; }
+    /* The owner freezes staging before begin; this journal is written only
+     * after the incremental full validation/sync walk has finished. Recovery
+     * checks directory identity/existence and commits, never resyncs the tree. */
+    if(stage_exists) {
+        rc=mkdir_ok(d,"themes"); if(!rc && path_join(parent,"themes/",id)) rc=-22;
+        if(!rc) rc=mkdir_ok(d,parent); if(!rc) rc=d->ctx->fs->rename(d->ctx,stage,target); if(rc) goto done;
+    }
+    rc=install_atomic(d,"interconnect-themes.json",registry.p,bytes); if(rc) goto done;
+cleanup:
+    /* Registry publication is the terminal success. A retained journal is
+     * harmless: equal/already superseded revisions are never replayed. */
+    (void)d->ctx->fs->remove(d->ctx,"registry-install.pending"); rc=0;
+done:
+    clear_data(&candidate); clear_data(&current); release(d,document); release(d,committed); return rc;
+}
+void rh_manager_data_install_abort(struct rh_manager_data *d) {
+    struct install_job *job; uint32_t i;
+    if(!d || !(job=d->install_job)) return;
+    for(i=0;i<17u;i++) if(job->dirs[i]) (void)d->ctx->fs->closedir(d->ctx,job->dirs[i]);
+    release(d,job->registry.p); release(d,job->journal.p); release(d,job);
+    d->install_job=0; d->busy=0;
+    /* A durable journal is committed intent. It is deliberately retained for
+     * refresh recovery; callers must recover before deleting staging. */
+}
+static int installed_package_present(struct rh_manager_data *d,uint32_t index) {
+    char base[256];int rc=package_base(d,d->ids[index],base);
+    if(!rc)rc=validate_install_pack(d,base,base,d->ids[index]);
+    if(!rc)return 1;
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND || rc==-22 || rc==CANOPUS_SVC_ERR_NOTDIR || rc==CANOPUS_SVC_ERR_ISDIR) return 0;
+    return rc;
+}
+static int installed_hash_index(struct rh_manager_data *d,const uint8_t hash[32]) {
+    uint32_t i,k;
+    for(i=0;i<d->count;i++) if(d->installations && d->installations[i].has_hash) {
+        for(k=0;k<32u;k++) if(d->installations[i].hash[k]!=hash[k]) break;
+        if(k==32u) return (int)i;
+    }
+    return -1;
+}
+int rh_manager_data_install_cancel(struct rh_manager_data *d,const uint8_t hash[32]) {
+    struct rh_manager_data current,pending;
+    struct json j;char *record=0,*intent=0,id[65];int rc,index;
+    if(!d||!hash) return -22;
+    zero(&current,sizeof(current));zero(&pending,sizeof(pending));
+    current.ctx=pending.ctx=d->ctx;current.pool=pending.pool=d->pool;
+    copy(current.root,d->root,sizeof(current.root));
+    /* Read the authoritative registry without refresh: refresh would replay
+     * precisely the uncommitted intent that CANCEL must first revoke. */
+    rc=read_text(d,"interconnect-themes.json",UINT32_MAX-1u,&record,&j);
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=0;
+    else if(!rc) rc=registry_parse(&current,j);
+    if(rc) goto done;
+    index=installed_hash_index(&current,hash);
+    if(index>=0) {
+        rc=installed_package_present(&current,(uint32_t)index);
+        if(rc)goto done;
+    }
+    rc=read_text(d,"registry-install.pending",UINT32_MAX-1u,&intent,&j);
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) {rc=0;goto revoke;}
+    if(rc) goto done;
+    if(decoded(field(j,"id"),id,sizeof(id),0)||!valid_id(id)) {rc=-22;goto done;}
+    rc=registry_parse(&pending,field(j,"registry"));if(rc)goto done;
+    index=find_id(pending.ids,pending.count,id);
+    if(index<0 || installed_hash_index(&pending,hash)!=index) {rc=-16;goto done;}
+    rc=d->ctx->fs->remove(d->ctx,"registry-install.pending");
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND)rc=0;
+revoke:
+    if(!rc)rh_manager_data_install_abort(d);
+done:
+    if(rc==1)rh_manager_data_install_abort(d);
+    release(d,record);release(d,intent);clear_data(&current);clear_data(&pending);return rc;
+}
+int rh_manager_data_install_begin(struct rh_manager_data *d,const char *stage,uint32_t generation,const uint8_t hash[32]) {
+    struct text registry={0,0,0},journal={0,0,0}; struct json j; struct rh_manager_data candidate;
+    struct install_job *job=0; struct canopus_fs_stat st;
+    char *document=0,file[256],id[65],target[256]; uint32_t i; int rc;
+    if(!d||!staging_valid(stage)||!generation||!hash) return -22;
     if(d->busy||d->pending_protection) return -16;
+    rc=rh_manager_data_refresh(d); if(rc) return rc;
+    job=alloc(d,sizeof(*job)); if(!job) return -12; zero(job,sizeof(*job));
+    for(i=0;i<d->count;i++) if(d->installations && d->installations[i].has_hash) {
+        uint32_t k; for(k=0;k<32u;k++) if(d->installations[i].hash[k]!=hash[k]) break;
+        if(k==32u) {
+            rc=installed_package_present(d,i);if(rc<0)goto done;
+            if(rc==1) { put(job->id,sizeof(job->id),d->ids[i]); job->phase=5u; d->install_job=job; d->busy=1; return 0; }
+        }
+    }
+    if(d->revision==UINT32_MAX) { rc=RH_MANAGER_ERR_LIMIT; goto done; }
+    if(path_join(file,stage,"/corona.json")) { rc=-22; goto done; }
+    rc=read_text(d,file,65536u,&document,&j);
+    if(rc==CANOPUS_SVC_ERR_NOTFOUND) { if(path_join(file,stage,"/canora.json")) { rc=-22; goto done; } rc=read_text(d,file,65536u,&document,&j); }
+    if(rc) goto done;
+    rc=decoded(field(j,"themeId"),id,sizeof(id),0); release(d,document); document=0;
+    if(rc || !valid_id(id)) { rc=-22; goto done; }
+    rc=check_install_references(d,id); if(rc) goto done;
+    rc=registry_text(d,&registry,d->revision+1u,0,id,generation,hash); if(rc) goto done;
+    zero(&candidate,sizeof(candidate)); candidate.ctx=d->ctx; candidate.pool=d->pool;
+    rc=parse(registry.p,registry.n,&j); if(!rc) rc=registry_parse(&candidate,j);
+    if(!rc) rc=package_base(&candidate,id,target); clear_data(&candidate); if(rc) goto done;
+    rc=d->ctx->fs->stat(d->ctx,target,&st); if(!rc) { rc=CANOPUS_SVC_ERR_EXIST; goto done; } if(rc!=CANOPUS_SVC_ERR_NOTFOUND) goto done;
+    if(put(job->stage,sizeof(job->stage),stage)||put(job->target,sizeof(job->target),target)||put(job->id,sizeof(job->id),id)) { rc=-22; goto done; }
+    rc=append(d,&journal,"{\"stage\":"); if(!rc) rc=quoted(d,&journal,stage);
+    if(!rc) rc=append(d,&journal,",\"id\":"); if(!rc) rc=quoted(d,&journal,id);
+    if(!rc) rc=append(d,&journal,",\"registry\":"); if(!rc) rc=append_n(d,&journal,registry.p,registry.n); if(!rc) rc=append(d,&journal,"}");
+    if(rc) goto done;
+    job->registry=registry; job->journal=journal; d->install_job=job; d->busy=1; return 0;
+done:
+    release(d,document); release(d,registry.p); release(d,journal.p); release(d,job); return rc;
+}
+int rh_manager_data_install_step(struct rh_manager_data *d,char installed_id[65]) {
+    struct install_job *job; char id[65]; int rc=0;
+    if(!d||!installed_id||!(job=d->install_job)) return -22;
+    installed_id[0]=0;
+    switch(job->phase) {
+    case 0: /* Bounded manifest/schema work (64 KiB, 256 mappings). */
+        rc=validate_install_pack(d,job->stage,job->target,job->id);
+        if(!rc && path_join(job->path,job->stage,"/")) rc=-22;
+        if(!rc) {
+            job->root_len=slen(job->path); job->offsets[0]=job->root_len;
+            job->dirs[0]=d->ctx->fs->opendir(d->ctx,job->stage);
+            if(!job->dirs[0]) rc=-5; else job->phase=1;
+        }
+        break;
+    case 1:
+        rc=validate_install_tree_step(d,job);
+        if(rc==1) { job->phase=2; rc=0; }
+        break;
+    case 2: /* Only fully validated, synced, immutable staging gains a journal. */
+        rc=check_install_references(d,job->id);
+        if(!rc) rc=install_atomic(d,"registry-install.pending",job->journal.p,job->journal.n);
+        if(!rc) job->phase=3;
+        break;
+    case 3: /* One registry sync; recovery never traverses or syncs payloads. */
+        rc=recover_install(d); if(!rc) job->phase=4;
+        break;
+    case 4:
+        /* Detach while refresh replaces the catalog value, retaining the
+         * owner job until refresh completes or fails. */
+        d->install_job=0; d->busy=0;
+        /* Registry publication is authoritative. View/order repair can fail
+         * independently and is retried by the next refresh or page load. */
+        (void)rh_manager_data_refresh(d);
+        d->install_job=job; d->busy=1;
+        job->phase=5;
+        break;
+    case 5:
+        put(id,sizeof(id),job->id); rh_manager_data_install_abort(d);
+        put(installed_id,65,id); return 1;
+    default: rc=-22; break;
+    }
+    if(rc<0) rh_manager_data_install_abort(d);
+    return rc;
+}
+int rh_manager_data_install(struct rh_manager_data *d,const char *stage,uint32_t generation,const uint8_t hash[32],char installed_id[65]) {
+    int rc;
+    if(!installed_id) return -22; installed_id[0]=0;
+    rc=rh_manager_data_install_begin(d,stage,generation,hash); if(rc) return rc;
+    do { rc=rh_manager_data_install_step(d,installed_id); } while(!rc);
+    return rc==1 ? 0:rc;
+}
+uint32_t rh_manager_data_revision(struct rh_manager_data *d) { return d ? d->revision:0u; }
+int rh_manager_data_find_hash(struct rh_manager_data *d,const uint8_t hash[32],char id[65]) {
+    uint32_t i,k; int rc;
+    if(!d||!hash||!id) return -1; id[0]=0; if(d->busy||d->pending_protection) return -2;
+    rc=rh_manager_data_refresh(d); if(rc) return -5;
+    for(i=0;i<d->count;i++) if(d->installations && d->installations[i].has_hash) {
+        for(k=0;k<32u;k++) if(hash[k]!=d->installations[i].hash[k]) break;
+        if(k==32u) {
+            rc=installed_package_present(d,i);
+            if(rc<0)return -5;
+            if(rc==1) { put(id,65,d->ids[i]); return 1; }
+        }
+    }
+    return 0;
+}
+static void list_u32(uint8_t *p,uint32_t value) { uint32_t i; for(i=0;i<4u;i++) p[i]=(uint8_t)(value>>(8u*i)); }
+int rh_manager_data_connect_list(struct rh_manager_data *d,uint32_t expected,uint32_t index,uint8_t *payload,uint32_t *size) {
+    uint32_t capacity,i,k,rank,selected=UINT32_MAX,n,at; struct rh_manager_metadata meta; int rc;
+    if(!d||!payload||!size) return -1; capacity=*size; *size=0;
+    if(d->busy||d->pending_protection) return -2;
+    rc=rh_manager_data_refresh(d); if(rc) return -5;
+    if(expected && expected!=d->revision) return -10;
+    if(index>=d->count && (index || d->count)) return -1;
+    if(capacity<12u) return -8;
+    if(d->count) {
+        for(i=0;i<d->count;i++) { rank=0; for(k=0;k<d->count;k++) if(scmp(d->ids[k],d->ids[i])<0) rank++; if(rank==index) { selected=i; break; } }
+        if(selected==UINT32_MAX) return -5;
+        rc=rh_manager_data_metadata(d,d->ids[selected],&meta);
+        if(rc) { zero(&meta,sizeof(meta)); put(meta.id,sizeof(meta.id),d->ids[selected]); put(meta.name,sizeof(meta.name),d->ids[selected]); }
+        n=26u+slen(meta.id)+slen(meta.name)+slen(meta.version)+slen(meta.author); if(capacity<n) return -8;
+    } else n=12u;
+    list_u32(payload,d->revision); list_u32(payload+4u,d->count); list_u32(payload+8u,index+1u<d->count ? index+1u:UINT32_MAX);
+    if(d->count) {
+        payload[12]=(uint8_t)((meta.has_version ? 1u:0u)|(meta.has_version_code ? 2u:0u)|(meta.has_author ? 4u:0u));
+        payload[13]=(uint8_t)slen(meta.id); payload[14]=(uint8_t)slen(meta.name); payload[15]=(uint8_t)slen(meta.version); payload[16]=(uint8_t)slen(meta.author); payload[17]=(uint8_t)!meta.available;
+        for(i=0;i<8u;i++) payload[18u+i]=(uint8_t)(meta.version_code>>(8u*i));
+        at=26u; copy(payload+at,meta.id,slen(meta.id)); at+=slen(meta.id); copy(payload+at,meta.name,slen(meta.name)); at+=slen(meta.name); copy(payload+at,meta.version,slen(meta.version)); at+=slen(meta.version); copy(payload+at,meta.author,slen(meta.author));
+    }
+    *size=n; return 0;
+}
+int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
+    char **protected_ids=0; uint32_t n=0,i; int rc; struct text registry={0,0,0}; char relative_root[256],absolute[256];
+    if(!d||!id||!valid_id(id)) return -22;
+    if(d->busy||d->pending_protection) return -16;
+    rc=rh_manager_data_refresh(d); if(rc) return rc;
+    if(find_id(d->ids,d->count,id)<0) return -22;
+    if(d->revision==UINT32_MAX) return RH_MANAGER_ERR_LIMIT;
     rc=protection_index(d,&protected_ids,&n,0,0); if(!rc) rc=live_references(d,&protected_ids,&n);
     if(!rc && find_id(protected_ids,n,id)>=0) rc=RH_MANAGER_ERR_ACTIVE;
     free_strings(d,protected_ids,n); if(rc) return fail(d,rc,rc==RH_MANAGER_ERR_ACTIVE ? "正在使用的资源包不能删除":"活动资源引用记录不可读取");
     d->busy=1;
-    if(path_join(relative_root,"themes/",id)||path_join(absolute,d->root,relative_root)) { rc=-22; goto done; }
+    if(package_base(d,id,relative_root)||path_join(absolute,d->root,relative_root)) { rc=-22; goto done; }
     {
         struct canopus_fs_stat st;
         rc=d->ctx->fs->stat(d->ctx,relative_root,&st);
@@ -1441,9 +1843,7 @@ int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
     for(i=0;i<d->override_count;i++) if(equal(d->overrides[i].choice,id)) { char *choice=dup(d,RH_MANAGER_DEFAULT); if(!choice) { rc=-12; goto done; } release(d,d->overrides[i].choice); d->overrides[i].choice=choice; }
     for(i=0;i<5;i++) if(d->features[i] && equal(d->features[i],id)) { char *choice=dup(d,RH_MANAGER_DEFAULT); if(!choice) { rc=-12; goto done; } release(d,d->features[i]); d->features[i]=choice; }
     rc=save_overrides(d); if(rc) goto done;
-    rc=append(d,&registry,"[");
-    { uint32_t at=0; for(i=0;!rc && i<d->count;i++) if(!equal(d->ids[i],id)) { if(at++) rc=append(d,&registry,","); if(!rc) rc=quoted(d,&registry,d->ids[i]); } }
-    if(!rc) rc=append(d,&registry,"]");
+    rc=registry_text(d,&registry,d->revision+1u,id,0,0,0);
     if(!rc) rc=atomic_text(d,"interconnect-themes.json",registry.p,registry.n); if(rc) goto done;
     rc=remove_inventory_entry(d,id);
     /* refresh normalizes order after native registry commit, even when an

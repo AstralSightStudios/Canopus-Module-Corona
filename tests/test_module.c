@@ -327,7 +327,9 @@ static int hook_is_hooked(const struct canopus_context_v1 *ctx, uintptr_t target
 #if RH_NATIVE_MANAGER
 static char native_active_config[32], native_config_part[32];
 static unsigned native_pointer_position, native_pointer_writes;
-static int native_rename_fail;
+static int native_rename_fail, native_hooks_ready, native_connect_enabled;
+static void *native_catalog;
+static unsigned native_catalog_resets;
 static int32_t native_data_path(const struct canopus_context_v1 *ctx, char *out, uint32_t cap) {
     assert(ctx == &test_context && cap >= sizeof(RH_APP_FILES_ROOT));
     memcpy(out, RH_APP_FILES_ROOT, sizeof(RH_APP_FILES_ROOT));
@@ -341,7 +343,25 @@ static int32_t native_config_rename(const struct canopus_context_v1 *ctx, const 
     memcpy(native_active_config, native_config_part, sizeof(native_active_config));
     return 0;
 }
-int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *hooks) { (void)hooks; return 0; }
+int rh_connect_runtime_start(const struct canopus_context_v1 *ctx) {
+    assert(ctx == &test_context && !locked && native_hooks_ready);
+    if(native_connect_enabled) {
+        if(!native_catalog)native_catalog=ctx->mem->alloc(ctx,64u);
+        assert(native_catalog);return 0;
+    }
+    return CANOPUS_SVC_ERR_UNSUPPORTED;
+}
+void rh_connect_runtime_stop(void) { assert(!locked); }
+void rh_manager_ui_reset_data(void) {
+    assert(!locked);native_catalog_resets++;
+    if(native_catalog)test_context.mem->free(&test_context,native_catalog);
+    native_catalog=0;
+}
+int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *hooks) {
+    assert(hooks && hooks->quickapp_icon);
+    native_hooks_ready = 1;
+    return 0;
+}
 int rh_manager_ui_register(const struct canopus_context_v1 *ctx) { (void)ctx; return 0; }
 int rh_manager_launcher_register(const struct canopus_context_v1 *ctx) { (void)ctx; return 0; }
 #endif
@@ -2546,6 +2566,20 @@ static int test_manager_reentrant_reload(void) {
     return 0;
 }
 #if RH_NATIVE_MANAGER
+static int test_manager_connect_rollback(void) {
+    native_connect_enabled=1;fail_hook_install=1;
+    assert(canopus_module_descriptor.activate(&test_context)==-2010);
+    assert(native_catalog_resets==1u && !native_catalog);
+    /* Model Supervisor reclamation after failed first activation. */
+    for(unsigned i=0;i<allocations;i++)
+        if(temp_allocations[i].live)mem_free(&test_context,temp_allocations[i].pointer);
+    assert(!persistent_allocs);
+    fail_hook_install=0;
+    assert(!canopus_module_descriptor.activate(&test_context));
+    assert(native_catalog && native_catalog_resets==1u && slot!=backend);
+    puts("native manager: shared catalog is released before failed-activation service reclamation");
+    return 0;
+}
 static int test_manager_config_generations(void) {
     struct rh_module_status_snapshot status;
     assert(!canopus_module_descriptor.activate(&test_context));
@@ -2585,6 +2619,8 @@ int main(int argc, char **argv) {
     rh_module_entry(&test_context);
     canopus_hook_engine_init();
 #if RH_NATIVE_MANAGER
+    if (argc == 2 && !strcmp(argv[1], "--connect-rollback"))
+        return test_manager_connect_rollback();
     if (argc == 2 && !strcmp(argv[1], "--manager-generations"))
         return test_manager_config_generations();
 #endif

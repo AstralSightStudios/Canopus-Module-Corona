@@ -12,6 +12,7 @@
 #if RH_NATIVE_MANAGER
 #include "manager_ui.h"
 #include "manager_config_store.h"
+#include "corona_runtime.h"
 #endif
 
 #define RH_MODULE_ID "corona"
@@ -65,6 +66,11 @@ static int manager_config_error;
 static char manager_candidate_dir[RH_PATH];
 static const char *manager_candidate_relative;
 static struct rh_backgrounds manager_background_current;
+static int manager_quickapp_icon(void *, const char *, char out[RH_PATH]);
+static int manager_bind_data_hooks(void) {
+    struct rh_manager_data_hooks hooks = {0, manager_quickapp_icon, 0};
+    return rh_manager_ui_set_data_hooks(&hooks);
+}
 #endif
 static int manager_config_path(const char *name, char out[RH_PATH]) {
     const char *root = RH_APP_FILES_ROOT;
@@ -121,6 +127,9 @@ static int bind_context(const struct canopus_context_v1 *ctx) {
     rc = rh_platform_bind_fs(ctx);
     if (rc < 0) return rc;
 #if RH_NATIVE_MANAGER
+    /* Connect may query the shared catalog before native app publication. */
+    rc = manager_bind_data_hooks();
+    if (rc) return rc;
     if (!module_context) manager_config_error = rh_manager_config_bind(ctx);
 #endif
     module_context = ctx;
@@ -1502,6 +1511,14 @@ static int32_t activate(const struct canopus_context_v1 *c) {
         }
         watch_rc = schedule_watch_timer();
         rc = refresh_rc ? refresh_rc : watch_rc;
+#if RH_NATIVE_MANAGER
+        if (!rc) {
+            int connect_rc = rh_connect_runtime_start(c);
+            startup_record("connect.start", connect_rc, 0, 0);
+            /* Hook use remains available on older Supervisors without Connect. */
+            if (connect_rc != CANOPUS_SVC_ERR_UNSUPPORTED) rc = connect_rc;
+        }
+#endif
         if (rc) {
             startup_record("refresh.end", refresh_rc, 0, (uintptr_t)refresh_timer);
             startup_record("watch.end", watch_rc, 0, (uintptr_t)watch_timer);
@@ -1554,7 +1571,13 @@ activation_done:
         if (watch_timer >= 0) delete_timer(watch_timer);
         refresh_timer = watch_timer = -1;
     }
-    if (rc && !activated_once) rollback_initial_activation();
+    if (rc && !activated_once) {
+#if RH_NATIVE_MANAGER
+        rh_connect_runtime_stop();
+        rh_manager_ui_reset_data();
+#endif
+        rollback_initial_activation();
+    }
     if (!rc) activated_once = 1;
     startup_record("activate.end", rc, 0, (uintptr_t)S.installed);
     notify_manager_status();
@@ -1562,6 +1585,11 @@ activation_done:
 }
 static int32_t stop(const struct canopus_context_v1 *c) {
     (void)c;
+    if (!S.installed) {
+#if RH_NATIVE_MANAGER
+        rh_connect_runtime_stop();
+#endif
+    }
     return S.installed ? CANOPUS_RESULT_REBOOT_REQUIRED : 0;
 }
 static int32_t query(struct canopus_status_writer_v1 *writer) {
@@ -1603,13 +1631,9 @@ static int manager_quickapp_icon(void *cookie, const char *package, char out[RH_
     return rh_platform_quickapp_icon_path(package, out);
 }
 static int32_t publish_native_app_stage(const struct canopus_context_v1 *ctx, uint32_t stage) {
-    struct rh_manager_data_hooks hooks = {0, manager_quickapp_icon, 0};
     int rc = bind_context(ctx);
     if (rc) return rc;
-    if (stage == 1u) {
-        rc = rh_manager_ui_set_data_hooks(&hooks);
-        return rc ? rc : rh_manager_ui_register(ctx);
-    }
+    if (stage == 1u) return rh_manager_ui_register(ctx);
     if (stage == 2u) return rh_manager_launcher_register(ctx);
     return CANOPUS_SVC_ERR_ARGUMENT;
 }

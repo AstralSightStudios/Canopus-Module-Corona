@@ -8,8 +8,9 @@
 
 当前 Manager 已迁入 `corona` 模块，使用 Canopus ABI 2 原生页面与桌面入口；首批目标为
 Band 11 `4.100.155` 和 Band 10 Pro `3.101.043`。首页状态卡保留原视觉，其他控件使用系统组件。
-模块状态和重载结果通过内存快照与内部通知更新，不再轮询控制文件。本轮仅实现主题传输 UI，
-新 CanopusConnect 接收与安装状态机尚未接入。设计、实现边界与验证记录见
+模块状态和重载结果通过内存快照与内部通知更新，不再轮询控制文件。
+CanopusConnect 设备端已接入二进制接收、续传、磁盘校验、分步解压与安装登记；
+手机发送端及蓝牙实机验收仍待完成，详见 [设备端实现与边界](docs/canopusconnect_implementation.md)。设计、实现边界与验证记录见
 [原生 Manager 文档](docs/native_manager_ui_plan.md)。
 
 ---
@@ -176,7 +177,7 @@ RESOURCE_HOOK_PAYLOAD=dist/0.3.0-155/payload/xiaomi-band-11-4.100.155 \
 原生交付目录根部的 `corona-0.3.0.canopus` 是可安装模块包，通过 AstroBox 的 Canopus
 入口安装。三个原生 UI target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
 Canopus 处理。Corona Manager 的内置图片作为 `.canopus` 包内资源随安装解压到模块私有目录，不打包进模块 ELF；
-本轮不提供新主题上传实现。
+本轮增加 CanopusConnect 设备端主题接收实现，仍需配套手机发送端与实机验收。
 默认交付运行宿主与产物校验；原生页面模拟器脚本为 `scripts/test-manager-emulator.py`，
 每个目标使用独立 `--library` 与 `--work`，详见原生 Manager 文档。
 

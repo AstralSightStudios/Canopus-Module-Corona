@@ -1,6 +1,6 @@
 # Corona 原生管理器 UI 设计与实现方案
 
-状态：按阶段实施中。传输范围仅包含内部状态接口与界面，不实现 CanopusConnect 接收、校验、解压或手机端传输。对应 [CanopusConnect 精简协议](canopusconnect_proto.md) 与 [CanopusConnect 两端实现方案](canopusconnect_implementation.md)。
+状态：原生传输状态与界面已接入设备端 CanopusConnect 接收、校验、解压和登记链路；手机端传输与真机验收仍待完成。对应 [CanopusConnect 精简协议](canopusconnect_proto.md) 与 [CanopusConnect 两端实现方案](canopusconnect_implementation.md)。
 
 实施时以实际 SDK 与原管理器代码为准：原生页面与桌面入口通过 `publish_native_app_stage` 分阶段注册；`ui.post` 仅安排前台 UI 工作，不是后台线程；连接是否就绪由未来传输层推送，不能把 `remote_listening` 当作设备已连接。
 
@@ -343,7 +343,7 @@ ROUTE_MIX_MATCH (Band 11)                ROUTE_MIX_MATCH_SELECT (Band 11)
 
 ---
 
-### 4.6 主题传输页 (`ROUTE_RECEIVE`，本轮仅实现 UI)
+### 4.6 主题传输页 (`ROUTE_RECEIVE`)
 
 1. **顶部标题栏**：`NAVIGATION_HEADER`，`title = "主题传输"`，`show_back = 1`。
 2. **阶段视觉映射（对齐 `canopusconnect_proto.md` §4 & §8）**：
@@ -392,7 +392,7 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
 - **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。
 - **原生存储与发布**：`get_data_path` 必须对应 `/data/canopus/m.corona/`；每次重载先写完整 `active/<generation>/{mappings.tsv,backgrounds.cfg,calendar.cfg}`，再由内部事务验证并发布 `active-config` 指针。指针内容为 `active/<非零规范 uint32>\n`。旧、新资源引用在刷新完成前共同受保护；只有匹配成功通知才能缩小保护范围。
 - **清理能力边界**：当前 SDK 没有目录删除接口。默认清理逐文件调用 `fs.remove`，成功后移除安装索引；空目录保留等待未来目录回收能力。文件删除、索引写入或清理失败均返回错误，不把失败显示为成功。
-- **旧存储导入**：保留旧快应用数据，首次全量复制到原生根后最后发布原生索引；原生索引已存在时合并尚未登记的旧包，同名 ID 和已有原生配置保留。配置文件先复制到临时文件再 rename，失败可重试；完成标记 `resource-legacy-imported` 避免删除后复活，后续旧目录变化不持续同步。导入不代表已应用，仍需内部重载事务。框架目录枚举须按固件 `d_name +1` 解码，旧版 `+2` 会截掉首字节并阻断导入。新传输的 `registry.*` 安装适配留待接收状态机实现。
+- **旧存储导入**：保留旧快应用数据，首次全量复制到原生根后最后发布原生索引；原生索引已存在时合并尚未登记的旧包，同名 ID 和已有原生配置保留。配置文件先复制到临时文件再 rename，失败可重试；完成标记 `resource-legacy-imported` 避免删除后复活，后续旧目录变化不持续同步。导入不代表已应用，仍需内部重载事务。框架目录枚举须按固件 `d_name +1` 解码，旧版 `+2` 会截掉首字节并阻断导入。新传输安装适配已接入 `manager_data.c`，实现边界见 CanopusConnect 实现文档。
 
 ### Step 3：实现 6 路由原生 UI 视图与事件状态机
 - **`src/manager_ui.c`**：

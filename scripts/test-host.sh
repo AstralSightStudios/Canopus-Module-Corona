@@ -141,6 +141,11 @@ sh "$ROOT/scripts/test-manager-assets.sh"
 sh "$ROOT/scripts/test-manager-data.sh"
 sh "$ROOT/scripts/test-manager-ui.sh"
 
+# Production CanopusConnect state machine, archive parser and complete install path.
+sh "$ROOT/scripts/test-corona-connect.sh"
+sh "$ROOT/scripts/test-corona-archive.sh"
+python3 "$ROOT/scripts/test-corona-runtime.py"
+
 # Exact APs and emulator dependencies are intentionally optional for host users.
 if [ "${RH_TEST_BAND11_FEATURES:-0}" = 1 ]; then
     sh "$ROOT/scripts/test-band11-features.sh"

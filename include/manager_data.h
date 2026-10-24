@@ -74,5 +74,43 @@ int rh_manager_data_prepare_apply(struct rh_manager_data *, const char *config_d
  * empty directory shells. Invalid/changed pointers leave protection intact. */
 int rh_manager_data_complete_apply(struct rh_manager_data *, int success);
 int rh_manager_data_delete(struct rh_manager_data *, const char *id);
+/* Install a verified/extracted CRPack from staging/<owner-owned-name>. The ZIP
+ * receiver supplies its disk-verified hash. Manifests are read one at a time
+ * (64 KiB maximum; 256 mappings), never a ZIP directory or per-page inventory.
+ * generation must be nonzero and unused for this theme. Success registers an
+ * immutable themes/<themeId>/<generation> and does not apply it. A new commit
+ * consumes staging by rename; a hash duplicate leaves staging for caller
+ * cleanup. A durable pending record completes interrupted registration on
+ * create/refresh/retry. Native errors, including
+ * RH_MANAGER_ERR_ACTIVE / LIMIT, follow the other catalog APIs. */
+int rh_manager_data_install(struct rh_manager_data *, const char *staging_relative,
+                            uint32_t generation, const uint8_t hash[32], char installed_id[65]);
+/* Cooperative installation: begin returns 0 accepted, negative native error;
+ * step returns 0 working, 1 complete (id filled), negative native error.
+ * Each step consumes at most one directory entry OR performs one file sync.
+ * Manifest/schema validation retains its 64 KiB / 256-mapping bound and runs
+ * in one step. Only the serialized owner may access staging: freeze all bytes
+ * before begin and keep them immutable until completion/abort and journal
+ * recovery. A pending journal certifies completed validation/sync; recovery
+ * never rescans the tree. Mutation/refresh APIs return BUSY during this job.
+ * Abort closes handles/releases RAM; committed intent is preserved on disk,
+ * so callers MUST successfully refresh before cleaning abandoned staging.
+ * The synchronous compatibility API above loops over begin/step. */
+int rh_manager_data_install_begin(struct rh_manager_data *, const char *staging_relative,
+                                  uint32_t generation, const uint8_t hash[32]);
+int rh_manager_data_install_step(struct rh_manager_data *, char installed_id[65]);
+/* Cancel before the registry publication point. Returns 0 revoked, 1 already
+ * committed, or a native error. Unlike abort, this removes pending intent. */
+int rh_manager_data_install_cancel(struct rh_manager_data *, const uint8_t hash[32]);
+void rh_manager_data_install_abort(struct rh_manager_data *);
+uint32_t rh_manager_data_revision(struct rh_manager_data *);
+/* 1 found, 0 absent, negative protocol code (BAD=1, BUSY=2, IO=5). */
+int rh_manager_data_find_hash(struct rh_manager_data *, const uint8_t hash[32], char id[65]);
+/* size is input capacity/output payload bytes, excluding the 12-byte frame.
+ * A 468-byte capacity suffices. Returns negative protocol codes BAD=1,
+ * BUSY=2, IO=5, LIMIT=8, CHANGED=10. Pages are themeId ASCII order; expected
+ * revision 0 starts a new enumeration, otherwise it must equal the registry. */
+int rh_manager_data_connect_list(struct rh_manager_data *, uint32_t expected_revision,
+                                 uint32_t index, uint8_t *payload, uint32_t *size);
 const char *rh_manager_data_error(const struct rh_manager_data *);
 #endif

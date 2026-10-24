@@ -19,4 +19,5 @@ for target in 155 179 1043; do
     "$ROOT/build/test_module_native_$target" --manager-internal
     "$ROOT/build/test_module_native_$target" --manager-reentrant
     "$ROOT/build/test_module_native_$target" --manager-generations
+    "$ROOT/build/test_module_native_$target" --connect-rollback
 done

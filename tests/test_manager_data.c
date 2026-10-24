@@ -13,7 +13,9 @@
 
 static char sandbox[512];
 static int fail_write,fail_rename,fail_unlink,fail_close,alloc_budget=-1;
-static const char *fail_write_path,*fail_rename_path,*fail_stat_path;
+static const char *fail_write_path,*fail_rename_path,*fail_stat_path,*fail_remove_path,*fail_sync_path;
+static int sync_fault_fd=-1;
+static uint32_t directory_reads,file_syncs,open_directories;
 static uint32_t blocks,peak_blocks,live_bytes,peak_bytes;
 struct allocation_header { uint64_t bytes; uint64_t alignment; };
 static int resolve(char out[1024],const char *p) {
@@ -33,24 +35,24 @@ static int resolve(char out[1024],const char *p) {
 }
 static int fs_open(const struct canopus_context_v1 *c,const char *p,uint32_t f) {
     char path[1024]; int rc;(void)c;if((f&CANOPUS_FS_WRITE)&&fail_write_path&&!strcmp(p,fail_write_path))return -EIO;rc=resolve(path,p);if(rc)return rc;
-    rc=open(path,(f&CANOPUS_FS_WRITE) ? O_WRONLY|O_TRUNC|O_CREAT:O_RDONLY,0600);return rc<0?-errno:rc;
+    rc=open(path,(f&CANOPUS_FS_WRITE) ? O_WRONLY|O_TRUNC|O_CREAT:O_RDONLY,0600);if(rc>=0&&fail_sync_path&&!strcmp(p,fail_sync_path))sync_fault_fd=rc;return rc<0?-errno:rc;
 }
 static int fs_read(const struct canopus_context_v1 *c,int fd,void *p,uint32_t n) {(void)c;ssize_t rc=read(fd,p,n);return rc<0?-errno:(int)rc;}
 static int fs_write(const struct canopus_context_v1 *c,int fd,const void *p,uint32_t n) {(void)c;if(fail_write)return -EIO; if(n>7)n=7;ssize_t rc=write(fd,p,n);return rc<0?-errno:(int)rc;}
-static int fs_close(const struct canopus_context_v1 *c,int fd) {(void)c;int rc=close(fd);return fail_close ? -EIO:(rc<0?-errno:0);}
+static int fs_close(const struct canopus_context_v1 *c,int fd) {(void)c;if(fd==sync_fault_fd)sync_fault_fd=-1;int rc=close(fd);return fail_close ? -EIO:(rc<0?-errno:0);}
 static int64_t fs_size(const struct canopus_context_v1 *c,int fd) {struct stat s;(void)c;return fstat(fd,&s)<0?-errno:s.st_size;}
-static int fs_sync(const struct canopus_context_v1 *c,int fd) {(void)c;return fsync(fd)<0?-errno:0;}
-static int fs_remove(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(fail_unlink)return -EIO;int rc=resolve(path,p);return rc?rc:(unlink(path)<0?-errno:0);}
+static int fs_sync(const struct canopus_context_v1 *c,int fd) {(void)c;file_syncs++;if(fd==sync_fault_fd)return -EIO;return fsync(fd)<0?-errno:0;}
+static int fs_remove(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(fail_unlink||(fail_remove_path&&!strcmp(p,fail_remove_path)))return -EIO;int rc=resolve(path,p);return rc?rc:(unlink(path)<0?-errno:0);}
 static int fs_rename(const struct canopus_context_v1 *c,const char *a,const char *b) {char x[1024],y[1024];(void)c;if(fail_rename||(fail_rename_path&&!strcmp(b,fail_rename_path)))return -EIO;int rc=resolve(x,a);if(!rc)rc=resolve(y,b);return rc?rc:(rename(x,y)<0?-errno:0);}
 static int fs_stat(const struct canopus_context_v1 *c,const char *p,struct canopus_fs_stat *o) {char path[1024];struct stat s;(void)c;if(fail_stat_path&&!strcmp(p,fail_stat_path))return -EIO;int rc=resolve(path,p);if(rc)return rc;if(stat(path,&s)<0)return -errno;o->size=(uint32_t)s.st_size;o->is_dir=(uint8_t)S_ISDIR(s.st_mode);return 0;}
 static int fs_exists(const struct canopus_context_v1 *c,const char *p) {struct canopus_fs_stat st;int rc=fs_stat(c,p,&st);return rc==-ENOENT?0:(rc?rc:1);}
 static int fs_mkdir(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;int rc=resolve(path,p);return rc?rc:(mkdir(path,0700)<0?-errno:0);}
-static void *fs_opendir(const struct canopus_context_v1 *c,const char *p) {char path[1024];(void)c;if(resolve(path,p))return 0;return opendir(path);}
+static void *fs_opendir(const struct canopus_context_v1 *c,const char *p) {char path[1024];void *dir;(void)c;if(resolve(path,p))return 0;dir=opendir(path);if(dir)open_directories++;return dir;}
 static int fs_readdir(const struct canopus_context_v1 *c,void *dir,struct canopus_fs_dirent *out) {
-    struct dirent *e;(void)c;errno=0;e=readdir(dir);if(!e)return errno?-errno:1;
+    struct dirent *e;(void)c;directory_reads++;errno=0;e=readdir(dir);if(!e)return errno?-errno:1;
     if(strlen(e->d_name)>=sizeof(out->name))return -22;strcpy(out->name,e->d_name);out->is_dir=e->d_type==DT_DIR;return 0;
 }
-static int fs_closedir(const struct canopus_context_v1 *c,void *dir) {(void)c;return closedir(dir)<0?-errno:0;}
+static int fs_closedir(const struct canopus_context_v1 *c,void *dir) {(void)c;assert(open_directories);open_directories--;return closedir(dir)<0?-errno:0;}
 static int fs_root(const struct canopus_context_v1 *c,char *p,uint32_t n) {(void)c;if(n<24)return -22;strcpy(p,"/data/canopus/m.corona");return 0;}
 static void *mem_alloc(const struct canopus_context_v1 *c,uint32_t n) {
     (void)c;if(alloc_budget==0||blocks>=128u||n>262144u-live_bytes)return 0;if(alloc_budget>0)alloc_budget--;
@@ -292,4 +294,240 @@ static void test_failed_close_buffer_ownership(void) {
     assert(live_bytes==baseline);assert(fs_exists(&ctx,"themes/beta/x.bin")==1);
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
-int main(void) {test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+static const char *gamma="{\"format\":\"canopus-resource-pack\",\"formatVersion\":1,\"themeId\":\"gamma\",\"name\":\"New gamma\",\"versionCode\":0,\"mappings\":[{\"source\":\"/resource/g.bin\",\"destination\":\"g.bin\"}],\"backgrounds\":{\"launcher\":\"g.bin\"},\"calendar\":{\"weekday\":{\"type\":\"image\",\"context\":[\"g.bin\",\"g.bin\",\"g.bin\",\"g.bin\",\"g.bin\",\"g.bin\",\"g.bin\"]}}}";
+static void make_staging(const char *name,const char *manifest) {
+    char path[256]; int rc=fs_mkdir(&ctx,"staging"); assert(!rc||rc==-EEXIST);
+    snprintf(path,sizeof(path),"staging/%s",name); assert(!fs_mkdir(&ctx,path));
+    snprintf(path,sizeof(path),"staging/%s/corona.json",name); fixture(path,manifest);
+    snprintf(path,sizeof(path),"staging/%s/g.bin",name); fixture(path,"G");
+}
+static uint32_t list_read32(const uint8_t *p) {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
+static void test_connect_install_and_list(void) {
+    struct rh_manager_data *d=0; struct rh_manager_metadata meta; struct rh_manager_option option;
+    uint8_t hash[32]={1},other[32]={2},payload[468]; uint32_t revision,size,n; char id[65],*text;
+    setup(); assert(!rh_manager_data_create(&ctx,0,&d)); revision=rh_manager_data_revision(d); assert(revision==1u);
+    assert(!rh_manager_data_find_hash(d,hash,id)); make_staging("7",gamma);
+    assert(!rh_manager_data_install(d,"staging/7",7u,hash,id)&&!strcmp(id,"gamma"));
+    assert(rh_manager_data_revision(d)==revision+1u); assert(!rh_manager_data_metadata(d,"gamma",&meta)&&!strcmp(meta.name,"New gamma"));
+    assert(fs_exists(&ctx,"staging/7")==0 && fs_exists(&ctx,"themes/gamma/7/g.bin")==1);
+    assert(fs_exists(&ctx,"active-config")==0); assert(rh_manager_data_find_hash(d,hash,id)==1&&!strcmp(id,"gamma"));
+    assert(!rh_manager_data_find_hash(d,other,id)&&!id[0]);
+    make_staging("dedup",gamma); assert(!rh_manager_data_install(d,"staging/dedup",8u,hash,id));
+    assert(rh_manager_data_revision(d)==revision+1u&&fs_exists(&ctx,"staging/dedup/g.bin")==1);
+    assert(!rh_manager_data_order_get(d,0,id,0)&&!strcmp(id,"gamma"));
+    assert(!rh_manager_data_option_count(d,"/resource/g.bin",&n)&&n==3u);
+    assert(!rh_manager_data_option_get(d,"/resource/g.bin",0,&option)); assert(strstr(option.preview,"themes/gamma/7/g.bin"));
+    assert(!rh_manager_data_prepare_apply(d,"active/20"));
+    text=read_fixture("active/20/mappings.tsv"); assert(strstr(text,"/resource/g.bin\tthemes/gamma/7/g.bin\n")); free(text);
+    text=read_fixture("active/20/backgrounds.cfg");assert(strstr(text,"launcher=themes/gamma/7/g.bin\n"));free(text);
+    text=read_fixture("active/20/calendar.cfg");assert(strstr(text,"\nthemes/gamma/7/g.bin\n")&&!strstr(text,"staging/"));free(text);
+    assert(!rh_manager_data_complete_apply(d,0));
+    size=sizeof(payload); assert(rh_manager_data_connect_list(d,revision,0,payload,&size)==-10&&size==0);
+    revision=rh_manager_data_revision(d);
+    size=sizeof(payload); assert(!rh_manager_data_connect_list(d,0,0,payload,&size));
+    assert(list_read32(payload)==revision && list_read32(payload+4)==3u && list_read32(payload+8)==1u);
+    assert(payload[12]==7u && payload[13]==5u && payload[17]==0u && !memcmp(payload+26,"alpha",5));
+    assert(list_read32(payload+18)==UINT32_MAX && list_read32(payload+22)==2097151u);
+    size=sizeof(payload); assert(!rh_manager_data_connect_list(d,revision,1,payload,&size));
+    assert(!payload[12] && !payload[15] && !payload[16] && !memcmp(payload+26,"beta",4));
+    size=sizeof(payload); assert(!rh_manager_data_connect_list(d,revision,2,payload,&size));
+    assert(list_read32(payload+8)==UINT32_MAX && payload[12]==2u && !list_read32(payload+18)&&!list_read32(payload+22));
+    assert(!memcmp(payload+26,"gamma",5));
+    size=12u; assert(rh_manager_data_connect_list(d,revision,2,payload,&size)==-8&&size==0);
+    size=sizeof(payload); assert(rh_manager_data_connect_list(d,revision,3,payload,&size)==-1);
+    fixture("themes/gamma/7/corona.json","broken");size=sizeof(payload);assert(!rh_manager_data_connect_list(d,revision,2,payload,&size));
+    assert(payload[17]==1u && !payload[12] && payload[14]==5u && !memcmp(payload+31,"gamma",5));
+    fixture("themes/gamma/7/corona.json",gamma);
+    rh_manager_data_destroy(d); assert(!blocks); assert(!rh_manager_data_create(&ctx,0,&d));
+    assert(rh_manager_data_revision(d)==revision && rh_manager_data_find_hash(d,hash,id)==1);
+    assert(rh_manager_data_delete(d,"gamma")==RH_MANAGER_ERR_ACTIVE);
+    assert(!rh_manager_data_move(d,3u,0u)); assert(!rh_manager_data_prepare_apply(d,"active/22")); fixture("active-config","active/22\n"); assert(!rh_manager_data_complete_apply(d,1));
+    assert(!rh_manager_data_delete(d,"gamma")); assert(rh_manager_data_revision(d)==revision+1u);
+    assert(fs_exists(&ctx,"themes/gamma/7")==1&&fs_exists(&ctx,"themes/gamma/7/g.bin")==0);
+    assert(!rh_manager_data_find_hash(d,hash,id));
+    fixture("interconnect-themes.json","broken"); size=sizeof(payload); assert(rh_manager_data_connect_list(d,0,0,payload,&size)==-5);
+    assert(rh_manager_data_find_hash(d,hash,id)==-5);
+    rh_manager_data_destroy(d); assert(!blocks&&!live_bytes); cleanup_dir(sandbox);
+}
+static void test_connect_install_recovery(void) {
+    for(uint32_t i=0;i<4u;i++) {
+        struct rh_manager_data *d=0; uint8_t hash[32]={3}; char id[65]; uint32_t revision;
+        setup(); assert(!rh_manager_data_create(&ctx,0,&d)); make_staging("7",gamma);
+        if(i==0) fail_write_path="registry-install.pending.manager-tmp";
+        else if(i==1) fail_rename_path="themes/gamma/7";
+        else if(i==2) fail_rename_path="interconnect-themes.json";
+        else fail_unlink=1;
+        assert(rh_manager_data_install(d,"staging/7",7u,hash,id)==(i==3u ? 0:-EIO));
+        assert(fs_exists(&ctx,"registry-install.pending")== (i!=0));
+        assert(fs_exists(&ctx,"staging/7")== (i<2u));
+        fail_write_path=fail_rename_path=0;fail_unlink=0;
+        rh_manager_data_destroy(d); assert(!blocks&&!live_bytes);
+        assert(!rh_manager_data_create(&ctx,0,&d));
+        if(i==0) { assert(!rh_manager_data_find_hash(d,hash,id)); assert(!rh_manager_data_install(d,"staging/7",7u,hash,id)); }
+        assert(rh_manager_data_find_hash(d,hash,id)==1&&!strcmp(id,"gamma"));
+        assert(fs_exists(&ctx,"registry-install.pending")==0);
+        revision=rh_manager_data_revision(d);assert(revision==2u);
+        assert(!rh_manager_data_refresh(d)&&rh_manager_data_revision(d)==revision);
+        assert(!rh_manager_data_install(d,"staging/7",7u,hash,id)&&rh_manager_data_revision(d)==revision);
+        rh_manager_data_destroy(d); assert(!blocks&&!live_bytes); cleanup_dir(sandbox);
+    }
+}
+static void test_connect_install_update_and_validation(void) {
+    struct rh_manager_data *d=0; uint8_t hash[32]={4},second[32]={5}; char id[65],*text; uint32_t revision;
+    setup(); assert(!rh_manager_data_create(&ctx,0,&d));
+    make_staging("beta",beta); fixture("staging/beta/x.bin","NEW B");
+    fixture("mappings.tsv","/resource/a/x.bin\tthemes/beta/x.bin\n");
+    assert(rh_manager_data_install(d,"staging/beta",12u,hash,id)==RH_MANAGER_ERR_ACTIVE);
+    assert(fs_exists(&ctx,"themes/beta/12")==0&&fs_exists(&ctx,"staging/beta/x.bin")==1);
+    assert(!fs_remove(&ctx,"mappings.tsv"));
+    fixture("resource-active-generations.json","{\"version\":1,\"generations\":[],\"protectedThemes\":[\"beta\"]}");
+    assert(rh_manager_data_install(d,"staging/beta",12u,hash,id)==RH_MANAGER_ERR_ACTIVE);
+    assert(!fs_remove(&ctx,"resource-active-generations.json"));
+    assert(!rh_manager_data_install(d,"staging/beta",12u,hash,id));
+    assert(!rh_manager_data_choose(d,"/resource/a/x.bin","beta"));
+    assert(!rh_manager_data_prepare_apply(d,"active/21")); text=read_fixture("active/21/mappings.tsv"); assert(strstr(text,"themes/beta/12/x.bin"));free(text);assert(!rh_manager_data_complete_apply(d,0));
+    assert(!rh_manager_data_choose(d,"/resource/a/x.bin",RH_MANAGER_SYSTEM));assert(!rh_manager_data_move(d,2u,0u));assert(!rh_manager_data_prepare_apply(d,"active/23"));fixture("active-config","active/23\n");assert(!rh_manager_data_complete_apply(d,1));
+    make_staging("collision",beta);fixture("staging/collision/x.bin","B2");
+    assert(rh_manager_data_install(d,"staging/collision",12u,second,id)==-EEXIST);assert(fs_exists(&ctx,"themes/beta/12/x.bin")==1);
+    make_staging("bad",gamma); revision=rh_manager_data_revision(d);
+    fixture("staging/bad/mappings.tsv","derived");assert(rh_manager_data_install(d,"staging/bad",13u,second,id)==-22);assert(!fs_remove(&ctx,"staging/bad/mappings.tsv"));
+    fixture("staging/bad/canora.json",gamma);assert(rh_manager_data_install(d,"staging/bad",13u,second,id)==-22);assert(!fs_remove(&ctx,"staging/bad/canora.json"));
+    assert(!fs_remove(&ctx,"staging/bad/g.bin"));assert(rh_manager_data_install(d,"staging/bad",13u,second,id)==-22);fixture("staging/bad/g.bin","G");
+    fixture("staging/bad/corona.json","{\"format\":\"canopus-resource-pack\",\"formatVersion\":1,\"themeId\":\"gamma\",\"name\":\"bad\",\"mappings\":[{\"source\":\"/resource/g.bin\",\"destination\":\"../g.bin\"}]}");
+    assert(rh_manager_data_install(d,"staging/bad",13u,second,id)==-22);fixture("staging/bad/corona.json",gamma);
+    assert(rh_manager_data_install(d,"themes/beta",13u,second,id)==-22);assert(rh_manager_data_install(d,"staging/../bad",13u,second,id)==-22);
+    assert(rh_manager_data_install(d,"staging/bad",0u,second,id)==-22);assert(rh_manager_data_revision(d)==revision);
+    fail_close=1;assert(rh_manager_data_install(d,"staging/bad",13u,second,id)==-EIO);fail_close=0;
+    assert(rh_manager_data_revision(d)==revision&&fs_exists(&ctx,"staging/bad/g.bin")==1);
+    assert(!fs_remove(&ctx,"staging/bad/corona.json"));fixture("staging/bad/canora.json",gamma);
+    assert(!rh_manager_data_install(d,"staging/bad",UINT32_MAX,second,id));assert(fs_exists(&ctx,"themes/gamma/4294967295/g.bin")==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+static void test_connect_cleanup_and_sync(void) {
+    struct rh_manager_data *d=0;uint8_t hash[32]={8};char id[65];
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("sync",gamma);
+    fail_sync_path="staging/sync/g.bin";assert(rh_manager_data_install(d,"staging/sync",7u,hash,id)==-EIO);fail_sync_path=0;
+    assert(fs_exists(&ctx,"registry-install.pending")==0&&fs_exists(&ctx,"themes/gamma/7")==0);
+    fail_sync_path="registry-install.pending.manager-tmp";assert(rh_manager_data_install(d,"staging/sync",7u,hash,id)==-EIO);fail_sync_path=0;
+    assert(fs_exists(&ctx,"registry-install.pending")==0&&fs_exists(&ctx,"staging/sync/g.bin")==1);
+    fail_remove_path="registry-install.pending";assert(!rh_manager_data_install(d,"staging/sync",7u,hash,id));
+    assert(rh_manager_data_revision(d)==2u&&fs_exists(&ctx,"registry-install.pending")==1);
+    assert(!rh_manager_data_delete(d,"gamma"));assert(rh_manager_data_revision(d)==3u);
+    assert(fs_exists(&ctx,"registry-install.pending")==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);fail_remove_path=0;
+    assert(!rh_manager_data_create(&ctx,0,&d));assert(!rh_manager_data_find_hash(d,hash,id));
+    assert(rh_manager_data_revision(d)==3u&&fs_exists(&ctx,"registry-install.pending")==0);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+    {struct canopus_fs_obj no_sync=fs;struct canopus_context_v1 unsupported=ctx;no_sync.sync=0;unsupported.fs=&no_sync;
+        setup();make_staging("sync",gamma);assert(!rh_manager_data_create(&unsupported,0,&d));
+        assert(rh_manager_data_install(d,"staging/sync",7u,hash,id)==CANOPUS_SVC_ERR_UNSUPPORTED);
+        assert(fs_exists(&ctx,"registry-install.pending")==0&&fs_exists(&ctx,"staging/sync/g.bin")==1);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);}
+}
+static void test_connect_empty_list(void) {
+    struct rh_manager_data *d=0;uint8_t payload[468];uint32_t size=sizeof(payload);
+    setup();fixture("interconnect-themes.json","[]");assert(!rh_manager_data_create(&ctx,0,&d));
+    assert(!rh_manager_data_connect_list(d,0,0,payload,&size)&&size==12u&&!list_read32(payload+4)&&list_read32(payload+8)==UINT32_MAX);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+static int install_budget_step(struct rh_manager_data *d,char id[65]) {
+    uint32_t reads=directory_reads,syncs=file_syncs;int rc=rh_manager_data_install_step(d,id);
+    assert(directory_reads-reads<=1u);assert(file_syncs-syncs<=1u);
+    assert((directory_reads-reads)+(file_syncs-syncs)<=1u);
+    if(!rc)assert(!id[0]);return rc;
+}
+static void test_incremental_install(void) {
+    struct rh_manager_data *d=0;uint8_t hash[32]={11},payload[468];char id[65],path[160];uint32_t i,size,steps=0;
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("incremental",gamma);
+    assert(!fs_mkdir(&ctx,"staging/incremental/nested"));assert(!fs_mkdir(&ctx,"staging/incremental/nested/deep"));
+    for(i=0;i<80u;i++){snprintf(path,sizeof(path),"staging/incremental/nested/deep/%u.bin",i);fixture(path,"PAYLOAD");}
+    {uint32_t reads=directory_reads;assert(!rh_manager_data_install_begin(d,"staging/incremental",14u,hash));assert(directory_reads==reads);}
+    assert(rh_manager_data_install_begin(d,"staging/incremental",14u,hash)==-16);
+    assert(rh_manager_data_refresh(d)==-16);assert(rh_manager_data_move(d,0,1)==-16);
+    assert(rh_manager_data_find_hash(d,hash,id)==-2);size=sizeof(payload);assert(rh_manager_data_connect_list(d,0,0,payload,&size)==-2);
+    {int rc;do{rc=install_budget_step(d,id);assert(++steps<500u);}while(!rc);assert(rc==1&&!strcmp(id,"gamma"));}
+    assert(steps>160u&&!open_directories&&fs_exists(&ctx,"themes/gamma/14/nested/deep/79.bin")==1);
+    assert(rh_manager_data_install_step(d,id)==-22);assert(rh_manager_data_find_hash(d,hash,id)==1);
+    assert(!rh_manager_data_install_begin(d,"staging/incremental",14u,hash));assert(install_budget_step(d,id)==1&&!strcmp(id,"gamma"));
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+}
+static void test_incremental_abort_and_fault(void) {
+    struct rh_manager_data *d=0;uint8_t hash[32]={12};char id[65];int rc;uint32_t i;
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("abort",gamma);
+    assert(!rh_manager_data_install_begin(d,"staging/abort",15u,hash));assert(!install_budget_step(d,id));assert(open_directories==1u);
+    rh_manager_data_install_abort(d);assert(!open_directories&&!fs_exists(&ctx,"registry-install.pending"));assert(!rh_manager_data_refresh(d));
+    assert(!rh_manager_data_install_begin(d,"staging/abort",15u,hash));fail_sync_path="staging/abort/g.bin";
+    for(i=0;i<30u;i++){rc=install_budget_step(d,id);if(rc)break;}assert(rc==-EIO);fail_sync_path=0;
+    assert(!open_directories&&!fs_exists(&ctx,"registry-install.pending"));assert(!rh_manager_data_refresh(d));
+    assert(!rh_manager_data_install_begin(d,"staging/abort",15u,hash));assert(!install_budget_step(d,id));
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);
+    assert(!rh_manager_data_create(&ctx,0,&d));assert(!rh_manager_data_install_begin(d,"staging/abort",15u,hash));
+    for(i=0;i<30u;i++){assert(!install_budget_step(d,id));if(fs_exists(&ctx,"registry-install.pending"))break;}assert(i<30u);
+    rh_manager_data_install_abort(d);assert(!open_directories);
+    {uint32_t reads=directory_reads;fail_sync_path="staging/abort/g.bin";assert(!rh_manager_data_refresh(d));fail_sync_path=0;assert(directory_reads==reads);}
+    assert(rh_manager_data_find_hash(d,hash,id)==1&&!strcmp(id,"gamma"));
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+}
+static void test_incremental_recovery_budget(void) {
+    for(uint32_t phase=0;phase<2u;phase++) {
+        struct rh_manager_data *d=0;uint8_t hash[32]={13};char id[65];uint32_t i,reads;
+        setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("recovery",gamma);
+        assert(!rh_manager_data_install_begin(d,"staging/recovery",16u,hash));
+        for(i=0;i<30u;i++){assert(!install_budget_step(d,id));if(fs_exists(&ctx,"registry-install.pending"))break;}assert(i<30u);
+        if(phase){fail_rename_path="interconnect-themes.json";assert(install_budget_step(d,id)==-EIO);fail_rename_path=0;assert(fs_exists(&ctx,"themes/gamma/16/g.bin"));}
+        rh_manager_data_destroy(d);assert(!blocks&&!open_directories);
+        reads=directory_reads;
+        fail_sync_path=phase ? "themes/gamma/16/g.bin":"staging/recovery/g.bin";
+        assert(!rh_manager_data_create(&ctx,0,&d));fail_sync_path=0;assert(directory_reads==reads);
+        assert(rh_manager_data_find_hash(d,hash,id)==1&&!strcmp(id,"gamma"));
+        assert(!fs_exists(&ctx,"registry-install.pending"));rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+    }
+}
+static void test_install_cancel_and_terminal_commit(void) {
+    for(unsigned boundary=0;boundary<2;boundary++) {
+        struct rh_manager_data *d=0;uint8_t hash[32]={21};char id[65];
+        setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("cancel",gamma);
+        fail_rename_path=boundary ? "interconnect-themes.json":"themes/gamma/21";
+        assert(rh_manager_data_install(d,"staging/cancel",21,hash,id)==-EIO);
+        assert(fs_exists(&ctx,"registry-install.pending")==1);
+        fail_remove_path="registry-install.pending";
+        assert(rh_manager_data_install_cancel(d,hash)==-EIO);
+        fail_remove_path=0;
+        assert(!rh_manager_data_install_cancel(d,hash));
+        assert(!fs_exists(&ctx,"registry-install.pending"));
+        fail_rename_path=0;assert(!rh_manager_data_refresh(d));
+        assert(!rh_manager_data_find_hash(d,hash,id));
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);
+        assert(!rh_manager_data_create(&ctx,0,&d));assert(!rh_manager_data_find_hash(d,hash,id));
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+    }
+    {
+        struct rh_manager_data *d=0;uint8_t hash[32]={22};char id[65];int rc;unsigned steps=0;
+        setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("commit",gamma);
+        assert(!rh_manager_data_install_begin(d,"staging/commit",22,hash));
+        do {
+            rc=install_budget_step(d,id);assert(++steps<100);
+            if(fs_exists(&ctx,"themes/gamma/22/g.bin") && !fs_exists(&ctx,"registry-install.pending"))
+                fail_write_path="resource-order.json.manager-tmp";
+        } while(!rc);
+        assert(rc==1&&!strcmp(id,"gamma"));
+        assert(rh_manager_data_install_cancel(d,hash)==1);
+        fail_write_path=0;assert(rh_manager_data_find_hash(d,hash,id)==1);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+    }
+}
+static void test_damaged_hash_reinstall(void) {
+    struct rh_manager_data *d=0;uint8_t hash[32]={23};char id[65];
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("original",gamma);
+    assert(!rh_manager_data_install(d,"staging/original",23,hash,id));
+    assert(!fs_remove(&ctx,"themes/gamma/23/g.bin"));
+    assert(!rh_manager_data_find_hash(d,hash,id));
+    make_staging("repair",gamma);assert(!rh_manager_data_install(d,"staging/repair",24,hash,id));
+    assert(rh_manager_data_find_hash(d,hash,id)==1);
+    assert(fs_exists(&ctx,"themes/gamma/24/g.bin"));
+    fixture("themes/gamma/24/corona.json","broken");assert(!rh_manager_data_find_hash(d,hash,id));
+    make_staging("repair-manifest",gamma);assert(!rh_manager_data_install(d,"staging/repair-manifest",25,hash,id));
+    assert(rh_manager_data_find_hash(d,hash,id)==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+int main(void) {test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
