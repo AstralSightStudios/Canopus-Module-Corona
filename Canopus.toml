@@ -39,10 +39,5 @@ files = [
     "build/manager-resources/none.bin",
     "build/manager-resources/check.bin",
     "build/manager-resources/uncheck.bin",
-    "build/manager-resources/connect.bin",
-    "build/manager-resources/choose.bin",
-    "build/manager-resources/download.bin",
-    "build/manager-resources/error.bin",
-    "build/manager-resources/succ.bin",
     "build/manager-resources/logo.bin",
 ]

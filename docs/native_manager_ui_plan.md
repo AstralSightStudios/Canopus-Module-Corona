@@ -16,7 +16,7 @@
    - Manager UI 与 Resource Hook 运行于同一模块实例及同一 serialized module/UI owner 任务：状态读取直接访问模块内存快照，配置重载直接调用模块内部发布事务，异步刷新完成与传输进度变更通过内部回调 + `ctx->ui->post` 推送驱动 UI 更新。
 3. **视觉与组件原则**：
    - **首页状态卡片**：1:1 复刻既有视觉（尺寸、圆角裁剪、四态背景色、主副标题字号、右下角状态装饰图）。
-   - **其余页面与控件**：采用 `../Canopus-Private` 原生 UI 宿主（`canopus_ui.h` / `canopus_ui_host.c`）提供的固件系统预制组件；底部胶囊操作按钮（重载、删除）及空状态/传输状态插图继续复用既有切图资源（与固件原生底部图片按钮机制一致）。
+   - **其余页面与控件**：采用 `../Canopus-Private` 原生 UI 宿主（`canopus_ui.h` / `canopus_ui_host.c`）提供的固件系统预制组件；底部胶囊操作按钮（重载、删除）及空状态插图继续复用既有切图资源（与固件原生底部图片按钮机制一致）；传输状态插图随独立传输页一并移除，进度改由资源管理页内嵌横幅承载。
    - **混搭微调增强**：突破快应用沙盒限制，在「选择来源」页新增对 **「默认」(`@default`)** 与 **「系统」(`@system`)** 选项的真实 `.bin` 图标预览。
 4. **首批支持与模拟器验证目标**：
    - `xiaomi-band-10-pro-3.101.043`（`336×480` 方屏）
@@ -103,7 +103,7 @@ struct rh_transfer_ui_state {
 };
 ```
 
-- **本轮范围**：实现 `rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state)` 内部更新入口与 `ROUTE_RECEIVE` 页面完整渲染逻辑；后续接入 `canopusconnect_implementation.md` 的接收状态机时，只需在状态跳变或累计 ACK 写入时调用该接口，即可通过 `ctx->ui->post` 自动跳转或刷新 `ROUTE_RECEIVE` 页面。
+- **本轮范围**：实现 `rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state)` 内部更新入口与资源管理页内嵌传输横幅渲染（见 §4.6）；后续接入 `canopusconnect_implementation.md` 的接收状态机时，只需在状态跳变或累计 ACK 写入时调用该接口，`ctx->ui->post` 会自动刷新横幅并在安装完成时提示包名 Toast。传输不再占用独立路由：接收器与页面解耦，UI 关闭不影响接收与续传。
 
 ---
 
@@ -132,7 +132,7 @@ struct rh_transfer_ui_state {
 
 ---
 
-## 4. 六大路由页面 UI 设计与交互规范
+## 4. 五大路由页面 UI 设计与交互规范
 
 ### 4.1 首页 (`ROUTE_INDEX`)
 
@@ -344,37 +344,38 @@ ROUTE_MIX_MATCH (Band 11)                ROUTE_MIX_MATCH_SELECT (Band 11)
 
 ---
 
-### 4.6 主题传输页 (`ROUTE_RECEIVE`)
+### 4.6 传输状态横幅（资源管理页内嵌，无独立传输页）
 
-1. **顶部标题栏**：`NAVIGATION_HEADER`，`title = "主题传输"`，`show_back = 1`。
+接收链路在模块层独立运行（`rh_connect_start` / `rh_connect_poll`），不需要前台页面，原「主题传输」页已删除；传输进度改为钉在资源管理页列表顶部的横幅卡片展示。横幅不是列表行：不进入虚拟滚动窗口、不参与拖拽排序的 `KEY_ROW` 网格与 `EV_ORDER` 映射，仅压缩列表视口一个 `BANNER_H (96px) + 8px` 间距。
+
+1. **出现规则**：仅 `ROUTE_RESOURCES` 且 `phase` 为 `RECEIVING / VERIFYING / INSTALLING`，或 `ERROR / CANCELED` 且未被点按消除；`IDLE` 与 `INSTALLED` 不渲染横幅。没有前台传输，就没有「等待连接 / 等待文件」常驻页。
 2. **阶段视觉映射（对齐 `canopusconnect_proto.md` §4 & §8）**：
-   | 内部 `phase` | 条件 | 状态插图 (`IMAGE`) | 阶段标题 (`TEXT TITLE`) | 底部展示内容 |
-   |---|---|---|---|---|
-   | `IDLE` (0) | `!remote_connected` | `connect.bin` (`199×199`) | `"等待连接"` | 说明文本：`"等待手机端互联连接…"` |
-   | `IDLE` (0) | `remote_connected` | `choose.bin` (`199×199`) | `"等待文件"` | 说明文本：`"请在手机端选择主题包发送"` |
-   | `RECEIVING` (1) | 正在接收数据 | `download.bin` (`120×120`) | `"正在接收"` | 原生进度条 `PROGRESS (0..100)` + `"{percent}%"` |
-   | `VERIFYING` (2) | 校验 SHA-256 | `download.bin` (`120×120`) | `"正在校验"` | 原生进度条 `PROGRESS (100)` + `"正在核对完整性…"` |
-   | `INSTALLING` (3) | 解压与登记 | `download.bin` (`120×120`) | `"正在安装"` | 原生进度条 `PROGRESS (100)` + `"正在解压并登记…"` |
-   | `INSTALLED` (4) | 安装成功 | `succ.bin` (`120×120`) | `"接收完成"` | 说明文本：`"主题包已安装，可前往资源管理查看"` |
-   | `ERROR` (5) / `CANCELED` (6) | 异常或取消 | `error.bin` (`120×120`) | `"传输中断"` | 错误码对应说明（如 `HASH`/`PACK`/`IO`/`ACTIVE` 等） |
-3. **屏幕常亮控制**：
-   - 当 `ROUTE_RECEIVE` 可见且 `phase` 处于 `RECEIVING / VERIFYING / INSTALLING` 时，通过 `ctx->display->acquire_wake_lock(ctx, CANOPUS_WAKELOCK_SCREEN)` 保持屏幕常亮；页面隐藏、关闭或进入终态时立即 `release_wake_lock`。
+   | 内部 `phase` | 第一行 (`TEXT TITLE`, `font_px=22`) | 第二行 |
+   |---|---|---|
+   | `RECEIVING` (1) | `"正在接收 · {percent}%"` | 原生进度条 `PROGRESS (0..100)` |
+   | `VERIFYING` (2) | `"正在校验完整性"` | 原生进度条 `PROGRESS (100)` |
+   | `INSTALLING` (3) | `"正在解压并登记"` | 原生进度条 `PROGRESS (100)` |
+   | `ERROR` (5) | `"传输中断"` | 错误码对应说明（`transfer_error` 映射，左对齐两行换行，`font_px=20`） |
+   | `CANCELED` (6) | `"传输中断"` | `"任务已取消"` |
+
+3. **`INSTALLED` (4)**：横幅消失，`CANOPUS_UI_NODE_TOAST`（2000ms）提示 `"{包名}已安装"`（包名读取登记后的 `corona.json`，经 `rh_manager_data_last_installed` + `rh_manager_data_metadata`，缺失时回退 `"主题包已安装"`），并刷新资源列表让新包立即出现。包名只在此刻登场：协议握手不携带名称，接收/校验阶段设备端不存在名字。
+4. **错误常驻与消除**：`ERROR / CANCELED` 横幅常驻（后台传输失败本来就无人围观，不能一闪而过），点按横幅卡片（`EV_DISMISS`，点击语义为 slop 内松开，与底部图片按钮一致）消除；任意后续 `phase` 跳变自动恢复横幅。
+5. **无常亮锁**：传输无需用户盯屏，`CANOPUS_WAKELOCK_SCREEN` 随传输页一并移除；接收进度由接收器持久化与跨重启续传保证，息屏无影响。
 
 ```text
-IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
-   .--------------------.                   .--------------------.
-  /        08:03         \                 /        08:03         \
- |      < 主题传输        |               |      < 主题传输        |
- |------------------------|               |------------------------|
- |   .----------------.   |               |      .----------.      |
- |   |                |   |               |      | download |      | [120x120 Image]
- |   |  connect.bin   |   | [199x199 Img] |      |   .bin   |      |
- |   |   (199x199)    |   |               |      '----------'      |
- |   '----------------'   |               |        正在接收        | [TEXT TITLE]
- |        等待连接        | [TEXT TITLE]  |  [============>     ]  | [PROGRESS 0..100]
- |  等待手机端互联连接…  | [TEXT BODY]   |          68%           | [TEXT BODY]
-  \                      /                 \                      /
-   '--------------------'                   '--------------------'
+Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
+   .--------------------.               +------------------------------------+
+  /        08:03         \              | < 资源管理                   08:05 |
+ |      < 资源管理        |              +------------------------------------+
+ |------------------------|              | .--------------------------------. |
+ | .====================. |              | | 正在接收 · 68%                   | |
+ | || 正在接收 · 68%      || |            | | [===============>    ]           | |
+ | || [========>    ]    || |            | '--------------------------------' |
+ | '====================' |              | .--------------------------------. |
+ | .--------------------. |              | | 霓虹主题                     > | |
+ | | 霓虹主题         > | |              | | Alice · v1.2.0 · 赛博风格图标  | |
+  \   (scroll list)      /               \  (scroll list)                    /
+   '--------------------'                 +------------------------------------+
 ```
 
 ---
@@ -387,7 +388,7 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
   - 在 `rh_wrapper` 中添加 8 字节 `".rh_sys/"` 直通分支，供混搭微调预览原厂资源。
   - 暴露内部状态读取 `rh_module_get_status_snapshot` 与内部重载触发 `rh_module_request_reload` 及完成回调钩子。
 - **`src/manager_assets.c`**：
-  - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`true.png`、`false.png`、`connect.png`、`choose.png`、`download.png`、`error.png`、`succ.png`、`logo.png` 转为 LVGL v9 `.bin`，经 `Canopus.toml` 的 `[resources]` 作为 `.canopus` 包内资源（`resources/common/<name>.bin`）发布；安装时由包安装器解压到模块私有目录 `/data/canopus/m.corona/<name>.bin`。模块 ELF 不携带任何图片字节；运行时仅按名校验已解压文件的大小并返回绝对路径，图片由 UI 图片节点懒加载。`true.png` / `false.png` 分别生成 `check.bin` / `uncheck.bin`，供「选择来源」的选中标识使用。
+  - 将 `status-running.png`、`status-config-error.png`、`status-unresponsive.png`、`reload.png`、`reload-wide.png`、`del.png`、`del-wide.png`、`none.png`、`true.png`、`false.png`、`logo.png` 转为 LVGL v9 `.bin`，经 `Canopus.toml` 的 `[resources]` 作为 `.canopus` 包内资源（`resources/common/<name>.bin`）发布；安装时由包安装器解压到模块私有目录 `/data/canopus/m.corona/<name>.bin`。模块 ELF 不携带任何图片字节；运行时仅按名校验已解压文件的大小并返回绝对路径，图片由 UI 图片节点懒加载。`true.png` / `false.png` 分别生成 `check.bin` / `uncheck.bin`，供「选择来源」的选中标识使用。
 
 ### Step 2：C 语言移植 Manager 数据与配置生成层
 - **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。
@@ -395,20 +396,20 @@ IDLE (waiting / ready)                   RECEIVING / VERIFYING / INSTALLING
 - **清理能力**：FS v2 提供 `rmdir`。默认清理逐文件调用 `fs.remove`，目录句柄关闭后按后序删除空目录，主题卸载覆盖该主题全部安装代次；只有先通过服务版本检查才访问新增接口。FS v1 或接口缺失时保留空目录兼容。文件、目录删除、索引写入或清理失败均返回错误，不把失败显示为成功；旧活动配置中的未知文件保留。
 - **旧存储导入**：保留旧快应用数据，首次全量复制到原生根后最后发布原生索引；原生索引已存在时合并尚未登记的旧包，同名 ID 和已有原生配置保留。配置文件先复制到临时文件再 rename，失败可重试；完成标记 `resource-legacy-imported` 避免删除后复活，后续旧目录变化不持续同步。导入不代表已应用，仍需内部重载事务。框架目录枚举须按固件 `d_name +1` 解码，旧版 `+2` 会截掉首字节并阻断导入。新传输安装适配已接入 `manager_data.c`，实现边界见 CanopusConnect 实现文档。
 
-### Step 3：实现 6 路由原生 UI 视图与事件状态机
+### Step 3：实现 5 路由原生 UI 视图与事件状态机
 - **`src/manager_ui.c`**：
   - 通过 `publish_native_app_stage` 的两个独立阶段登记 `ctx->ui->set_entry` 与 `ctx->launcher->set_entry`。
-  - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT`、`ROUTE_RECEIVE` 的树构建与增量提交。
+  - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT` 的树构建与增量提交；传输进度以横幅卡片形式内嵌 `ROUTE_RESOURCES`（见 §4.6），不占用独立路由。
   - 错误页保留标题返回，内部返回由模块消费；替换页面提交失败时恢复原路由、条目数和错误信息，连续返回不会因不可见的首页状态退出应用。仅首页的 `on_back` 允许框架关闭页面。配套 Supervisor 在 `.155` / `.179` / `.043` 的模块页面绑定系统右滑完成回调，复用相同层级；接管后阻止固件再次关闭页面，普通手势中间阶段不退栈。精确 ABI 静态证据见 Canopus `docs/investigations/native-system-back.md`。
-  - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、双击删除计时、虚拟滚动窗口切换与 `scroll_y` 记忆恢复、常亮锁管理。
+  - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、双击删除计时、虚拟滚动窗口切换与 `scroll_y` 记忆恢复。
 
 ### Step 4：Host 测试与 Mirage 模拟器双端验收（`.043` & `.155`）
 1. **Host ASan/UBSan 测试 (`tests/test_manager_native.c`)**：
-   - 验证 manifest 解析、排序归一化、混搭覆盖、`@default`/`@system` 预览路径计算、`.rh_sys/` 直通打开、活动包删除保护、6 路由 UI 树节点数/字符串容量边界（`<= 32` 节点、`<= 1536B`）及拖拽/双击事件状态机。
+   - 验证 manifest 解析、排序归一化、混搭覆盖、`@default`/`@system` 预览路径计算、`.rh_sys/` 直通打开、活动包删除保护、5 路由 UI 树节点数/字符串容量边界（`<= 32` 节点、`<= 1536B`）及拖拽/双击事件状态机。
 2. **Mirage 模拟器端到端验证 (`.043` Band 10 Pro & `.155` Band 11)**：
    - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `corona-0.3.0.canopus`，预置测试主题包。
    - 通过自动化触摸脚本依次打开并截图验收：
      - **首页**：验证状态卡颜色、圆角裁剪、字号、右下角装饰图，以及底部 `reload*.bin` 按钮点击触发内部重载与 `TOAST`。
      - **资源管理 & 资源详情**：验证原生双行列表、长按拖拽排序、详情页 6 项 `STATUS_ROW` 及 `del*.bin` 双击删除保护。
      - **混搭微调 & 选择来源**：验证已微调项置顶、「默认」/「系统」/「主题包」的 `96×96 CONTAIN` 真实 `.bin` 图标预览与单选切换、返回后滚动位置恢复。
-     - **主题传输**：通过测试钩子驱动 `IDLE / RECEIVING / INSTALLED / ERROR` 状态切换，验证插图与原生 `PROGRESS` 进度条渲染。
+     - **传输横幅**：通过测试钩子（长按首页卡片，每次推进一个 phase）驱动 `RECEIVING / VERIFYING / INSTALLING / INSTALLED / ERROR / CANCELED` 状态切换，在资源管理页验证横幅文案、原生 `PROGRESS` 进度条、安装完成 Toast 与错误横幅点按消除；`IDLE` 不渲染横幅（无「等待连接」页）。

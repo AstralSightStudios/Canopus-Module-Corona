@@ -320,6 +320,7 @@ static void test_connect_install_and_list(void) {
     setup(); assert(!rh_manager_data_create(&ctx,0,&d)); revision=rh_manager_data_revision(d); assert(revision==1u);
     assert(!rh_manager_data_find_hash(d,hash,id)); make_staging("7",gamma);
     assert(!rh_manager_data_install(d,"staging/7",7u,hash,id)&&!strcmp(id,"gamma"));
+    assert(!rh_manager_data_last_installed(d,id)&&!strcmp(id,"gamma"));
     assert(rh_manager_data_revision(d)==revision+1u); assert(!rh_manager_data_metadata(d,"gamma",&meta)&&!strcmp(meta.name,"New gamma"));
     assert(fs_exists(&ctx,"staging/7")==0 && fs_exists(&ctx,"themes/gamma/7/g.bin")==1);
     assert(fs_exists(&ctx,"active-config")==0); assert(rh_manager_data_find_hash(d,hash,id)==1&&!strcmp(id,"gamma"));

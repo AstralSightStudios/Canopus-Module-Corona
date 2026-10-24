@@ -36,6 +36,7 @@ struct rh_manager_data {
     struct pool *pool;
     struct rh_manager_data_hooks hooks;
     char root[256];
+    char last_installed[65];
     char **ids, **order;
     struct installation *installations; /* Parallel to ids; generation 0 is legacy. */
     struct install_job *install_job;
@@ -1778,6 +1779,7 @@ int rh_manager_data_install_step(struct rh_manager_data *d,char installed_id[65]
         break;
     case 5:
         put(id,sizeof(id),job->id); rh_manager_data_install_abort(d);
+        put(d->last_installed,sizeof(d->last_installed),id);
         put(installed_id,65,id); return 1;
     default: rc=-22; break;
     }
@@ -1792,6 +1794,10 @@ int rh_manager_data_install(struct rh_manager_data *d,const char *stage,uint32_t
     return rc==1 ? 0:rc;
 }
 uint32_t rh_manager_data_revision(struct rh_manager_data *d) { return d ? d->revision:0u; }
+int rh_manager_data_last_installed(const struct rh_manager_data *d,char id[65]) {
+    if(!d||!id) return RH_MANAGER_ERR_INVALID;
+    copy(id,d->last_installed,sizeof(d->last_installed)); return 0;
+}
 int rh_manager_data_find_hash(struct rh_manager_data *d,const uint8_t hash[32],char id[65]) {
     uint32_t i,k; int rc;
     if(!d||!hash||!id) return -1; id[0]=0; if(d->busy||d->pending_protection) return -2;

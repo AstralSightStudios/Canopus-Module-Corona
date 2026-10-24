@@ -18,7 +18,7 @@ static struct rh_transfer_ui_state transfer;
 static rh_manager_state_listener listener;
 static void *listener_cookie;
 static uint32_t width=212,height=520,move_from,move_to,moves,selected,chooses,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
-static int wake_count,close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
+static int close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
 static uint32_t refresh_count,applies;
 static uint32_t subscription_count;
 static canopus_timer_callback_t timer_callback;
@@ -70,8 +70,6 @@ static int32_t post(const struct canopus_context_v1 *c,canopus_ui_task_fn cb,voi
 static int32_t close_page(const struct canopus_context_v1 *c) {(void)c;close_count++;entry->on_close(&context,0);return 0;}
 static int32_t publish_launcher(const struct canopus_context_v1 *c,const struct canopus_launcher_entry_v1 *e) {(void)c;assert(!strcmp(e->label,"Corona"));assert(e->icon);return 0;}
 static void resolution(const struct canopus_context_v1 *c,uint32_t *w,uint32_t *h) {(void)c;*w=width;*h=height;}
-static int32_t wake_acquire(const struct canopus_context_v1 *c,uint32_t flags) {(void)c;assert(flags==CANOPUS_WAKELOCK_SCREEN);wake_count++;return 7;}
-static int32_t wake_release(const struct canopus_context_v1 *c,int32_t id) {(void)c;assert(id==7);wake_count--;return 0;}
 static uint32_t clock_ms(const struct canopus_context_v1 *c) {(void)c;return 1000;}
 static int32_t timer_create(const struct canopus_context_v1 *c,uint32_t ms,int periodic,canopus_timer_callback_t cb,void *cookie) {(void)c;(void)cookie;assert((ms==40 && periodic)||(ms==450 && !periodic));timer_callback=cb;return ++timer_id;}
 static int32_t timer_start(const struct canopus_context_v1 *c,int32_t id) {(void)c;assert(id==timer_id);return 0;}
@@ -95,7 +93,7 @@ static const struct canopus_fs_obj fs_api={.stat=config_stat,
 #endif
 };
 static const struct canopus_launcher_obj launcher_api={publish_launcher};
-static const struct canopus_display_obj display_api={.acquire_wake_lock=wake_acquire,.release_wake_lock=wake_release,.get_resolution=resolution};
+static const struct canopus_display_obj display_api={.get_resolution=resolution};
 static const struct canopus_time_obj time_api={.monotonic_ms=clock_ms,.timer_create=timer_create,.timer_start=timer_start,.timer_destroy=timer_destroy};
 
 void rh_module_get_status_snapshot(struct rh_module_status_snapshot *out) {*out=status;}
@@ -141,6 +139,7 @@ int rh_manager_data_prepare_apply(struct rh_manager_data *d,const char *dir) {(v
 int rh_manager_data_complete_apply(struct rh_manager_data *d,int success) {(void)d;assert(success);completed++;data_pending=0;return fail_complete?-5:0;}
 int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {(void)d;(void)id;deletes++;return fail_delete?RH_MANAGER_ERR_ACTIVE:0;}
 const char *rh_manager_data_error(const struct rh_manager_data *d) {(void)d;return "";}
+int rh_manager_data_last_installed(const struct rh_manager_data *d,char id[65]) {(void)d;strcpy(id,"theme3");return 0;}
 
 static int32_t dispatch(void *cookie,const struct canopus_ui_event_v1 *e) {(void)cookie;return entry->on_event(&context,&ui,e,entry->user_data);}
 static void pump(void) {canopus_ui_task_fn cb=pending;pending=0;if(cb) cb(&context,0);}
@@ -153,6 +152,14 @@ static uint32_t find_text(const char *s) {
     assert(0);return 0;
 }
 static uint32_t find_key(uint32_t key) {uint32_t i;for(i=0;i<ui.committed.node_count;i++)if(ui.committed.nodes[i].key==key)return i;assert(0);return 0;}
+static void assert_no_text(const char *s) {
+    uint32_t i;
+    for(i=0;i<ui.committed.node_count;i++)
+        if(!strcmp(ui.committed.strings+ui.committed.nodes[i].primary_off,s)) {
+            fprintf(stderr,"Unexpected UI text '%s' (page key %u, phase %u)\n",s,ui.committed.nodes[0].key,transfer.phase);
+            assert(0);
+        }
+}
 static void visible_copy(const char *s) {
     char joined[1536];uint32_t i,n=0;joined[0]=0;
     for(i=0;i<ui.committed.node_count;i++) {
@@ -345,18 +352,29 @@ int main(int argc,char **argv) {
      assert(ui.committed.nodes[find_key(wkey+2)].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
     }
     host_back();assert_route(3);assert(!close_count);assert(ui.committed.visuals[find_key(10)].scroll_y==208);back();
-    assert(!rh_manager_ui_show_receive());assert_route(5);assert(!wake_count);
-    s.phase=RH_XFER_PHASE_RECEIVING;s.percent=68;assert(!rh_manager_set_transfer_state(&s));pump();assert(wake_count==1);
+    activate_text("资源管理");assert_route(1);
+    s.remote_connected=1;s.phase=RH_XFER_PHASE_RECEIVING;s.percent=68;assert(!rh_manager_set_transfer_state(&s));pump();
+    find_text("正在接收 · 68%");
     i=find_type(CANOPUS_UI_NODE_PROGRESS,0);assert(ui.committed.values[i].value==68);
-    s.phase=RH_XFER_PHASE_VERIFYING;assert(!rh_manager_set_transfer_state(&s));pump();assert(wake_count==1);find_text("正在校验");
-    s.phase=RH_XFER_PHASE_INSTALLING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在安装");
-    s.phase=RH_XFER_PHASE_INSTALLED;assert(!rh_manager_set_transfer_state(&s));pump();assert(!wake_count);find_text("接收完成");
-    s.phase=RH_XFER_PHASE_ERROR;s.detail=6;assert(!rh_manager_set_transfer_state(&s));pump();visible_copy("主题包完整性校验失败，请重新发送");
+    s.phase=RH_XFER_PHASE_VERIFYING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在校验完整性");
+    s.phase=RH_XFER_PHASE_INSTALLING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在解压并登记");
+    {uint32_t reads=refresh_count;
+        s.phase=RH_XFER_PHASE_INSTALLED;assert(!rh_manager_set_transfer_state(&s));pump();
+        assert(refresh_count==reads+1);find_text("测试主题已安装");
+    }
+    s.phase=RH_XFER_PHASE_ERROR;s.detail=6;assert(!rh_manager_set_transfer_state(&s));pump();
+    find_text("传输中断");visible_copy("主题包完整性校验失败，请重新发送");
     s.phase=RH_XFER_PHASE_CANCELED;assert(!rh_manager_set_transfer_state(&s));pump();find_text("任务已取消");
-    s.phase=RH_XFER_PHASE_RECEIVING;assert(!rh_manager_set_transfer_state(&s));pump();assert(wake_count==1);
-    host_back();assert_route(0);assert(!wake_count&&!close_count);
-    entry->on_close(&context,0);assert(!wake_count);
-    s.phase=RH_XFER_PHASE_INSTALLED;assert(!rh_manager_set_transfer_state(&s));pump();assert(!wake_count);
+    /* Errors persist in the banner until the user dismisses the card; any
+       later phase transition brings the banner back. */
+    tap(60,30000);assert_no_text("传输中断");
+    s.phase=RH_XFER_PHASE_RECEIVING;s.percent=20;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在接收 · 20%");
+    {struct rh_transfer_ui_state idle={0};assert(!rh_manager_set_transfer_state(&idle));pump();assert_no_text("正在接收 · 20%");}
+    host_back();assert_route(0);assert(!close_count);
+    entry->on_close(&context,0);
+    /* A closed app shows no install toast; only a live transition announces. */
+    {struct rh_transfer_ui_state done={0};done.phase=RH_XFER_PHASE_INSTALLED;
+     assert(!rh_manager_set_transfer_state(&done));pump();assert_no_text("测试主题已安装");}
     assert(!rh_manager_ui_set_data_hooks(&hooks));assert(!rh_manager_ui_register(&context));assert(subscription_count==1);
     {struct rh_manager_data_hooks changed_hooks=hooks;changed_hooks.cookie=0;assert(rh_manager_ui_set_data_hooks(&changed_hooks)==CANOPUS_SVC_ERR_STATE);}
     assert(!entry->on_open(&context,&ui,0));activate_text("资源管理");assert_route(1);
@@ -364,19 +382,20 @@ int main(int argc,char **argv) {
     host_back();assert(close_count==1);
 #ifdef RH_MANAGER_UI_TEST
     assert(!entry->on_open(&context,&ui,0));
-    event(20,CANOPUS_UI_EVENT_LONG_PRESS,50000,50,50,0);assert_route(5);
-    for(i=0;i<8;i++) {
-        event(ui.committed.nodes[0].key,CANOPUS_UI_EVENT_LONG_PRESS,51000+i*1000,50,100,0);pump();
-        if(i==0) {assert(transfer.phase==RH_XFER_PHASE_IDLE && transfer.remote_connected);}
-        if(i==1) {assert(transfer.phase==RH_XFER_PHASE_RECEIVING && transfer.percent==68);}
-        if(i==5) {assert(transfer.phase==RH_XFER_PHASE_ERROR && transfer.detail==6);}
+    activate_text("资源管理");assert_route(1);
+    /* Long holds cycle the banner states; the header is not a list row, so the
+       drag-to-reorder long press keeps its meaning while the states turn. */
+    for(i=0;i<6;i++) {
+        event(2,CANOPUS_UI_EVENT_LONG_PRESS,51000+i*1000,50,60,0);pump();
+        if(i==0) {assert(transfer.phase==RH_XFER_PHASE_RECEIVING && transfer.percent==68);}
+        if(i==4) {assert(transfer.phase==RH_XFER_PHASE_ERROR && transfer.detail==6);}
+        if(i==5) {assert(transfer.phase==RH_XFER_PHASE_CANCELED);}
     }
-    assert(transfer.phase==RH_XFER_PHASE_IDLE && !transfer.remote_connected && !wake_count);
-    assert(probe_value("routes_mask")==63 && probe_value("phases_mask")==127);
+    assert(probe_value("routes_mask")==31 && probe_value("phases_mask")==127);
     /* The four intentional backend rejections above are latched even though
        later renders recover. A clean emulator scenario expects zero. */
     assert(probe_value("render_failures")==4);
-    assert(probe_value("idle_connected_seen")==1 && probe_value("received_68_seen")==1);
+    assert(probe_value("received_68_seen")==1);
     assert(probe_value("render_error")==0 && probe_used<=256);
     entry->on_close(&context,0);
 #endif

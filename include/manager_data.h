@@ -53,6 +53,10 @@ int rh_manager_data_order_get(struct rh_manager_data *, uint32_t index,
  * corona.json wins; canora.json is used only when corona.json is absent. */
 int rh_manager_data_metadata(struct rh_manager_data *, const char *id,
                              struct rh_manager_metadata *);
+/* Theme id of the most recent install completed through install_step in this
+   catalog lifetime, empty before the first one. Display only: the name source
+   for the finished-transfer toast. */
+int rh_manager_data_last_installed(const struct rh_manager_data *, char id[65]);
 int rh_manager_data_move(struct rh_manager_data *, uint32_t from, uint32_t to);
 /* Mix items use stable partition: explicit selections first, then defaults.
  * Features retain their fixed order and paths retain bytewise sorted order. */

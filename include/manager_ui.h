@@ -11,6 +11,4 @@ int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *);
 int rh_manager_ui_get_data(const struct canopus_context_v1 *, struct rh_manager_data **);
 /* Initial activation rollback only, before native pages can be published. */
 void rh_manager_ui_reset_data(void);
-/* Internal navigation entry for the receiver. */
-int rh_manager_ui_show_receive(void);
 #endif

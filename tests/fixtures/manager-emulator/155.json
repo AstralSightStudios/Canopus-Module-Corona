@@ -481,102 +481,137 @@
       "settle": 0.5
     },
     {
-      "shot": "transfer-idle-disconnected"
-    },
-    {
-      "drag": [
+      "tap": [
         106,
-        288,
-        106,
-        288
+        244
       ],
-      "hold": 0.7,
-      "duration": 0.1,
-      "settle": 0.5
-    },
-    {
-      "shot": "transfer-idle-connected"
-    },
-    {
-      "drag": [
-        106,
-        288,
-        106,
-        288
-      ],
-      "hold": 0.7,
-      "duration": 0.1,
-      "settle": 0.5
+      "settle": 0.6
     },
     {
       "shot": "transfer-receiving-68"
     },
     {
+      "tap": [
+        106,
+        50
+      ],
+      "settle": 0.6
+    },
+    {
       "drag": [
         106,
-        288,
+        128,
         106,
-        288
+        128
       ],
       "hold": 0.7,
       "duration": 0.1,
       "settle": 0.5
+    },
+    {
+      "tap": [
+        106,
+        244
+      ],
+      "settle": 0.6
     },
     {
       "shot": "transfer-verifying"
     },
     {
+      "tap": [
+        106,
+        50
+      ],
+      "settle": 0.6
+    },
+    {
       "drag": [
         106,
-        288,
+        128,
         106,
-        288
+        128
       ],
       "hold": 0.7,
       "duration": 0.1,
       "settle": 0.5
+    },
+    {
+      "tap": [
+        106,
+        244
+      ],
+      "settle": 0.6
     },
     {
       "shot": "transfer-installing"
     },
     {
+      "tap": [
+        106,
+        50
+      ],
+      "settle": 0.6
+    },
+    {
       "drag": [
         106,
-        288,
+        128,
         106,
-        288
+        128
       ],
       "hold": 0.7,
       "duration": 0.1,
       "settle": 0.5
     },
     {
-      "shot": "transfer-installed"
+      "shot": "transfer-installed-toast"
     },
     {
       "drag": [
         106,
-        288,
+        128,
         106,
-        288
+        128
       ],
       "hold": 0.7,
       "duration": 0.1,
       "settle": 0.5
+    },
+    {
+      "tap": [
+        106,
+        244
+      ],
+      "settle": 0.6
     },
     {
       "shot": "transfer-hash-error"
     },
     {
+      "tap": [
+        106,
+        50
+      ],
+      "settle": 0.6
+    },
+    {
       "drag": [
         106,
-        288,
+        128,
         106,
-        288
+        128
       ],
       "hold": 0.7,
       "duration": 0.1,
       "settle": 0.5
+    },
+    {
+      "tap": [
+        106,
+        244
+      ],
+      "settle": 0.6
     },
     {
       "shot": "transfer-canceled"
@@ -585,12 +620,11 @@
   "probe": {
     "path": "ui-probe.txt",
     "required": [
-      "^route=5$",
+      "^route=1$",
       "^phase=6$",
-      "^routes_mask=63$",
+      "^routes_mask=31$",
       "^phases_mask=127$",
       "^render_failures=0$",
-      "^idle_connected_seen=1$",
       "^received_68_seen=1$",
       "^reload=[1-9][0-9]*$",
       "^drag=(?:[2-9]|[1-9][0-9]+)$",

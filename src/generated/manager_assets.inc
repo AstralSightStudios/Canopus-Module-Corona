@@ -10,10 +10,5 @@ static const struct asset_record asset_records[RH_MANAGER_ASSET_COUNT] = {
     {"none.bin", 124652u},
     {"check.bin", 2636u},
     {"uncheck.bin", 2636u},
-    {"connect.bin", 158416u},
-    {"choose.bin", 158416u},
-    {"download.bin", 15436u},
-    {"error.bin", 15436u},
-    {"succ.bin", 15436u},
     {"logo.bin", 36876u},
 };

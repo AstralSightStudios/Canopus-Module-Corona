@@ -34,11 +34,6 @@ ASSETS = [
     ('none', 'images/none.png'),
     ('check', 'images/true.png'),
     ('uncheck', 'images/false.png'),
-    ('connect', 'images/connect.png'),
-    ('choose', 'images/choose.png'),
-    ('download', 'images/download.png'),
-    ('error', 'images/error.png'),
-    ('succ', 'images/succ.png'),
     ('logo', 'logo.png'),
 ]
 

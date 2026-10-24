@@ -6,11 +6,11 @@
 
 #define ON (CANOPUS_UI_NODE_FLAG_VISIBLE | CANOPUS_UI_NODE_FLAG_ENABLED)
 #define TRY(call) do { int _r = (call); if (_r) return _r; } while (0)
-enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, RECEIVE, ROUTES };
-enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL,
+enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, ROUTES };
+enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL, EV_DISMISS,
        EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000, EV_CHOOSE=3000000 };
-enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_TOAST=90, KEY_ROW=1000, OPTION_SLOTS=5,
-       ROW_STEP=104, WINDOW=7, EDGE=42, SLOP=8 };
+enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_BANNER=60, KEY_TOAST=90, KEY_ROW=1000, OPTION_SLOTS=5,
+       ROW_STEP=104, BANNER_H=96, WINDOW=7, EDGE=42, SLOP=8 };
 /* UI state is shared across routes. Catalog and metadata are never duplicated
  * into page models, and only a visible subset enters the bounded UI tree. */
 static struct {
@@ -29,19 +29,19 @@ static struct {
        stays inside it the tree is reusable, so a scroll sample costs no rebuild. */
     int32_t window_from, window_to, window_total, viewport;
     char detail_id[65], mix_key[256], mix_title[256], error[256], toast[256];
-    int32_t wake_lock, edge_timer, hold_timer;
+    int32_t edge_timer, hold_timer, list_top;
     uint32_t pressed, press_id, press_key, press_time, moved, drag, drag_from, drag_to;
     int32_t start_x, start_y, last_y, start_scroll, drag_delta;
-    uint32_t delete_armed, delete_at, suppressed;
+    uint32_t delete_armed, delete_at, suppressed, banner_hidden;
     uint32_t position_count, position_keys[2*WINDOW+4];
     int32_t position_y[2*WINDOW+4];
-} U = { .wake_lock=-1, .edge_timer=-1, .hold_timer=-1 };
+} U = { .edge_timer=-1, .hold_timer=-1 };
 #ifdef RH_MANAGER_UI_TEST
 /* Compiled only into the emulator acceptance artifact. A long hold enters
  * receive and steps its copied state; no Connect listener is registered. */
 static struct {
     uint32_t reload,drag,delete_taps,pick,scroll,cycle;
-    uint32_t routes_mask,phases_mask,render_failures,idle_connected_seen,received_68_seen;
+    uint32_t routes_mask,phases_mask,render_failures,received_68_seen;
     int32_t render_rc;
 } probe_state;
 #endif
@@ -85,11 +85,8 @@ static void write_probe(int rc) {
     if(rc) {if(probe_state.render_failures!=0xffffffffu) probe_state.render_failures++;}
     else {
         probe_state.routes_mask|=1u<<U.route;
-        if(U.route==RECEIVE) {
-            probe_state.phases_mask|=1u<<U.transfer.phase;
-            if(U.transfer.phase==RH_XFER_PHASE_IDLE && U.transfer.remote_connected) probe_state.idle_connected_seen=1;
-            if(U.transfer.phase==RH_XFER_PHASE_RECEIVING && U.transfer.percent==68) probe_state.received_68_seen=1;
-        }
+        probe_state.phases_mask|=1u<<U.transfer.phase;
+        if(U.route==RESOURCES && U.transfer.phase==RH_XFER_PHASE_RECEIVING && U.transfer.percent==68) probe_state.received_68_seen=1;
     }
     p=probe_field(p,"route",U.route);p=probe_field(p,"phase",U.transfer.phase);
     p=probe_field(p,"connected",U.transfer.remote_connected);p=probe_field(p,"percent",U.transfer.percent);
@@ -99,7 +96,6 @@ static void write_probe(int rc) {
     p=probe_field(p,"scroll",probe_state.scroll);
     p=probe_field(p,"routes_mask",probe_state.routes_mask);p=probe_field(p,"phases_mask",probe_state.phases_mask);
     p=probe_field(p,"render_failures",probe_state.render_failures);
-    p=probe_field(p,"idle_connected_seen",probe_state.idle_connected_seen);
     p=probe_field(p,"received_68_seen",probe_state.received_68_seen);total=(uint32_t)(p-data);
     if(!U.ctx->fs || !U.ctx->fs->open || !U.ctx->fs->write || !U.ctx->fs->close) return;
     fd=U.ctx->fs->open(U.ctx,"ui-probe.txt",CANOPUS_FS_WRITE);if(fd<0) return;
@@ -114,20 +110,12 @@ static void set_error(const char *fallback) {
 static void toast(const char *message) {copy(U.toast,sizeof(U.toast),message);U.toast_id++;}
 static int render(void);
 static void cancel_gesture(void);
+static int build_banner(struct canopus_ui_tree_v1 *t);
+static int banner_active(void);
 static void changed(void *,uint32_t);
 static void edge_tick(const struct canopus_context_v1 *,int32_t,void *);
 static void clear_hold(void) {
     if(U.hold_timer>=0) {(void)U.ctx->time->timer_destroy(U.ctx,U.hold_timer);U.hold_timer=-1;}
-}
-static void sync_wake(void) {
-    int need=U.opened && U.route==RECEIVE && U.transfer.phase>=RH_XFER_PHASE_RECEIVING && U.transfer.phase<=RH_XFER_PHASE_INSTALLING;
-    if (need && U.wake_lock<0 && U.ctx->display && U.ctx->display->acquire_wake_lock)
-        U.wake_lock=U.ctx->display->acquire_wake_lock(U.ctx,CANOPUS_WAKELOCK_SCREEN);
-    else if (!need && U.wake_lock>=0) {
-        if (U.ctx->display && U.ctx->display->release_wake_lock)
-            (void)U.ctx->display->release_wake_lock(U.ctx,U.wake_lock);
-        U.wake_lock=-1;
-    }
 }
 static int component(struct canopus_ui_tree_v1 *t,uint32_t key,uint16_t type,
                      const char *a,const char *b,uint32_t event,uint32_t flags) {
@@ -207,7 +195,7 @@ void rh_manager_ui_reset_data(void) {
 }
 static int load_route(uint32_t route,int refresh) {
     int rc=0; U.error[0]=0;
-    if(route==INDEX || route==RECEIVE) return 0;
+    if(route==INDEX) return 0;
     rc=ensure_data();
     if(!rc && refresh && !U.busy) rc=rh_manager_data_refresh(U.data);
     if(!rc && route==DETAIL) rc=rh_manager_data_metadata(U.data,U.detail_id,&U.metadata);
@@ -221,12 +209,12 @@ static int navigate(uint32_t route,int refresh) {
     uint32_t previous_route=U.route,previous_count=U.count;char previous_error[256];int rc;
     copy(previous_error,sizeof(previous_error),U.error);
     cancel_gesture();U.delete_armed=0;U.toast[0]=0;U.route=route;
-    (void)load_route(route,refresh);sync_wake();rc=render();
+    (void)load_route(route,refresh);rc=render();
     /* A rejected replacement leaves the old native page visible. Its route
      * must still own the next back event instead of accidentally exiting. */
     if(rc && U.ui->committed.nodes[0].key!=1u+route*10000u) {
         U.route=previous_route;U.count=previous_count;
-        copy(U.error,sizeof(U.error),previous_error);sync_wake();
+        copy(U.error,sizeof(U.error),previous_error);
     }
     return rc;
 }
@@ -257,7 +245,7 @@ static int build_home(struct canopus_ui_tree_v1 *t) {
     return image_button(t,U.wide?RH_MANAGER_ASSET_RELOAD_WIDE:RH_MANAGER_ASSET_RELOAD,EV_RELOAD,U.wide?324:150,U.wide?80:78,
                         (int)U.content_height-(U.wide?90:80),!U.busy);
 }
-static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height) {
+static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height,int top) {
     struct canopus_ui_visual_v1 v=CANOPUS_UI_VISUAL_DEFAULT;
     int32_t maximum;
     if(total>0x7fffffffu) return CANOPUS_UI_ERR_CAPACITY;
@@ -268,9 +256,9 @@ static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height) 
     maximum=(int32_t)total-height;if(maximum<0) maximum=0;
     if(U.scroll[U.route]<0) U.scroll[U.route]=0;
     else if(U.scroll[U.route]>maximum) U.scroll[U.route]=maximum;
-    U.viewport=height;U.window_total=(int32_t)total;U.window_from=U.window_to=0;
+    U.viewport=height;U.list_top=top;U.window_total=(int32_t)total;U.window_from=U.window_to=0;
     TRY(component(t,KEY_SCROLL,CANOPUS_UI_NODE_SCROLL,"","",EV_SCROLL,ON));
-    TRY(box(t,KEY_SCROLL,(int)U.width,height,0,0,0,0,-1,1));
+    TRY(box(t,KEY_SCROLL,(int)U.width,height,0,top,0,0,-1,1));
     v.flags=CANOPUS_UI_VISUAL_FLAG_ABSOLUTE|CANOPUS_UI_VISUAL_FLAG_CLIP|CANOPUS_UI_VISUAL_FLAG_VIRTUAL_CONTENT;
     v.content_height=total;v.scroll_y=U.scroll[U.route];
     return U.ctx->ui->node_set_visual(t,KEY_SCROLL,&v);
@@ -335,10 +323,11 @@ static int build_mix_row(struct canopus_ui_tree_v1 *t,uint32_t i) {
     TRY(row(t,KEY_ROW+i,item.label,choice,EV_MIX_ITEM+i));return positioned(t,KEY_ROW+i,96,(int32_t)(i*ROW_STEP));
 }
 static int build_list(struct canopus_ui_tree_v1 *t) {
-    uint32_t i,first;int rc;
+    uint32_t i,first;int rc,banner=banner_active();
+    if(banner) TRY(build_banner(t));
     if(!U.count) return image_asset(t,50,RH_MANAGER_ASSET_NONE,205,152,((int)U.width-205)/2,130);
     if(U.count>(0x7fffffffu-32u)/ROW_STEP) return CANOPUS_UI_ERR_CAPACITY;
-    TRY(scroll_begin(t,U.count*ROW_STEP+32u,(int)U.content_height));
+    TRY(scroll_begin(t,U.count*ROW_STEP+32u,(int)U.content_height-(banner?BANNER_H+8:0),banner?BANNER_H+8:0));
     first=(uint32_t)U.scroll[U.route]/ROW_STEP;
     if(first>=U.count) first=U.count-1;
     U.shown=0;
@@ -427,7 +416,7 @@ static int build_detail(struct canopus_ui_tree_v1 *t) {
     TRY(detail_segments(0,&height));
     /* The delete action floats over a full-height scroll like the Vela page:
        cards pass beneath it and the trailing spacer clears the last card. */
-    TRY(scroll_begin(t,height,(int)U.content_height));U.shown=0;
+    TRY(scroll_begin(t,height,(int)U.content_height,0));U.shown=0;
     TRY(detail_segments(t,&height));TRY(U.ctx->ui->end(t));
     return image_button(t,U.wide?RH_MANAGER_ASSET_DELETE_WIDE:RH_MANAGER_ASSET_DELETE,EV_DELETE,U.wide?324:150,U.wide?80:78,
                         (int)U.content_height-(U.wide?90:80),!U.busy);
@@ -493,7 +482,7 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
         TRY(rh_manager_data_option_get(U.data,U.mix_key,i,&option));h=option_height(&option);
         if(total>0x7fffffffu-(uint32_t)h) return CANOPUS_UI_ERR_CAPACITY;total+=(uint32_t)h;
     }
-    TRY(scroll_begin(t,total,(int)U.content_height));U.shown=0;
+    TRY(scroll_begin(t,total,(int)U.content_height,0));U.shown=0;
     {
     /* The window is a contiguous height range, not a row index: options mix
        compact and preview heights, so an index would not describe the span. */
@@ -551,49 +540,68 @@ static const char *transfer_error(uint8_t detail) {
     default:return "传输中断，请重新连接后重试";
     }
 }
-static int centered_lines(struct canopus_ui_tree_v1 *t,uint32_t key,const char *s,int y,uint16_t font,uint32_t color) {
-    uint32_t offset=0,line=0,n=len(s),maximum=U.width-32;char buffer[256];
-    while(offset<n) {
+/* Left-aligned UTF-8 wrap for the banner's bounded message area. Every
+   protocol error string fits two lines at 20px on the narrow row width. */
+static int wrap_lines(struct canopus_ui_tree_v1 *t,uint32_t key,const char *s,int y,uint16_t font,uint32_t color) {
+    uint32_t offset=0,line=0,n=len(s),maximum=U.row_width-28;char buffer[256];
+    while(offset<n && line<2) {
         uint32_t bytes=0,pixels=0;
         while(offset+bytes<n) {
             unsigned char c=(unsigned char)s[offset+bytes];
             uint32_t size=c<0x80?1u:(c&0xe0u)==0xc0u?2u:(c&0xf0u)==0xe0u?3u:4u;
             uint32_t advance=c<0x80?font/2u:font;
-            if(bytes && (pixels+advance>maximum || c=='\n')) break;
+            if(bytes && pixels+advance>maximum) break;
             if(bytes+size>=sizeof(buffer)) break;
             canopus_memcpy(buffer+bytes,s+offset+bytes,size);bytes+=size;pixels+=advance;
         }
         if(!bytes) return CANOPUS_UI_ERR_CAPACITY;
-        buffer[bytes]=0;TRY(label_box(t,key+line,buffer,(int)pixels,(int)font+8,((int)U.width-(int)pixels)/2,y+(int)line*((int)font+8),font,color));
-        offset+=bytes;if(s[offset]=='\n') offset++;line++;
+        buffer[bytes]=0;
+        TRY(label_box(t,key+line,buffer,(int)pixels,(int)font+4,14,y+(int)line*((int)font+4),font,color));
+        offset+=bytes;line++;
     }
     return 0;
 }
-static int build_receive(struct canopus_ui_tree_v1 *t) {
-    const char *title,*message="";enum rh_manager_asset a;int hero=120,phase=U.transfer.phase;char percent[8];
-    if(phase==RH_XFER_PHASE_IDLE) {
-        hero=199;a=U.transfer.remote_connected?RH_MANAGER_ASSET_CHOOSE:RH_MANAGER_ASSET_CONNECT;
-        title=U.transfer.remote_connected?"等待文件":"等待连接";
-        message=U.transfer.remote_connected?"请在手机端选择主题包发送":"等待手机端互联连接…";
-    } else if(phase==RH_XFER_PHASE_INSTALLED) {a=RH_MANAGER_ASSET_SUCCESS;title="接收完成";message="主题包已安装，可前往资源管理查看";}
-    else if(phase==RH_XFER_PHASE_ERROR || phase==RH_XFER_PHASE_CANCELED) {
-        a=RH_MANAGER_ASSET_ERROR;title="传输中断";
+/* Transfer progress is pinned above the resources list instead of owning a
+   page: the receiver runs headless, so this banner is a passive surface that
+   never gates a transfer, and the idle phase deliberately shows nothing. */
+static int banner_active(void) {
+    int phase=U.transfer.phase;
+    if(U.route!=RESOURCES) return 0;
+    if(phase>=RH_XFER_PHASE_RECEIVING && phase<=RH_XFER_PHASE_INSTALLING) return 1;
+    return (phase==RH_XFER_PHASE_ERROR || phase==RH_XFER_PHASE_CANCELED) && !U.banner_hidden;
+}
+static int build_banner(struct canopus_ui_tree_v1 *t) {
+    char composed[40];const char *title,*message="";uint32_t n;int phase=U.transfer.phase;
+    if(phase==RH_XFER_PHASE_RECEIVING) {
+        copy(composed,sizeof(composed),"正在接收 · ");n=len(composed);
+        n+=number(composed+n,U.transfer.percent);composed[n++]='%';composed[n]=0;title=composed;
+    } else if(phase==RH_XFER_PHASE_VERIFYING) title="正在校验完整性";
+    else if(phase==RH_XFER_PHASE_INSTALLING) title="正在解压并登记";
+    else {
+        title="传输中断";
         message=phase==RH_XFER_PHASE_CANCELED?"任务已取消":transfer_error(U.transfer.detail);
-    } else {
-        a=RH_MANAGER_ASSET_DOWNLOAD;
-        title=phase==RH_XFER_PHASE_RECEIVING?"正在接收":phase==RH_XFER_PHASE_VERIFYING?"正在校验":"正在安装";
-        message=phase==RH_XFER_PHASE_VERIFYING?"正在核对完整性…":phase==RH_XFER_PHASE_INSTALLING?"正在解压并登记…":"";
     }
-    TRY(image_asset(t,50,a,hero,hero,((int)U.width-hero)/2,U.wide?(hero==199?16:56):(hero==199?92:132)));
-    TRY(centered_lines(t,60,title,U.wide?202:278,28,0xffffff));
+    /* The card is its own dismiss target and its click is the release inside
+       slop, like the bottom image buttons. Progress states carry no event. */
+    TRY(component(t,KEY_BANNER,CANOPUS_UI_NODE_LIST,"","",phase>=RH_XFER_PHASE_ERROR?EV_DISMISS:0,ON));
+    TRY(box(t,KEY_BANNER,(int)U.row_width,BANNER_H,((int)U.width-(int)U.row_width)/2,0,0x222222,1,24,0));
+    TRY(label_box(t,KEY_BANNER+1,title,(int)U.row_width-28,34,14,10,22,0xffffff));
     if(phase>=RH_XFER_PHASE_RECEIVING && phase<=RH_XFER_PHASE_INSTALLING) {
         struct canopus_ui_component_props_v1 p={sizeof(p),"",0,"",0,0,ON,phase==RH_XFER_PHASE_RECEIVING?U.transfer.percent:100,0,100,0,0};
-        TRY(U.ctx->ui->component(t,52,CANOPUS_UI_NODE_PROGRESS,&p));
-        TRY(box(t,52,(int)U.width-32,12,16,U.wide?264:340,0,0,-1,0));
-        if(phase==RH_XFER_PHASE_RECEIVING) {uint32_t n=number(percent,U.transfer.percent);percent[n++]='%';percent[n]=0;message=percent;}
-        TRY(centered_lines(t,70,message,U.wide?288:364,24,0xffffff));
-    } else TRY(centered_lines(t,70,message,U.wide?250:326,24,0xc5cbd5));
-    return 0;
+        TRY(U.ctx->ui->component(t,KEY_BANNER+2,CANOPUS_UI_NODE_PROGRESS,&p));
+        TRY(box(t,KEY_BANNER+2,(int)U.row_width-32,12,16,58,0,0,-1,0));
+    } else TRY(wrap_lines(t,KEY_BANNER+2,message,44,20,0xc5cbd5));
+    return U.ctx->ui->end(t);
+}
+/* The install toast is the only pack-name reveal: the protocol carries no
+   metadata, so the name exists only after the manifest registration. */
+static void installed_toast(void) {
+    char id[65],message[160];uint32_t n;id[0]=0;
+    if(!ensure_data() && !rh_manager_data_last_installed(U.data,id) && id[0] &&
+       !rh_manager_data_metadata(U.data,id,&U.metadata) && U.metadata.name[0]) {
+        copy(message,sizeof(message),U.metadata.name);n=len(message);
+        copy(message+n,sizeof(message)-n,"已安装");toast(message);
+    } else toast("主题包已安装");
 }
 static int translate_rows(void) {
     uint32_t i;
@@ -610,7 +618,7 @@ static int translate_rows(void) {
     return 0;
 }
 static int render(void) {
-    static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源","主题传输"};
+    static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源"};
     struct canopus_ui_tree_v1 *t;const char *title=U.route==SELECT && U.mix_title[0]?U.mix_title:titles[U.route];int rc;
     struct canopus_ui_navigation_page_props_v1 p={sizeof(p),title,len(title)};
     struct canopus_ui_navigation_header_props_v1 h={sizeof(h),title,len(title),"",0,EV_BACK,1,0,0};
@@ -633,7 +641,6 @@ static int render(void) {
         case RESOURCES:case MIX:rc=build_list(t);break;
         case DETAIL:rc=build_detail(t);break;
         case SELECT:rc=build_choices(t);break;
-        case RECEIVE:rc=build_receive(t);break;
         default:rc=CANOPUS_UI_ERR_ARGUMENT;break;
         }
     }
@@ -673,9 +680,9 @@ static void edge_tick(const struct canopus_context_v1 *ctx,int32_t timer,void *c
     (void)ctx;(void)cookie;if(timer!=U.edge_timer || !U.drag || !U.opened) return;
     if(U.ctx->ui->control(U.ui,U.generation,KEY_SCROLL,CANOPUS_UI_CONTROL_SCROLL_QUERY,0,0,&metrics)) return;
     /* The host normalizes native points to the content viewport origin. */
-    if(U.last_y<EDGE) depth=U.last_y-EDGE;
-    else if(U.last_y>metrics.viewport_height-EDGE)
-        depth=U.last_y-(metrics.viewport_height-EDGE);
+    if(U.last_y<U.list_top+EDGE) depth=U.last_y-(U.list_top+EDGE);
+    else if(U.last_y>U.list_top+metrics.viewport_height-EDGE)
+        depth=U.last_y-(U.list_top+metrics.viewport_height-EDGE);
     if(!depth) return;
     step=2+6*clamp(depth<0?-depth:depth,0,EDGE)/EDGE;if(depth<0) step=-step;
     maximum=metrics.content_height-metrics.viewport_height;if(maximum<0) maximum=0;
@@ -792,20 +799,20 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
     if(U.route==SELECT && !event && e->key>=KEY_ROW && (e->key-KEY_ROW)/OPTION_SLOTS<U.count)
         event=EV_CHOOSE+(e->key-KEY_ROW)/OPTION_SLOTS;
 #ifdef RH_MANAGER_UI_TEST
-    if(e->type==CANOPUS_UI_EVENT_LONG_PRESS && U.route==INDEX) {
-        probe_state.cycle=0;return navigate(RECEIVE,0);
-    }
-    if(e->type==CANOPUS_UI_EVENT_LONG_PRESS && U.route==RECEIVE) {
-        struct rh_transfer_ui_state s={0};uint32_t cycle=(probe_state.cycle+1u)%8u;
+    /* Acceptance-only: a long hold cycles the transfer banner states. The home
+       card is gesture-free; on resources only non-row holds cycle, so the
+       drag-to-reorder long press keeps its meaning. */
+    if(e->type==CANOPUS_UI_EVENT_LONG_PRESS &&
+       (U.route==INDEX || (U.route==RESOURCES && !(e->key>=KEY_ROW && e->key-KEY_ROW<U.count)))) {
+        struct rh_transfer_ui_state s={0};uint32_t cycle=(probe_state.cycle+1u)%7u;
         probe_state.cycle=cycle;
-        if(cycle==1) s.remote_connected=1;
-        else if(cycle>=2) {
-            s.remote_connected=1;s.archive_bytes=1000;s.written_offset=cycle==2?680:1000;
-            s.percent=cycle==2?68:100;s.durable_offset=cycle==2?0:1000;
-            s.phase=cycle==2?RH_XFER_PHASE_RECEIVING:cycle==3?RH_XFER_PHASE_VERIFYING:
-                    cycle==4?RH_XFER_PHASE_INSTALLING:cycle==5?RH_XFER_PHASE_INSTALLED:
-                    cycle==6?RH_XFER_PHASE_ERROR:RH_XFER_PHASE_CANCELED;
-            if(cycle==6) s.detail=6;
+        if(cycle>=1) {
+            s.remote_connected=1;s.archive_bytes=1000;s.written_offset=cycle==1?680:1000;
+            s.percent=cycle==1?68:100;s.durable_offset=cycle==1?0:1000;
+            s.phase=cycle==1?RH_XFER_PHASE_RECEIVING:cycle==2?RH_XFER_PHASE_VERIFYING:
+                    cycle==3?RH_XFER_PHASE_INSTALLING:cycle==4?RH_XFER_PHASE_INSTALLED:
+                    cycle==5?RH_XFER_PHASE_ERROR:RH_XFER_PHASE_CANCELED;
+            if(cycle==5) s.detail=6;
         }
         return rh_manager_set_transfer_state(&s);
     }
@@ -854,6 +861,7 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
         U.pressed=0;
         if(event==EV_RELOAD && click) return request_reload();
         if(event==EV_DELETE && click) return delete_tap(e->time_ms);
+        if(event==EV_DISMISS && click) {U.banner_hidden=1;return render();}
         /* The preview wrapper is not a prefab row, so it never sees ACTIVATE;
            its click is the release inside slop, like the image buttons. */
         if(click && event>=EV_CHOOSE && U.route==SELECT) return choose_option(event-EV_CHOOSE);
@@ -888,12 +896,16 @@ static void posted(const struct canopus_context_v1 *ctx,void *cookie) {
             set_error(success?"刷新成功，但活动引用保护记录保存失败":"活动引用保护记录处理失败");
             toast(U.error);U.error[0]=0;
         } else reload_toast(U.status.reload_result,U.status.last_changed);
-        if(U.opened && U.route!=INDEX && U.route!=RECEIVE) (void)load_route(U.route,1);
+        if(U.opened && U.route!=INDEX) (void)load_route(U.route,1);
     }
-    if(U.opened && U.route==INDEX && prior==RH_XFER_PHASE_IDLE && U.transfer.phase!=RH_XFER_PHASE_IDLE) {
-        (void)navigate(RECEIVE,0);return;
+    if(prior!=U.transfer.phase) {
+        U.banner_hidden=0;
+        if(U.opened && U.transfer.phase==RH_XFER_PHASE_INSTALLED) {
+            installed_toast();
+            if(U.route==RESOURCES) (void)load_route(RESOURCES,1);
+        }
     }
-    sync_wake();(void)render();
+    (void)render();
 }
 static void changed(void *cookie,uint32_t changes) {
     (void)cookie;(void)changes;
@@ -908,9 +920,9 @@ static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     U.content_height=U.wide?424:444;U.row_width=U.wide?336:204;
     if((U.wide && (U.width!=336 || U.height!=480)) || (!U.wide && (U.width!=212 || U.height!=520))) return CANOPUS_UI_ERR_UNSUPPORTED;
     rc=rh_manager_assets_install(ctx);if(rc) return rc;
-    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=U.toast[0]=0;U.suppressed=0;U.delete_armed=0;
+    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=U.toast[0]=0;U.suppressed=0;U.delete_armed=0;U.banner_hidden=0;
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
-    sync_wake();rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
+    rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
 }
 static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,void *cookie) {
     (void)ctx;(void)ui;(void)cookie;
@@ -920,7 +932,7 @@ static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     (void)back();return 0;
 }
 static void on_close(const struct canopus_context_v1 *ctx,void *cookie) {
-    (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;U.delete_armed=0;sync_wake();
+    (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;U.delete_armed=0;
 }
 static const struct canopus_ui_entry_v1 entry={sizeof(entry),"Corona",on_open,on_event,on_back,on_close,0};
 int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *hooks) {
@@ -942,8 +954,4 @@ int rh_manager_launcher_register(const struct canopus_context_v1 *ctx) {
     if(!ctx || ctx->struct_size<sizeof(*ctx) || !ctx->launcher || !ctx->launcher->set_entry) return CANOPUS_SVC_ERR_UNSUPPORTED;
     TRY(rh_manager_assets_install(ctx));TRY(rh_manager_asset_ensure(RH_MANAGER_ASSET_LOGO,&icon));
     launcher.icon=icon;return ctx->launcher->set_entry(ctx,&launcher);
-}
-int rh_manager_ui_show_receive(void) {
-    if(!U.opened) return CANOPUS_SVC_ERR_STATE;
-    return navigate(RECEIVE,0);
 }
