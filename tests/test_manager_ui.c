@@ -68,7 +68,7 @@ static const struct canopus_ui_backend_v1 backend={sizeof(backend),2,0,(1u<<18)-
 static int32_t set_entry(const struct canopus_context_v1 *c,const struct canopus_ui_entry_v1 *e) {(void)c;entry=e;return 0;}
 static int32_t post(const struct canopus_context_v1 *c,canopus_ui_task_fn cb,void *cookie) {(void)c;(void)cookie;assert(!pending||pending==cb);pending=cb;return 0;}
 static int32_t close_page(const struct canopus_context_v1 *c) {(void)c;close_count++;entry->on_close(&context,0);return 0;}
-static int32_t publish_launcher(const struct canopus_context_v1 *c,const struct canopus_launcher_entry_v1 *e) {(void)c;assert(!strcmp(e->label,"Corona"));assert(e->icon);return 0;}
+static int32_t publish_launcher(const struct canopus_context_v1 *c,const struct canopus_app_entry_v1 *e) {(void)c;assert(!strcmp(e->label,"Corona"));assert(e->icon);assert(!e->pages&&!e->page_count);return 0xCC;}
 static void resolution(const struct canopus_context_v1 *c,uint32_t *w,uint32_t *h) {(void)c;*w=width;*h=height;}
 static uint32_t clock_ms(const struct canopus_context_v1 *c) {(void)c;return 1000;}
 static int32_t timer_create(const struct canopus_context_v1 *c,uint32_t ms,int periodic,canopus_timer_callback_t cb,void *cookie) {(void)c;(void)cookie;assert((ms==40 && periodic)||(ms==450 && !periodic));timer_callback=cb;return ++timer_id;}
@@ -92,7 +92,7 @@ static const struct canopus_fs_obj fs_api={.stat=config_stat,
     .open=probe_open,.write=probe_write,.close=probe_close,
 #endif
 };
-static const struct canopus_launcher_obj launcher_api={publish_launcher};
+static const struct canopus_launcher_obj launcher_api={.register_app=publish_launcher};
 static const struct canopus_display_obj display_api={.get_resolution=resolution};
 static const struct canopus_time_obj time_api={.monotonic_ms=clock_ms,.timer_create=timer_create,.timer_start=timer_start,.timer_destroy=timer_destroy};
 

@@ -950,8 +950,8 @@ int rh_manager_ui_register(const struct canopus_context_v1 *ctx) {
     return ctx->ui->set_entry(ctx,&entry);
 }
 int rh_manager_launcher_register(const struct canopus_context_v1 *ctx) {
-    const char *icon=0;struct canopus_launcher_entry_v1 launcher={sizeof(launcher),"Corona",0};
-    if(!ctx || ctx->struct_size<sizeof(*ctx) || !ctx->launcher || !ctx->launcher->set_entry) return CANOPUS_SVC_ERR_UNSUPPORTED;
+    const char *icon=0;int32_t rc;struct canopus_app_entry_v1 app={sizeof(app),"Corona",0,0,0};
+    if(!ctx || ctx->struct_size<sizeof(*ctx) || !ctx->launcher || !ctx->launcher->register_app) return CANOPUS_SVC_ERR_UNSUPPORTED;
     TRY(rh_manager_assets_install(ctx));TRY(rh_manager_asset_ensure(RH_MANAGER_ASSET_LOGO,&icon));
-    launcher.icon=icon;return ctx->launcher->set_entry(ctx,&launcher);
+    app.icon=icon;rc=ctx->launcher->register_app(ctx,&app);return rc<0?rc:0;
 }

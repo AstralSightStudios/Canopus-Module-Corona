@@ -10,7 +10,7 @@
 
 1. **合并进 `corona` 模块本体（C 语言，Canopus ABI 2.0）**：
    - 移除独立的 Vela 快应用前端，将 Corona Manager 以 C 语言直接构建进 `corona` 模块（`Canopus.toml` 升级为 `canopus_abi = "2"`，描述符升级为 `CANOPUS_ABI_MAJOR = 2, CANOPUS_ABI_MINOR = 0`）。
-   - 通过 `publish_native_app_stage` 的第一阶段调用 `ctx->ui->set_entry` 注册模块原生页面，第二阶段通过 `ctx->launcher->set_entry`（ADR-CAN-011）在系统桌面发布独立的 `Corona` 启动器入口；不在启动激活回调中直接发布 UI。
+   - 通过 `publish_native_app_stage` 的第一阶段调用 `ctx->ui->set_entry` 注册模块原生页面，第二阶段通过 `ctx->launcher->register_app`（ADR-CAN-011，页面数组为空）登记 `Corona` 应用及启动器入口；应用 ID 由 Supervisor 统一分配并持久化，不在启动激活回调中直接发布 UI。
 2. **模块数据通讯改为纯内部状态（零文件轮询）**：
    - 废弃快应用时期通过 `control.request` / `control.response` 的每秒文件轮询机制（原 `queryModuleStatus` 与 `waitForReloadOutcome` 轮询）。
    - Manager UI 与 Resource Hook 运行于同一模块实例及同一 serialized module/UI owner 任务：状态读取直接访问模块内存快照，配置重载直接调用模块内部发布事务，异步刷新完成与传输进度变更通过内部回调 + `ctx->ui->post` 推送驱动 UI 更新。
@@ -398,7 +398,7 @@ Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
 
 ### Step 3：实现 5 路由原生 UI 视图与事件状态机
 - **`src/manager_ui.c`**：
-  - 通过 `publish_native_app_stage` 的两个独立阶段登记 `ctx->ui->set_entry` 与 `ctx->launcher->set_entry`。
+  - 通过 `publish_native_app_stage` 的两个独立阶段登记 `ctx->ui->set_entry` 与 `ctx->launcher->register_app`；登记接口返回正数 app ID，模块对外仍将成功规范为 0。
   - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT` 的树构建与增量提交；传输进度以横幅卡片形式内嵌 `ROUTE_RESOURCES`（见 §4.6），不占用独立路由。
   - 错误页保留标题返回，内部返回由模块消费；替换页面提交失败时恢复原路由、条目数和错误信息，连续返回不会因不可见的首页状态退出应用。仅首页的 `on_back` 允许框架关闭页面。配套 Supervisor 在 `.155` / `.179` / `.043` 的模块页面绑定系统右滑完成回调，复用相同层级；接管后阻止固件再次关闭页面，普通手势中间阶段不退栈。精确 ABI 静态证据见 Canopus `docs/investigations/native-system-back.md`。
   - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、双击删除计时、虚拟滚动窗口切换与 `scroll_y` 记忆恢复。
