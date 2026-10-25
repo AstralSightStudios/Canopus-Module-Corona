@@ -303,10 +303,11 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
        - 快应用图标（`@quickapp-icon/<pkg>`）：通过 `rh_platform_quickapp_icon_path` 解析出快应用原始图标路径 `<icon_path>`，预览图设为 `"/.rh_sys<icon_path>"`。
        - 日历样式（`feature:calendar`）：预览图设为 `"/.rh_sys" RH_CALENDAR_BACKGROUND`。
        - 其余四个背景功能项（`launcher` / `controlCenter` / `notifications` / `widgets`）：系统默认无单一静态图，保持紧凑无图单选行。
+     - **四项背景功能（`launcher` / `controlCenter` / `notifications` / `widgets`）**：所有选项均使用紧凑无图单选行，仅显示名称和选中状态；不解析、探测或加载背景原图预览，避免大图解码开销。背景选择与重载应用保持原有行为。以下「默认」和候选主题预览规则仅适用于普通资源、快应用图标及日历样式。
      - **「默认」(`@default`)**：
        - 按当前 `resource-order.json` 顺序，在 `@system` 分界线以上的激活主题中查找第一个接管该路径（或声明了该功能项 `mode == "image"`）的主题；若找到，则预览图设为该胜出主题的 `.bin` 文件路径；若 `@system` 以上无主题接管（或胜出模式为 `system`），则回退使用与「系统」选项相同的 `"/.rh_sys/..."` 预览图（若胜出模式为 `blur` 则无预览图）。
      - **「模糊」(`@blur`)**：仅在非日历的 4 个背景功能项中出现，无预览图，使用紧凑单选行。
-     - **各候选主题**：按 `resource-order.json` 优先级排序，`.bin` 资源或 `mode == "image"` 背景展示对应主题包内的 `.bin` 预览图。
+     - **各候选主题**：按 `resource-order.json` 优先级排序，普通 `.bin` 资源和日历底图展示对应主题包内的 `.bin` 预览图。四项背景功能不展示预览图。
 3. **卡片与组件布局（对齐快应用原页）**：
    - **所有选项共用一张卡片**：底色 `#262626`、圆角 `24px`、左右内缩 `14/13`，行间 `8px`，与 `mix-match.ux` 的 `.resource-choice` / `.choice-card` 一致。
    - **带预览图项（高 `168px`）**：`CANOPUS_UI_NODE_SECTION` 作为卡片（`y` 偏移由提交后 `TRANSLATE` 施加），内含居中 `96×96` `CANOPUS_UI_NODE_IMAGE`（`image_fit = CANOPUS_UI_IMAGE_FIT_CONTAIN`，顶部偏移 `8`）+ 底部高 `48px` 的 `CANOPUS_UI_NODE_RADIO_ROW`。

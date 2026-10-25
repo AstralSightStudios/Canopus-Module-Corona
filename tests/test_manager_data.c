@@ -96,6 +96,15 @@ static void test_core(void) {
     assert(!rh_manager_data_mix_count(d,&n) && n==7);assert(!rh_manager_data_option_count(d,"/resource/a/x.bin",&n)&&n==4);
     assert(!rh_manager_data_option_get(d,"/resource/a/x.bin",0,&option));assert(!strcmp(option.preview,"/data/canopus/m.corona/themes/alpha/icons/x.bin"));
     assert(!rh_manager_data_option_get(d,"/resource/a/x.bin",1,&option));assert(!strcmp(option.preview,"/.rh_sys/resource/a/x.bin"));
+    assert(!rh_manager_data_option_count(d,"feature:launcher",&n)&&n==5);
+    fail_stat_path="/data/canopus/m.corona/themes/alpha/bg.bin";
+    for(uint32_t i=0;i<n;i++) {
+        assert(!rh_manager_data_option_get(d,"feature:launcher",i,&option));
+        assert(!option.preview[0]);
+        if(i==0) assert(!strcmp(option.id,RH_MANAGER_DEFAULT)&&option.selected);
+        if(i==3) assert(!strcmp(option.id,"alpha"));
+    }
+    fail_stat_path=0;
     assert(!rh_manager_data_choose(d,"/resource/a/x.bin","beta"));assert(!rh_manager_data_mix_get(d,0,&item));assert(!strcmp(item.key,"/resource/a/x.bin")&&!strcmp(item.choice_name,"B"));
     assert(!rh_manager_data_move(d,2,0));assert(!rh_manager_data_option_get(d,"/resource/a/x.bin",0,&option));assert(!strcmp(option.preview,"/.rh_sys/resource/a/x.bin"));
     assert(!rh_manager_data_choose(d,"feature:launcher","alpha"));assert(!rh_manager_data_prepare_apply(d,"active/1"));assert(rh_manager_data_move(d,0,1)==-16);

@@ -962,9 +962,10 @@ static int relative_destination(struct rh_manager_data *d,const char *key,const 
     int feature=feature_index(key),theme=find_id(d->ids,d->count,id),path; uint32_t i; struct pack p; int rc;
     out[0]=0; if(theme<0) return -22;
     if(feature>=0) {
+        /* Keep background choices compact; full-size images are only loaded when applied. */
+        if(feature<4) return 0;
         rc=load_pack(d,id,&p); if(rc) return rc;
-        if(feature<4 && p.backgrounds[feature]==3) rc=put(out,256,p.images[feature]);
-        else if(feature==4) {
+        if(feature==4) {
             const struct mapping *best=0; uint32_t best_length=0;
             /* Calendar background remains an ordinary mapping and obeys the
              * same longest-prefix rule as the open hook. */
