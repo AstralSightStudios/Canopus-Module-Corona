@@ -4,7 +4,7 @@
 
 实施时以实际 SDK 与原管理器代码为准：原生页面与桌面入口通过 `publish_native_app_stage` 分阶段注册；`ui.post` 仅安排前台 UI 工作，不是后台线程；连接是否就绪由未来传输层推送，不能把 `remote_listening` 当作设备已连接。
 
-已知缺口：Canopus 已移除 TOAST API（`CANOPUS_UI_NODE_TOAST` / `CANOPUS_UI_CAP_TOAST`），管理器因此没有任何非阻断临时提示面。以下反馈当前无 UI 承载，等待补充方案：删除失败原因、双击删除引导、重载结果、安装完成包名揭示、排序/选择保存失败文案、活动保护记录处理失败。现存提示面只剩页面级错误标签（命中即替换整页内容）与资源管理页的传输横幅。
+已知缺口：Canopus 已移除 TOAST API（`CANOPUS_UI_NODE_TOAST` / `CANOPUS_UI_CAP_TOAST`），管理器因此没有任何非阻断临时提示面。以下反馈当前无 UI 承载，等待补充方案：重载结果、安装完成包名揭示、排序/选择保存失败文案、活动保护记录处理失败。删除相关的反馈已改由 §4.6 确认页承载。现存提示面只剩页面级错误标签（命中即替换整页内容）与资源管理页的传输横幅。
 
 ---
 
@@ -105,7 +105,7 @@ struct rh_transfer_ui_state {
 };
 ```
 
-- **本轮范围**：实现 `rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state)` 内部更新入口与资源管理页内嵌传输横幅渲染（见 §4.6）；后续接入 `canopusconnect_implementation.md` 的接收状态机时，只需在状态跳变或累计 ACK 写入时调用该接口，`ctx->ui->post` 会自动刷新横幅。传输不再占用独立路由：接收器与页面解耦，UI 关闭不影响接收与续传。
+- **本轮范围**：实现 `rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state)` 内部更新入口与资源管理页内嵌传输横幅渲染（见 §4.7）；后续接入 `canopusconnect_implementation.md` 的接收状态机时，只需在状态跳变或累计 ACK 写入时调用该接口，`ctx->ui->post` 会自动刷新横幅。传输不再占用独立路由：接收器与页面解耦，UI 关闭不影响接收与续传。
 
 ---
 
@@ -130,11 +130,11 @@ struct rh_transfer_ui_state {
 
 - LVGL v9 的 `lv_image` 默认不置位 `LV_OBJ_FLAG_CLICKABLE`，而 `CANOPUS_UI_NODE_LIST` 容器（由 `host_container_create` 创建的 `lv_obj`）默认具备 `LV_OBJ_FLAG_CLICKABLE`。
 - 因此将 `reload.bin` / `del.bin`（Band 11: `150×78`）或 `reload-wide.bin` / `del-wide.bin`（Band 10 Pro: `324×80`）作为子节点放入一个居中定宽高的 `CANOPUS_UI_NODE_LIST` 容器，将 `event_id`（`EV_RELOAD` / `EV_DELETE`）绑定在该容器上。
-- 当手指在该容器上按下并松开且位移未超过 `MOVE_SLOP (8px)` 时，触发重载或双击删除逻辑。
+- 当手指在该容器上按下并松开且位移未超过 `MOVE_SLOP (8px)` 时，触发重载或进入删除确认页。
 
 ---
 
-## 4. 五大路由页面 UI 设计与交互规范
+## 4. 六大路由页面 UI 设计与交互规范
 
 ### 4.1 首页 (`ROUTE_INDEX`)
 
@@ -244,12 +244,9 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
      5. `适用设备`：`manifest.targets` 以 `"、"` 拼接（缺省 `"未声明目标设备"`）
      6. `资源包 ID`：`themeId`
    - 元数据长度超过系统双行项可显示宽度时，使用同字段标题的系统 SECTION/TEXT 分块完整展示；长说明与适用设备均可滚动，不截断原文。
-3. **底部删除按钮与 500ms 双击确认**：
+3. **底部删除按钮进入确认页**：
    - `del.bin`（`150×78`）或 `del-wide.bin`（`324×80`）**悬浮于滚动列表之上**（复刻旧快应用 `position:absolute; bottom:10px`）：滚动视口铺满整个内容区（Band 11 `212×444` / Band 10 Pro `336×424`），按钮作为滚动容器之后的兄弟节点覆盖其上（Band 11 内容坐标 `y=364`，距屏幕底 `10px`；Band 10 Pro `y=334`）；滚动内容尾部保留 `90px`（Band 11）/ `100px`（Band 10 Pro）spacer，滚到底时末卡停在按钮上方 `10px`，滚动过程中卡片从按钮下方穿过。
-   - 首次点击记录 `delete_first_tap_ms = ctx->time->monotonic_ms(ctx)`，当前无「双击删除」引导提示（TOAST API 已移除）。
-   - `500ms` 内再次点击触发删除事务：
-     - 检查 `mappings.tsv`、`resource-active-generations.json` 的 `protectedThemes` 及 `calendar.cfg` 是否引用了该 `themeId`；若正在使用，拒绝删除（原因当前无 UI 承载）。
-     - 否则清理 `resource-overrides.json` 中的引用、删除主题文件、更新 `interconnect-themes.json` / `resource-order.json` / `resource-files.json` 并返回上一页。没有目录删除服务时仅保留空目录，文件或索引操作失败均不显示成功。
+   - 单击只做一次页面跳转：`navigate(ROUTE_DELETE, 0)` 打开 §4.6 确认页，删除事务永不从详情页发起。
 
 ```text
 Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
@@ -347,7 +344,23 @@ ROUTE_MIX_MATCH (Band 11)                ROUTE_MIX_MATCH_SELECT (Band 11)
 
 ---
 
-### 4.6 传输状态横幅（资源管理页内嵌，无独立传输页）
+### 4.6 删除确认页 (`ROUTE_DELETE`)
+
+1. **进入与退出**：资源详情页底部 `del*.bin` 单击 `navigate(ROUTE_DELETE, 0)`；返回头/返回手势回资源详情（`navigate(ROUTE_DETAIL, 0)`）。删除成功回资源管理页（`navigate(ROUTE_RESOURCES, 1)`），条目消失就是结果本身，不需要额外文案。
+2. **顶部标题栏**：`NAVIGATION_HEADER`，`title = "删除资源"`，`show_back = 1`。
+3. **内容**：
+   - `STATUS_ROW`（`title = "主题包"`，副标题 `manifest.name`，缺省回退 `themeId`），宽 `row_width`，高 `96`，`y = 0`。
+   - 说明段 `TEXT`（20px，最多 4 行，自 `y = 110` 起）：普通态 `"删除后，资源包文件与索引将一并移除，且无法恢复。"`（`0xC5CBD5`）；受保护态 `"正在使用中，无法删除。请先在「混搭微调」中改回「默认」。"`（`0xDA593C`）；预检遇到临时错误（目录忙、索引暂不可读）时改为 `"无法确认该资源包的使用状态，删除可能失败。"` 并保留按钮；事务失败态填 `rh_manager_data_error()`，缺省 `"删除失败，请稍后重试。"`。
+   - 确认动作是 `ACTION_ROW`（宽 `row_width`，高 `96`，`y = content_height - 106`），不是详情页那张 `del*.bin` 位图按钮；位图涂不上前景色，也撑不起置灰态。
+4. **受保护判定**：进入页面即调只读的 `rh_manager_data_delete_check()`；`RH_MANAGER_ERR_ACTIVE` 表示该 `themeId` 仍被 `mappings.tsv`、`resource-active-generations.json` 的 `protectedThemes` 或 `calendar.cfg` 引用。判断结果只做展示，删除事务在自己的保护区里重新校验。
+5. **禁用态**：正常态 `variant = CANOPUS_UI_VARIANT_DESTRUCTIVE`（host 把标题映射成 `COLOR_DANGER = 0xFF5C5C`）；被引用时 `enabled = 0` + `foreground = CANOPUS_UI_COLOR_DISABLED`（`0x666666`）+ `style.opacity = 500`。
+   - 透明度依赖目标绑定 `FW_UI_STYLE_OPA`，否则 `host_validate` 以 `CANOPUS_UI_ERR_UNSUPPORTED` 拒绝整次提交。三个出货目标现已全部具备：`.155`、`.179` 由 Band11 生成器输出，`.043` 由 `tools/canopus-core/src/target_config.rs` 的 `.043` 分支输出，证据为 `EVID-UI-1043-OPACITY-001`（固件 style prop 95 的 setter 与渲染乘法读取均为静态取证）。
+   - `enabled = 0` 只拦事件（runtime 返回 `CANOPUS_UI_ERR_DISABLED`），外观必须自己写；`action_row` 拒绝 `event_id = 0`，所以保留 `EV_DELETE` 作为防御，处理器再兜一次 `RH_MANAGER_ERR_ACTIVE` 判断。
+   - `style.opacity = 0` 表示继承，显式全透明需要同时置 `CANOPUS_UI_VISUAL_FLAG_OPACITY`；这里用非零值，不必置位。
+6. **事务失败留在本页**：把说明段换成原因，按钮保留供重试；不跳到页面级错误标签，否则用户失去重试与返回两个入口。
+7. **预算**：`NAVIGATION_PAGE` + `NAVIGATION_HEADER` 2 节点，`STATUS_ROW` 1，`ACTION_ROW` 1，说明 1–4，共 `≤ 8 / 32` 节点；字符串约 `200B / 1536B`；两屏内容均不需滚动。
+
+### 4.7 传输状态横幅（资源管理页内嵌，无独立传输页）
 
 接收链路在模块层独立运行（`rh_connect_start` / `rh_connect_poll`），不需要前台页面，原「主题传输」页已删除；传输进度改为钉在资源管理页列表顶部的横幅卡片展示。横幅不是列表行：不进入虚拟滚动窗口、不参与拖拽排序的 `KEY_ROW` 网格与 `EV_ORDER` 映射，仅压缩列表视口一个 `BANNER_H (96px) + 8px` 间距。
 
@@ -399,20 +412,20 @@ Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
 - **清理能力**：FS v2 提供 `rmdir`。默认清理逐文件调用 `fs.remove`，目录句柄关闭后按后序删除空目录，主题卸载覆盖该主题全部安装代次；只有先通过服务版本检查才访问新增接口。FS v1 或接口缺失时保留空目录兼容。文件、目录删除、索引写入或清理失败均返回错误，不把失败显示为成功；旧活动配置中的未知文件保留。
 - **旧存储导入**：保留旧快应用数据，首次全量复制到原生根后最后发布原生索引；原生索引已存在时合并尚未登记的旧包，同名 ID 和已有原生配置保留。配置文件先复制到临时文件再 rename，失败可重试；完成标记 `resource-legacy-imported` 避免删除后复活，后续旧目录变化不持续同步。导入不代表已应用，仍需内部重载事务。框架目录枚举须按固件 `d_name +1` 解码，旧版 `+2` 会截掉首字节并阻断导入。新传输安装适配已接入 `manager_data.c`，实现边界见 CanopusConnect 实现文档。
 
-### Step 3：实现 5 路由原生 UI 视图与事件状态机
+### Step 3：实现 6 路由原生 UI 视图与事件状态机
 - **`src/manager_ui.c`**：
   - 通过 `publish_native_app_stage` 的两个独立阶段登记 `ctx->ui->set_entry` 与 `ctx->launcher->register_app`；登记接口返回正数 app ID，模块对外仍将成功规范为 0。
-  - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT` 的树构建与增量提交；传输进度以横幅卡片形式内嵌 `ROUTE_RESOURCES`（见 §4.6），不占用独立路由。
+  - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT`、`ROUTE_DELETE` 的树构建与增量提交；传输进度以横幅卡片形式内嵌 `ROUTE_RESOURCES`（见 §4.7），不占用独立路由。
   - 错误页保留标题返回，内部返回由模块消费；替换页面提交失败时恢复原路由、条目数和错误信息，连续返回不会因不可见的首页状态退出应用。仅首页的 `on_back` 允许框架关闭页面。配套 Supervisor 在 `.155` / `.179` / `.043` 的模块页面绑定系统右滑完成回调，复用相同层级；接管后阻止固件再次关闭页面，普通手势中间阶段不退栈。精确 ABI 静态证据见 Canopus `docs/investigations/native-system-back.md`。
-  - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、双击删除计时、虚拟滚动窗口切换与 `scroll_y` 记忆恢复。
+  - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、删除确认页跳转与事务、虚拟滚动窗口切换与 `scroll_y` 记忆恢复。
 
 ### Step 4：Host 测试与 Mirage 模拟器双端验收（`.043` & `.155`）
 1. **Host ASan/UBSan 测试 (`tests/test_manager_native.c`)**：
-   - 验证 manifest 解析、排序归一化、混搭覆盖、`@default`/`@system` 预览路径计算、`.rh_sys/` 直通打开、活动包删除保护、5 路由 UI 树节点数/字符串容量边界（`<= 32` 节点、`<= 1536B`）及拖拽/双击事件状态机。
+   - 验证 manifest 解析、排序归一化、混搭覆盖、`@default`/`@system` 预览路径计算、`.rh_sys/` 直通打开、活动包删除保护与 `rh_manager_data_delete_check` 预检、禁用 `ACTION_ROW` 的 opacity/前景色组合、6 路由 UI 树节点数/字符串容量边界（`<= 32` 节点、`<= 1536B`）及拖拽/删除确认事件状态机。
 2. **Mirage 模拟器端到端验证 (`.043` Band 10 Pro & `.155` Band 11)**：
    - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `corona-0.3.0.canopus`，预置测试主题包。
    - 通过自动化触摸脚本依次打开并截图验收：
      - **首页**：验证状态卡颜色、圆角裁剪、字号、右下角装饰图，以及底部 `reload*.bin` 按钮点击触发内部重载。
-     - **资源管理 & 资源详情**：验证原生双行列表、长按拖拽排序、详情页 6 项 `STATUS_ROW` 及 `del*.bin` 双击删除保护。
+     - **资源管理 & 资源详情**：验证原生双行列表、长按拖拽排序、详情页 6 项 `STATUS_ROW` 及 `del*.bin` 进入删除确认页的受保护态。
      - **混搭微调 & 选择来源**：验证已微调项置顶、「默认」/「系统」/「主题包」的 `96×96 CONTAIN` 真实 `.bin` 图标预览与单选切换、返回后滚动位置恢复。
      - **传输横幅**：通过测试钩子（长按首页卡片，每次推进一个 phase）驱动 `RECEIVING / VERIFYING / INSTALLING / INSTALLED / ERROR / CANCELED` 状态切换，在资源管理页验证横幅文案、原生 `PROGRESS` 进度条与错误横幅点按消除；`INSTALLED` 只验证列表刷新（无安装完成提示）；`IDLE` 不渲染横幅（无「等待连接」页）。

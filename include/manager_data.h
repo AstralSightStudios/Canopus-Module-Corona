@@ -79,6 +79,12 @@ int rh_manager_data_prepare_apply(struct rh_manager_data *, const char *config_d
  * pointers leave protection intact. */
 int rh_manager_data_complete_apply(struct rh_manager_data *, int success);
 int rh_manager_data_delete(struct rh_manager_data *, const char *id);
+/* Read-only preflight for the confirmation page: 0 when the catalog would let
+ * delete run now, RH_MANAGER_ERR_ACTIVE when a live or protection reference
+ * owns the package, and another native error when the index cannot be read.
+ * Never mutates the catalog, never sets the error record, and its answer is
+ * advisory: delete re-checks under its own transaction. */
+int rh_manager_data_delete_check(struct rh_manager_data *, const char *id);
 /* Install a verified/extracted CRPack from staging/<owner-owned-name>. The ZIP
  * receiver supplies its disk-verified hash. Manifests are read one at a time
  * (64 KiB maximum; 256 mappings), never a ZIP directory or per-page inventory.

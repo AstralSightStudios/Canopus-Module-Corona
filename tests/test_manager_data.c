@@ -111,8 +111,13 @@ static void test_core(void) {
     text=read_fixture("active/1/mappings.tsv");assert(strstr(text,"/resource/a/x.bin\tthemes/beta/x.bin\n"));assert(!strstr(text,"y.bin"));free(text);
     text=read_fixture("active/1/backgrounds.cfg");assert(strstr(text,"launcher=themes/alpha/bg.bin"));free(text);
     fixture("active-config","active/1\n");assert(!rh_manager_data_complete_apply(d,1));assert(rh_manager_data_delete(d,"alpha")==RH_MANAGER_ERR_ACTIVE);assert(rh_manager_data_delete(d,"beta")==RH_MANAGER_ERR_ACTIVE);
+    /* The confirmation page's read-only preflight answers the same guard without mutating
+       the catalog; unknown and malformed ids stay argument errors. */
+    assert(rh_manager_data_delete_check(d,"alpha")==RH_MANAGER_ERR_ACTIVE);assert(rh_manager_data_delete_check(d,"beta")==RH_MANAGER_ERR_ACTIVE);
+    assert(rh_manager_data_delete_check(d,"missing")==-22);assert(rh_manager_data_delete_check(d,0)==-22);assert(rh_manager_data_order_count(d)==3);
     assert(!rh_manager_data_choose(d,"feature:launcher",RH_MANAGER_SYSTEM));assert(!rh_manager_data_choose(d,"/resource/a/x.bin",RH_MANAGER_SYSTEM));assert(!rh_manager_data_prepare_apply(d,"active/2"));fixture("active-config","active/2\n");assert(!rh_manager_data_complete_apply(d,1));
     assert(fs_exists(&ctx,"active/1/mappings.tsv")==0);assert(fs_exists(&ctx,"active/2/mappings.tsv")==1);
+    assert(!rh_manager_data_delete_check(d,"beta"));assert(rh_manager_data_order_count(d)==3);
     fail_unlink=1;assert(rh_manager_data_delete(d,"beta")==-EIO);fail_unlink=0;assert(rh_manager_data_order_count(d)==3);assert(!rh_manager_data_delete(d,"beta"));assert(rh_manager_data_order_count(d)==2);assert(fs_exists(&ctx,"themes/beta")==1);assert(fs_exists(&ctx,"themes/beta/corona.json")==0);
     fixture("resource-active-generations.json","broken");assert(rh_manager_data_delete(d,"alpha")==-22);
     rh_manager_data_destroy(d);assert(!blocks);cleanup_dir(sandbox);

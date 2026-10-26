@@ -18,7 +18,7 @@ static struct rh_transfer_ui_state transfer;
 static rh_manager_state_listener listener;
 static void *listener_cookie;
 static uint32_t width=212,height=520,move_from,move_to,moves,selected,chooses,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
-static int close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
+static int close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh,delete_protected;
 /* Set for the multi-page pass: the modelled host then answers ctx->ui->route. */
 static int multi_page;
 static uint32_t refresh_count,applies;
@@ -44,10 +44,13 @@ static int32_t backend_apply(void *cookie,const struct canopus_ui_snapshot_v1 *s
     for(i=0;i<s->node_count;i++) {
         uint16_t type=s->nodes[i].type;const struct canopus_ui_layout_v1 *l=&s->layouts[i];
         /* Exact constraints in canopus_ui_host.c:host_validate, shared by
-           .043/.155. Runtime capabilities alone do not validate these. */
+           .043/.155. Runtime capabilities alone do not validate these. All three
+           shipped targets bind FW_UI_STYLE_OPA (.043 through
+           EVID-UI-1043-OPACITY-001), so opacity is legal; the range and the
+           explicit-flag rule still have to hold. */
         assert(l->grow==0 && l->shrink==1);
-        assert(!(s->visuals[i].flags&CANOPUS_UI_VISUAL_FLAG_OPACITY));
-        assert(s->styles[i].opacity==0 && s->styles[i].border_width<=0);
+        assert(s->styles[i].opacity<=1000u);
+        assert(s->styles[i].border_width<=0);
         if(type==CANOPUS_UI_NODE_STATUS_ROW || type==CANOPUS_UI_NODE_ACTION_ROW || type==CANOPUS_UI_NODE_BUTTON || type==CANOPUS_UI_NODE_SWITCH_ROW)
             assert(!l->padding_left && !l->padding_right && !l->padding_top && !l->padding_bottom);
         if(type==CANOPUS_UI_NODE_IMAGE) assert(l->width>0 && l->height>0);
@@ -153,7 +156,8 @@ int rh_manager_data_option_get(struct rh_manager_data *d,const char *key,uint32_
 int rh_manager_data_choose(struct rh_manager_data *d,const char *key,const char *choice) {(void)d;(void)key;chooses++;selected=!strcmp(choice,"@system")?1:0;return 0;}
 int rh_manager_data_prepare_apply(struct rh_manager_data *d,const char *dir) {(void)d;prepared++;data_pending=1;assert(!strncmp(dir,"active/",7));return 0;}
 int rh_manager_data_complete_apply(struct rh_manager_data *d,int success) {(void)d;assert(success);completed++;data_pending=0;return fail_complete?-5:0;}
-int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {(void)d;(void)id;deletes++;return fail_delete?RH_MANAGER_ERR_ACTIVE:0;}
+int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {(void)d;(void)id;deletes++;return fail_delete?-5:0;}
+int rh_manager_data_delete_check(struct rh_manager_data *d,const char *id) {(void)d;(void)id;return delete_protected?RH_MANAGER_ERR_ACTIVE:0;}
 const char *rh_manager_data_error(const struct rh_manager_data *d) {(void)d;return "";}
 int rh_manager_data_last_installed(const struct rh_manager_data *d,char id[65]) {(void)d;strcpy(id,"theme3");return 0;}
 
@@ -182,6 +186,7 @@ static void visible_copy(const char *s) {
         const struct canopus_ui_node_v1 *node=&ui.committed.nodes[i];
         if(node->type==CANOPUS_UI_NODE_TEXT) {assert(n+node->primary_len<sizeof(joined));memcpy(joined+n,ui.committed.strings+node->primary_off,node->primary_len);n+=node->primary_len;joined[n]=0;}
     }
+    if(!strstr(joined,s)) fprintf(stderr,"Missing visible text '%s' in '%s'\n",s,joined);
     assert(strstr(joined,s));
 }
 static int quickapp_hook(void *cookie,const char *package,char out[256]) {(void)cookie;(void)package;strcpy(out,"/data/icon.bin");return 0;}
@@ -307,8 +312,32 @@ find_text("启动器背景");assert(refresh_count==reads);
         }
     }
     assert(bytes>=2064);
-    fail_delete=1;tap(31,20000);assert(deletes==0);tap(31,20400);assert(deletes==1);assert_route(2);
-    fail_delete=0;tap(31,22000);tap(31,22400);assert(deletes==2);assert_route(1);
+    /* The delete action opens a confirmation page instead of arming a second
+       tap: a referenced package states why it cannot go and dims the action,
+       and only the confirmation page ever runs the delete. */
+    delete_protected=1;tap(31,20000);assert(deletes==0);assert_route(5);
+    visible_copy("正在使用中，无法删除");visible_copy("「混搭微调」中改回「默认」");
+    /* A referenced package keeps its action but disables it: the host draws no
+       disabled appearance on its own, so the page asks for the grey semantic
+       colour (opacity is unavailable on .043) and the runtime refuses the
+       dispatch through the cleared ENABLED flag. */
+    {uint32_t action=find_text("删除");
+     assert(!(ui.committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED));
+     assert(ui.committed.styles[action].foreground==CANOPUS_UI_COLOR_DISABLED);
+     assert(ui.committed.styles[action].opacity==500);
+     assert(ui.committed.styles[action].variant!=CANOPUS_UI_VARIANT_DESTRUCTIVE);}
+    back();assert_route(2);
+    delete_protected=0;tap(31,21000);assert(deletes==0);assert_route(5);
+    visible_copy("删除后，资源包文件与索引将一并移除");
+    {uint32_t action=find_text("删除");
+     assert(ui.committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED);
+     assert(ui.committed.styles[action].opacity==0);
+     assert(ui.committed.styles[action].variant==CANOPUS_UI_VARIANT_DESTRUCTIVE);}
+    /* A refused transaction keeps the page and replaces the promise with the
+       reason, so the action can be retried without leaving and coming back. */
+    fail_delete=1;activate_text("删除");assert(deletes==1);assert_route(5);
+    visible_copy("删除失败");
+    fail_delete=0;activate_text("删除");assert(deletes==2);assert_route(1);
     /* 60 UTF-8 bytes are twenty CJK glyphs, which need multiple visual lines
        even though the previous byte threshold classified them as short. */
     event(1002,CANOPUS_UI_EVENT_ACTIVATE,22500,0,0,0);assert_route(2);
@@ -420,7 +449,7 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
         if(i==4) {assert(transfer.phase==RH_XFER_PHASE_ERROR && transfer.detail==6);}
         if(i==5) {assert(transfer.phase==RH_XFER_PHASE_CANCELED);}
     }
-    assert(probe_value("routes_mask")==31 && probe_value("phases_mask")==127);
+    assert(probe_value("routes_mask")==63 && probe_value("phases_mask")==127);
     /* The four intentional backend rejections above are latched even though
        later renders recover. A clean emulator scenario expects zero. */
     assert(probe_value("render_failures")==4);
@@ -432,7 +461,7 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
        navigate() goes through ctx->ui->route, which is what gives a real
        firmware page push/pop its stock transition. */
     multi_page=1;routed_routes=0;context.ui=&ui_api_multi;
-    assert(entry->page_count==5);
+    assert(entry->page_count==6);
     assert(!entry->on_open(&context,&ui,0));assert_route(0);
     assert(!(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
     activate_text("资源管理");assert_route(1);

@@ -6,7 +6,7 @@
 
 #define ON (CANOPUS_UI_NODE_FLAG_VISIBLE | CANOPUS_UI_NODE_FLAG_ENABLED)
 #define TRY(call) do { int _r = (call); if (_r) return _r; } while (0)
-enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, ROUTES };
+enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, DELETE, ROUTES };
 enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL, EV_DISMISS,
        EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000, EV_CHOOSE=3000000 };
 enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_BANNER=60, KEY_ROW=1000, OPTION_SLOTS=5,
@@ -32,9 +32,12 @@ static struct {
     int32_t edge_timer, hold_timer, list_top;
     uint32_t pressed, press_id, press_key, press_time, moved, drag, drag_from, drag_to;
     int32_t start_x, start_y, last_y, start_scroll, drag_delta;
-    uint32_t delete_armed, delete_at, suppressed, banner_hidden;
-    uint32_t position_count, position_keys[2*WINDOW+4];
+    uint32_t suppressed, banner_hidden, position_count, position_keys[2*WINDOW+4];
     int32_t position_y[2*WINDOW+4];
+    /* delete_blocked mirrors rh_manager_data_delete_check for the confirmation
+       page; confirm_error carries the reason a confirm attempt still failed. */
+    int32_t delete_blocked;
+    char confirm_error[96];
 } U = { .edge_timer=-1, .hold_timer=-1 };
 #ifdef RH_MANAGER_UI_TEST
 /* Compiled only into the emulator acceptance artifact. A long hold enters
@@ -108,6 +111,7 @@ static void set_error(const char *fallback) {
     copy(U.error,sizeof(U.error),s && *s?s:fallback);
 }
 static int render(void);
+static int build_confirm(struct canopus_ui_tree_v1 *t);
 static void cancel_gesture(void);
 static int build_banner(struct canopus_ui_tree_v1 *t);
 static int banner_active(void);
@@ -198,10 +202,16 @@ static int load_route(uint32_t route,int refresh) {
     rc=ensure_data();
     if(!rc && refresh && !U.busy) rc=rh_manager_data_refresh(U.data);
     if(!rc && route==DETAIL) rc=rh_manager_data_metadata(U.data,U.detail_id,&U.metadata);
+    if(!rc && route==DELETE) {
+        /* The confirmation page states the outcome up front instead of letting
+         * the user discover it on the one action it offers. */
+        rc=rh_manager_data_metadata(U.data,U.detail_id,&U.metadata);
+        if(!rc) {U.delete_blocked=rh_manager_data_delete_check(U.data,U.detail_id);U.confirm_error[0]=0;}
+    }
     if(!rc && route==RESOURCES) U.count=rh_manager_data_order_count(U.data);
     if(!rc && route==MIX) rc=rh_manager_data_mix_count(U.data,&U.count);
     if(!rc && route==SELECT) rc=rh_manager_data_option_count(U.data,U.mix_key,&U.count);
-    if(rc) set_error(route==DETAIL?"无法读取资源包信息":"读取资源包失败，请返回后重试。");
+    if(rc) set_error((route==DETAIL||route==DELETE)?"无法读取资源包信息":"读取资源包失败，请返回后重试。");
     return rc;
 }
 /* Each route is its own firmware page so the move is a stock push/pop and the
@@ -211,7 +221,7 @@ static int load_route(uint32_t route,int refresh) {
 static int navigate(uint32_t route,int refresh) {
     uint32_t previous_route=U.route,previous_count=U.count;char previous_error[256];int rc;
     copy(previous_error,sizeof(previous_error),U.error);
-    cancel_gesture();U.delete_armed=0;U.route=route;
+    cancel_gesture();U.route=route;
     (void)load_route(route,refresh);
     if(U.ctx->ui->route && !U.ctx->ui->route(U.ctx,route)) {
         /* The host replaced its view; the destination page still owes a tree. */
@@ -549,11 +559,12 @@ static const char *transfer_error(uint8_t detail) {
     default:return "传输中断，请重新连接后重试";
     }
 }
-/* Left-aligned UTF-8 wrap for the banner's bounded message area. Every
-   protocol error string fits two lines at 20px on the narrow row width. */
-static int wrap_lines(struct canopus_ui_tree_v1 *t,uint32_t key,const char *s,int y,uint16_t font,uint32_t color) {
+/* Left-aligned UTF-8 wrap with a caller-owned line budget: the banner clamps
+   its protocol errors to the two lines its card has room for, while the
+   confirmation page spends up to four on a full sentence. */
+static int wrap_lines(struct canopus_ui_tree_v1 *t,uint32_t key,const char *s,int y,uint16_t font,uint32_t color,uint32_t max_lines) {
     uint32_t offset=0,line=0,n=len(s),maximum=U.row_width-28;char buffer[256];
-    while(offset<n && line<2) {
+    while(offset<n && line<max_lines) {
         uint32_t bytes=0,pixels=0;
         while(offset+bytes<n) {
             unsigned char c=(unsigned char)s[offset+bytes];
@@ -599,7 +610,7 @@ static int build_banner(struct canopus_ui_tree_v1 *t) {
         struct canopus_ui_component_props_v1 p={sizeof(p),"",0,"",0,0,ON,phase==RH_XFER_PHASE_RECEIVING?U.transfer.percent:100,0,100,0,0};
         TRY(U.ctx->ui->component(t,KEY_BANNER+2,CANOPUS_UI_NODE_PROGRESS,&p));
         TRY(box(t,KEY_BANNER+2,(int)U.row_width-32,12,16,58,0,0,-1,0));
-    } else TRY(wrap_lines(t,KEY_BANNER+2,message,44,20,0xc5cbd5));
+    } else TRY(wrap_lines(t,KEY_BANNER+2,message,44,20,0xc5cbd5,2));
     return U.ctx->ui->end(t);
 }
 static int translate_rows(void) {
@@ -617,7 +628,7 @@ static int translate_rows(void) {
     return 0;
 }
 static int render(void) {
-    static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源"};
+    static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源","删除资源"};
     struct canopus_ui_tree_v1 *t;const char *title=U.route==SELECT && U.mix_title[0]?U.mix_title:titles[U.route];int rc;
     struct canopus_ui_navigation_page_props_v1 p={sizeof(p),title,len(title)};
     /* The root page is the app, not a sub-view: the stock firmware apps keep
@@ -644,6 +655,7 @@ static int render(void) {
         case RESOURCES:case MIX:rc=build_list(t);break;
         case DETAIL:rc=build_detail(t);break;
         case SELECT:rc=build_choices(t);break;
+        case DELETE:rc=build_confirm(t);break;
         default:rc=CANOPUS_UI_ERR_ARGUMENT;break;
         }
     }
@@ -717,6 +729,7 @@ static int back(void) {
      * closing explicitly. */
     if(U.route==INDEX) return U.ctx->ui->route?0:U.ctx->ui->close_page(U.ctx);
     if(U.route==DETAIL) return navigate(RESOURCES,1);
+    if(U.route==DELETE) return navigate(DETAIL,0);
     if(U.route==SELECT) return navigate(MIX,0);
     return navigate(INDEX,0);
 }
@@ -751,16 +764,55 @@ static int request_reload(void) {
     if(rc) {(void)rh_manager_data_complete_apply(U.data,0);U.busy=0;}
     rh_module_get_status_snapshot(&U.status);return render();
 }
-static int delete_tap(uint32_t when) {
-    int rc;if(U.busy) return 0;
-#ifdef RH_MANAGER_UI_TEST
-    probe_state.delete_taps++;
-#endif
-    if(!U.delete_armed || when-U.delete_at>500u) {U.delete_armed=1;U.delete_at=when;return render();}
-    U.delete_armed=0;U.busy=1;rc=rh_manager_data_delete(U.data,U.detail_id);U.busy=0;
-    /* Success returns to the list the pack left; a rejected delete leaves the
-       detail page and had only a toast for its reason. */
+/* The confirmation action is a stock ACTION_ROW, not the detail page's bitmap
+   button: a reference-protected package has to show a disabled state, and a
+   bitmap cannot take the grey foreground. Disabled is drawn two ways at once
+   because they cost nothing: the host's CANOPUS_UI_COLOR_DISABLED foreground,
+   plus style.opacity, which every shipped target now binds through
+   FW_UI_STYLE_OPA (the .043 generator emits it, EVID-UI-1043-OPACITY-001). The
+   title turns DANGER red while the action is live; the disabled copy keeps its
+   event id because action_row rejects a zero one, and the runtime refuses the
+   dispatch on its own through the cleared ENABLED flag. */
+static int confirm_action(struct canopus_ui_tree_v1 *t,int32_t y,uint8_t enabled) {
+    static const char *const label="删除";
+    const char *detail=enabled?"删除后无法恢复":"当前不可用";
+    struct canopus_ui_action_row_props_v1 p={sizeof(p),label,len(label),detail,len(detail),EV_DELETE,enabled};
+    struct canopus_ui_style_v1 s=CANOPUS_UI_STYLE_DEFAULT;
+    TRY(U.ctx->ui->action_row(t,KEY_ACTION,&p));
+    TRY(box(t,KEY_ACTION,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,y,0,0,-1,0));
+    if(enabled) s.variant=CANOPUS_UI_VARIANT_DESTRUCTIVE;
+    else {s.foreground=CANOPUS_UI_COLOR_DISABLED;s.opacity=500;}
+    return U.ctx->ui->node_set_style(t,KEY_ACTION,&s);
+}
+static int build_confirm(struct canopus_ui_tree_v1 *t) {
+    static const char *const blocked_text="正在使用中，无法删除。请先在「混搭微调」中改回「默认」。";
+    const char *name=U.metadata.name[0]?U.metadata.name:U.detail_id;
+    const char *message="删除后，资源包文件与索引将一并移除，且无法恢复。";
+    uint32_t color=0xc5cbd5;
+    if(U.delete_blocked) {message=U.delete_blocked==RH_MANAGER_ERR_ACTIVE?blocked_text:"无法确认该资源包的使用状态，删除可能失败。";color=0xda593c;}
+    else if(U.confirm_error[0]) {message=U.confirm_error;color=0xda593c;}
+    TRY(row(t,KEY_ROW,"主题包",name,0));
+    TRY(box(t,KEY_ROW,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,0,0,0,-1,0));
+    TRY(wrap_lines(t,KEY_ROW+2,message,110,20,color,4));
+    /* Only a live reference is a permanent refusal. Any other preflight error
+       (a busy catalog, a stale index) keeps the action so it can be retried. */
+    return confirm_action(t,(int32_t)U.content_height-106,U.delete_blocked!=RH_MANAGER_ERR_ACTIVE);
+}
+static int delete_confirm(void) {
+    int rc;
+    /* Advisory preflight answered at page load; the transaction re-checks under
+       its own guard, so a stale answer only costs a refused confirm. */
+    if(U.busy || U.delete_blocked==RH_MANAGER_ERR_ACTIVE) return 0;
+    U.busy=1;rc=rh_manager_data_delete(U.data,U.detail_id);U.busy=0;
+    /* The disappearing entry is the success signal. A refusal keeps the page so
+       the reason stays readable and the action can be retried. */
     if(!rc) return navigate(RESOURCES,1);
+    if(rc==RH_MANAGER_ERR_ACTIVE)
+        copy(U.confirm_error,sizeof(U.confirm_error),"正在使用中，无法删除。请先在「混搭微调」中改回「默认」。");
+    else if(rc==RH_MANAGER_ERR_INVALID)
+        copy(U.confirm_error,sizeof(U.confirm_error),"资源包索引损坏，删除失败。");
+    else {const char *reason=U.data?rh_manager_data_error(U.data):0;
+        copy(U.confirm_error,sizeof(U.confirm_error),reason&&*reason?reason:"删除失败，请稍后重试。");}
     return render();
 }
 static int choose_option(uint32_t index) {
@@ -781,7 +833,9 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
     if(!U.opened || e->generation!=U.generation) return CANOPUS_UI_ERR_STALE;
     if(e->key==KEY_ACTION+1 && !event) {
         if(U.route==INDEX) event=EV_RELOAD;
-        else if(U.route==DETAIL) event=EV_DELETE;
+        /* The same bottom asset carries one event on both pages: open the
+           confirmation here, run the delete there. */
+        else if(U.route==DETAIL || U.route==DELETE) event=EV_DELETE;
     }
     /* Failed commits retain the old native tree. Never strand its captured
        pointer or timers: release/cancel/back still own gesture cleanup. */
@@ -859,7 +913,17 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
         }
         U.pressed=0;
         if(event==EV_RELOAD && click) return request_reload();
-        if(event==EV_DELETE && click) return delete_tap(e->time_ms);
+        if(event==EV_DELETE && click) {
+            if(U.route==DETAIL && !U.busy) {
+#ifdef RH_MANAGER_UI_TEST
+                /* The acceptance probe counts confirmation pages, not presses:
+                   a refused package has no action to press. */
+                probe_state.delete_taps++;
+#endif
+                return navigate(DELETE,0);
+            }
+            if(U.route==DELETE) return delete_confirm();
+        }
         if(event==EV_DISMISS && click) {U.banner_hidden=1;return render();}
         /* The preview wrapper is not a prefab row, so it never sees ACTIVATE;
            its click is the release inside slop, like the image buttons. */
@@ -868,6 +932,7 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
     }
     if(e->type!=CANOPUS_UI_EVENT_ACTIVATE && e->type!=CANOPUS_UI_EVENT_VALUE_CHANGED) return 0;
     if(event==EV_BACK) return back();
+    if(event==EV_DELETE && U.route==DELETE) return delete_confirm();
     if(event==EV_RESOURCES) {U.scroll[RESOURCES]=0;return navigate(RESOURCES,1);}
     if(event==EV_MIX) {U.scroll[MIX]=0;return navigate(MIX,1);}
     if(event>=EV_OPTION && event<EV_CHOOSE && U.route==SELECT) return choose_option(event-EV_OPTION);
@@ -916,7 +981,8 @@ static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     U.content_height=U.wide?424:444;U.row_width=U.wide?336:204;
     if((U.wide && (U.width!=336 || U.height!=480)) || (!U.wide && (U.width!=212 || U.height!=520))) return CANOPUS_UI_ERR_UNSUPPORTED;
     rc=rh_manager_assets_install(ctx);if(rc) return rc;
-    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=0;U.suppressed=0;U.delete_armed=0;U.banner_hidden=0;
+    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=0;U.suppressed=0;U.banner_hidden=0;
+    U.delete_blocked=0;U.confirm_error[0]=0;
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
     rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
 }
@@ -928,7 +994,7 @@ static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     (void)back();return 0;
 }
 static void on_close(const struct canopus_context_v1 *ctx,void *cookie) {
-    (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;U.delete_armed=0;
+    (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;
 }
 /* One firmware page per route, so a route change is a stock push/pop. A
  * backend without ctx->ui->route ignores page_count and replaces the tree in

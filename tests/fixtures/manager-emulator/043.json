@@ -46,17 +46,24 @@
       "settle": 0.6
     },
     {
-      "shot": "delete-prompt"
+      "shot": "delete-blocked"
     },
     {
-      "double_tap": [
+      "tap": [
         168,
         430
       ],
-      "settle": 0.3
+      "settle": 0.6
     },
     {
-      "shot": "delete-protected"
+      "shot": "delete-still-blocked"
+    },
+    {
+      "tap": [
+        30,
+        28
+      ],
+      "settle": 0.6
     },
     {
       "tap": [
@@ -622,7 +629,7 @@
     "required": [
       "^route=1$",
       "^phase=6$",
-      "^routes_mask=31$",
+      "^routes_mask=63$",
       "^phases_mask=127$",
       "^render_failures=0$",
       "^received_68_seen=1$",

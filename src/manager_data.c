@@ -1838,6 +1838,20 @@ int rh_manager_data_connect_list(struct rh_manager_data *d,uint32_t expected,uin
     }
     *size=n; return 0;
 }
+/* Shares delete's guard order so the page cannot promise a delete that the
+ * transaction would then refuse. The catalog is whatever refresh last loaded;
+ * a stale answer costs one refused confirm, never a wrong removal. */
+int rh_manager_data_delete_check(struct rh_manager_data *d,const char *id) {
+    char **protected_ids=0; uint32_t n=0; int rc;
+    if(!d||!id||!valid_id(id)) return -22;
+    if(d->busy||d->pending_protection) return -16;
+    if(find_id(d->ids,d->count,id)<0) return -22;
+    rc=protection_index(d,&protected_ids,&n,0,0);
+    if(!rc) rc=live_references(d,&protected_ids,&n);
+    if(!rc && find_id(protected_ids,n,id)>=0) rc=RH_MANAGER_ERR_ACTIVE;
+    free_strings(d,protected_ids,n);
+    return rc;
+}
 int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
     char **protected_ids=0; uint32_t n=0,i; int rc; struct text registry={0,0,0}; char relative_root[256],absolute[256];
     if(!d||!id||!valid_id(id)) return -22;
