@@ -19,6 +19,8 @@ static rh_manager_state_listener listener;
 static void *listener_cookie;
 static uint32_t width=212,height=520,move_from,move_to,moves,selected,chooses,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
 static int close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh;
+/* Set for the multi-page pass: the modelled host then answers ctx->ui->route. */
+static int multi_page;
 static uint32_t refresh_count,applies;
 static uint32_t subscription_count;
 static canopus_timer_callback_t timer_callback;
@@ -68,6 +70,10 @@ static const struct canopus_ui_backend_v1 backend={sizeof(backend),2,0,(1u<<18)-
 static int32_t set_entry(const struct canopus_context_v1 *c,const struct canopus_ui_entry_v1 *e) {(void)c;entry=e;return 0;}
 static int32_t post(const struct canopus_context_v1 *c,canopus_ui_task_fn cb,void *cookie) {(void)c;(void)cookie;assert(!pending||pending==cb);pending=cb;return 0;}
 static int32_t close_page(const struct canopus_context_v1 *c) {(void)c;close_count++;entry->on_close(&context,0);return 0;}
+/* Multi-page entries: the modelled host moves to the destination page and
+ * drops the old view, exactly like the target backend after page_goto. */
+static uint32_t routed_routes;
+static int32_t route_page(const struct canopus_context_v1 *c,uint32_t r) {(void)c;assert(multi_page);assert(r<5);routed_routes++;return 0;}
 static int32_t publish_launcher(const struct canopus_context_v1 *c,const struct canopus_app_entry_v1 *e) {(void)c;assert(!strcmp(e->label,"Corona"));assert(e->icon);assert(!e->pages&&!e->page_count);return 0xCC;}
 static void resolution(const struct canopus_context_v1 *c,uint32_t *w,uint32_t *h) {(void)c;*w=width;*h=height;}
 static uint32_t clock_ms(const struct canopus_context_v1 *c) {(void)c;return 1000;}
@@ -80,6 +86,16 @@ static const struct canopus_ui_obj ui_api={
     .text=canopus_ui_text,.status_row=canopus_ui_status_row,.button=canopus_ui_button,.action_row=canopus_ui_action_row,
     .switch_row=canopus_ui_switch_row,.navigation_header=canopus_ui_navigation_header,.component=canopus_ui_component,
     .node_set_style=canopus_ui_node_set_style,.node_set_layout=canopus_ui_node_set_layout,.set_entry=set_entry,.close_page=close_page,
+    .node_set_visual=canopus_ui_node_set_visual,.control=canopus_ui_control,.post=post
+};
+/* The multi-page backend differs only by offering ctx->ui->route. */
+static const struct canopus_ui_obj ui_api_multi={
+    .capabilities=canopus_ui_context_capabilities,.tree_begin=canopus_ui_tree_begin,.tree_commit=canopus_ui_tree_commit,
+    .tree_abort=canopus_ui_tree_abort,.end=canopus_ui_end,.navigation_page=canopus_ui_navigation_page,.section=canopus_ui_section,
+    .text=canopus_ui_text,.status_row=canopus_ui_status_row,.button=canopus_ui_button,.action_row=canopus_ui_action_row,
+    .switch_row=canopus_ui_switch_row,.navigation_header=canopus_ui_navigation_header,.component=canopus_ui_component,
+    .node_set_style=canopus_ui_node_set_style,.node_set_layout=canopus_ui_node_set_layout,.set_entry=set_entry,.close_page=close_page,
+    .route=route_page,
     .node_set_visual=canopus_ui_node_set_visual,.control=canopus_ui_control,.post=post
 };
 static int32_t config_stat(const struct canopus_context_v1 *c,const char *path,struct canopus_fs_stat *out) {
@@ -192,6 +208,10 @@ int main(int argc,char **argv) {
     assert(!rh_manager_ui_set_data_hooks(&hooks));
     assert(!rh_manager_ui_register(&context));assert(!rh_manager_launcher_register(&context));
     assert(!entry->on_open(&context,&ui,0));assert_route(0);
+    /* The root page carries no back affordance: the stock apps exit through
+       the system back gesture so the firmware draws the page-out transition,
+       and only sub-routes draw a header back. */
+    assert(!(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
     i=find_text("正在工作");assert(ui.committed.visuals[0].flags==0);
     (void)i;
     assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
@@ -216,7 +236,8 @@ int main(int argc,char **argv) {
     tap(31,120);assert(reloads==1);pump();
     {uint32_t reads=refresh_count;
         activate_text("资源管理");assert_route(1);find_text("系统样式");assert(refresh_count==reads);
-        back();activate_text("混搭微调");assert_route(3);find_text("启动器背景");assert(refresh_count==reads);
+        back();activate_text("混搭微调");assert_route(3);
+find_text("启动器背景");assert(refresh_count==reads);
         status.reload_result=0;listener(listener_cookie,1);pump();assert(completed==1 && refresh_count==reads+1);
         find_text("启动器背景");back();
     }
@@ -292,7 +313,8 @@ int main(int argc,char **argv) {
         node=find_text(cjk);assert(ui.committed.nodes[node].type==CANOPUS_UI_NODE_TEXT);assert(ui.committed.layouts[node].height>32);
     }
     back();
-    back();activate_text("混搭微调");assert_route(3);event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
+    back();activate_text("混搭微调");assert_route(3);
+event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     event(1002,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert_route(4);
     i=find_text("系统");event(ui.committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert(selected==1);
     i=find_text("系统");assert(ui.committed.nodes[i].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
@@ -379,6 +401,10 @@ int main(int argc,char **argv) {
     {struct rh_manager_data_hooks changed_hooks=hooks;changed_hooks.cookie=0;assert(rh_manager_ui_set_data_hooks(&changed_hooks)==CANOPUS_SVC_ERR_STATE);}
     assert(!entry->on_open(&context,&ui,0));activate_text("资源管理");assert_route(1);
     host_back();assert_route(0);assert(!close_count);
+    /* Sub-routes still draw it, so an internal pop keeps its title affordance. */
+    activate_text("资源管理");assert_route(1);
+    assert(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK);
+    back();assert_route(0);assert(!close_count);
     host_back();assert(close_count==1);
 #ifdef RH_MANAGER_UI_TEST
     assert(!entry->on_open(&context,&ui,0));
@@ -399,5 +425,25 @@ int main(int argc,char **argv) {
     assert(probe_value("render_error")==0 && probe_used<=256);
     entry->on_close(&context,0);
 #endif
+    /* Multi-page pass: the entry declares one firmware page per route and every
+       navigate() goes through ctx->ui->route, which is what gives a real
+       firmware page push/pop its stock transition. */
+    multi_page=1;routed_routes=0;context.ui=&ui_api_multi;
+    assert(entry->page_count==5);
+    assert(!entry->on_open(&context,&ui,0));assert_route(0);
+    assert(!(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
+    activate_text("资源管理");assert_route(1);
+    assert(routed_routes==1);
+    assert(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK);
+    back();assert_route(0);assert(routed_routes==2);
+    /* A header back on the root declines too: close_page from inside the
+       callback would consume the gesture and skip the page-out transition.
+       There is no header node on the root, so call the entry directly. */
+    {int before=close_count;assert(entry->on_back(&context,&ui,0)==1);
+     assert(close_count==before);assert_route(0);}
+    activate_text("混搭微调");assert_route(3);assert(routed_routes==3);
+    /* The root page declines back so the firmware plays its page-out. */
+    host_back();assert(close_count==1);
+    entry->on_close(&context,0);
     puts(height==480?"native UI .043: passed":"native UI .155: passed");return 0;
 }

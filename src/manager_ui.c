@@ -205,11 +205,21 @@ static int load_route(uint32_t route,int refresh) {
     if(rc) set_error(route==DETAIL?"无法读取资源包信息":"读取资源包失败，请返回后重试。");
     return rc;
 }
+/* Each route is its own firmware page so the move is a stock push/pop and the
+ * firmware draws the transition; the host re-creates the view on the
+ * destination page, so render() rebuilds the whole tree from U afterwards.
+ * A backend without multi-page entries keeps the single-page replacement. */
 static int navigate(uint32_t route,int refresh) {
     uint32_t previous_route=U.route,previous_count=U.count;char previous_error[256];int rc;
     copy(previous_error,sizeof(previous_error),U.error);
     cancel_gesture();U.delete_armed=0;U.toast[0]=0;U.route=route;
-    (void)load_route(route,refresh);rc=render();
+    (void)load_route(route,refresh);
+    if(U.ctx->ui->route && !U.ctx->ui->route(U.ctx,route)) {
+        /* The host replaced its view; the destination page still owes a tree. */
+        U.generation=U.ui->committed.generation;
+        return render();
+    }
+    rc=render();
     /* A rejected replacement leaves the old native page visible. Its route
      * must still own the next back event instead of accidentally exiting. */
     if(rc && U.ui->committed.nodes[0].key!=1u+route*10000u) {
@@ -621,7 +631,11 @@ static int render(void) {
     static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源"};
     struct canopus_ui_tree_v1 *t;const char *title=U.route==SELECT && U.mix_title[0]?U.mix_title:titles[U.route];int rc;
     struct canopus_ui_navigation_page_props_v1 p={sizeof(p),title,len(title)};
-    struct canopus_ui_navigation_header_props_v1 h={sizeof(h),title,len(title),"",0,EV_BACK,1,0,0};
+    /* The root page is the app, not a sub-view: the stock firmware apps keep
+     * no back affordance there and leave the exit to the system back gesture,
+     * which draws the page-out transition. A header back would close the page
+     * from inside its own callback and cost that transition. */
+    struct canopus_ui_navigation_header_props_v1 h={sizeof(h),title,len(title),"",0,EV_BACK,U.route!=INDEX,0,0};
     if(!U.opened || !U.ui) return 0;
     rc=U.ctx->ui->tree_begin(U.ui,&t);
     if(rc) {
@@ -711,7 +725,12 @@ static void hold_tick(const struct canopus_context_v1 *ctx,int32_t timer,void *c
     clear_hold();(void)begin_drag();
 }
 static int back(void) {
-    if(U.route==INDEX) return U.ctx->ui->close_page(U.ctx);
+    /* The root page is the app: never close it from inside its own callback, or
+     * the firmware sees descriptor +104 consumed and skips its page-out
+     * transition. Declining lets the stock handler finish the app with the
+     * animation. A single-page backend has no such gesture path, so it keeps
+     * closing explicitly. */
+    if(U.route==INDEX) return U.ctx->ui->route?0:U.ctx->ui->close_page(U.ctx);
     if(U.route==DETAIL) return navigate(RESOURCES,1);
     if(U.route==SELECT) return navigate(MIX,0);
     return navigate(INDEX,0);
@@ -934,7 +953,10 @@ static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
 static void on_close(const struct canopus_context_v1 *ctx,void *cookie) {
     (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;U.delete_armed=0;
 }
-static const struct canopus_ui_entry_v1 entry={sizeof(entry),"Corona",on_open,on_event,on_back,on_close,0};
+/* One firmware page per route, so a route change is a stock push/pop. A
+ * backend without ctx->ui->route ignores page_count and replaces the tree in
+ * the single page as before, so this stays correct on older targets. */
+static const struct canopus_ui_entry_v1 entry={sizeof(entry),"Corona",on_open,on_event,on_back,on_close,0,ROUTES};
 int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *hooks) {
     struct rh_manager_data_hooks empty={0};const struct rh_manager_data_hooks *next=hooks?hooks:&empty;
     if(U.data && (U.hooks.remove_tree!=next->remove_tree || U.hooks.quickapp_icon!=next->quickapp_icon || U.hooks.cookie!=next->cookie))
