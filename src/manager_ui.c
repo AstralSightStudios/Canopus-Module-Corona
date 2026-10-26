@@ -9,7 +9,7 @@
 enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, ROUTES };
 enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL, EV_DISMISS,
        EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000, EV_CHOOSE=3000000 };
-enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_BANNER=60, KEY_TOAST=90, KEY_ROW=1000, OPTION_SLOTS=5,
+enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_BANNER=60, KEY_ROW=1000, OPTION_SLOTS=5,
        ROW_STEP=104, BANNER_H=96, WINDOW=7, EDGE=42, SLOP=8 };
 /* UI state is shared across routes. Catalog and metadata are never duplicated
  * into page models, and only a visible subset enters the bounded UI tree. */
@@ -24,11 +24,11 @@ static struct {
     uint32_t route, width, height, content_height, row_width;
     int32_t scroll[ROUTES];
     uint32_t generation, reload_generation, subscribed, opened, wide, busy, render_failed;
-    uint32_t mix_index, count, shown, toast_id;
+    uint32_t mix_index, count, shown;
     /* Content span the committed tree actually builds. While the whole viewport
        stays inside it the tree is reusable, so a scroll sample costs no rebuild. */
     int32_t window_from, window_to, window_total, viewport;
-    char detail_id[65], mix_key[256], mix_title[256], error[256], toast[256];
+    char detail_id[65], mix_key[256], mix_title[256], error[256];
     int32_t edge_timer, hold_timer, list_top;
     uint32_t pressed, press_id, press_key, press_time, moved, drag, drag_from, drag_to;
     int32_t start_x, start_y, last_y, start_scroll, drag_delta;
@@ -107,7 +107,6 @@ static void set_error(const char *fallback) {
     const char *s=U.data?rh_manager_data_error(U.data):0;
     copy(U.error,sizeof(U.error),s && *s?s:fallback);
 }
-static void toast(const char *message) {copy(U.toast,sizeof(U.toast),message);U.toast_id++;}
 static int render(void);
 static void cancel_gesture(void);
 static int build_banner(struct canopus_ui_tree_v1 *t);
@@ -212,7 +211,7 @@ static int load_route(uint32_t route,int refresh) {
 static int navigate(uint32_t route,int refresh) {
     uint32_t previous_route=U.route,previous_count=U.count;char previous_error[256];int rc;
     copy(previous_error,sizeof(previous_error),U.error);
-    cancel_gesture();U.delete_armed=0;U.toast[0]=0;U.route=route;
+    cancel_gesture();U.delete_armed=0;U.route=route;
     (void)load_route(route,refresh);
     if(U.ctx->ui->route && !U.ctx->ui->route(U.ctx,route)) {
         /* The host replaced its view; the destination page still owes a tree. */
@@ -290,7 +289,7 @@ static int positioned(struct canopus_ui_tree_v1 *t,uint32_t key,int height,int32
 static uint32_t string_room(struct canopus_ui_tree_v1 *t) {
     /* Public bounded storage; reading its accounting avoids speculatively
        appending a row that would leave a half-built staging tree. */
-    uint32_t used=t->_snapshot.string_used,reserve=(U.toast[0]?len(U.toast)+2u:0u)+8u;
+    uint32_t used=t->_snapshot.string_used,reserve=8u;
     return used+reserve>=CANOPUS_UI_STRING_CAPACITY?0:CANOPUS_UI_STRING_CAPACITY-used-reserve;
 }
 static int build_resource_row(struct canopus_ui_tree_v1 *t,uint32_t i) {
@@ -503,8 +502,8 @@ static int build_choices(struct canopus_ui_tree_v1 *t) {
         if(y+h<=U.scroll[SELECT]) {y+=h;continue;}
         if(U.shown>=WINDOW) break;
         /* Worst case is an all-preview window: OPTION_SLOTS nodes per row on
-           top of the page, header, scroll and a possible toast. Stop before
-           the bounded snapshot is full instead of failing the whole commit. */
+           top of the page, header and scroll. Stop before the bounded
+           snapshot is full instead of failing the whole commit. */
         if(t->_snapshot.node_count+OPTION_SLOTS>CANOPUS_UI_MAX_NODES) break;
         /* name + preview path + the checked/unchecked icon */
         if(len(option.name)+len(option.preview)+96u>string_room(t)) {if(U.shown) break;return CANOPUS_UI_ERR_CAPACITY;}
@@ -603,16 +602,6 @@ static int build_banner(struct canopus_ui_tree_v1 *t) {
     } else TRY(wrap_lines(t,KEY_BANNER+2,message,44,20,0xc5cbd5));
     return U.ctx->ui->end(t);
 }
-/* The install toast is the only pack-name reveal: the protocol carries no
-   metadata, so the name exists only after the manifest registration. */
-static void installed_toast(void) {
-    char id[65],message[160];uint32_t n;id[0]=0;
-    if(!ensure_data() && !rh_manager_data_last_installed(U.data,id) && id[0] &&
-       !rh_manager_data_metadata(U.data,id,&U.metadata) && U.metadata.name[0]) {
-        copy(message,sizeof(message),U.metadata.name);n=len(message);
-        copy(message+n,sizeof(message)-n,"已安装");toast(message);
-    } else toast("主题包已安装");
-}
 static int translate_rows(void) {
     uint32_t i;
     for(i=0;i<U.position_count;i++) {
@@ -657,10 +646,6 @@ static int render(void) {
         case SELECT:rc=build_choices(t);break;
         default:rc=CANOPUS_UI_ERR_ARGUMENT;break;
         }
-    }
-    if(!rc && U.toast[0]) {
-        struct canopus_ui_component_props_v1 tp={sizeof(tp),U.toast,len(U.toast),"",0,0,ON,2000,0,0,0,0};
-        rc=U.ctx->ui->component(t,KEY_TOAST+(U.toast_id%100u)*10000000u,CANOPUS_UI_NODE_TOAST,&tp);
     }
     if(!rc) rc=U.ctx->ui->end(t);
     if(rc) {U.ctx->ui->tree_abort(t);U.render_failed=1;
@@ -735,17 +720,6 @@ static int back(void) {
     if(U.route==SELECT) return navigate(MIX,0);
     return navigate(INDEX,0);
 }
-static void reload_toast(int32_t result,uint32_t changed_count) {
-    char message[96];uint32_t n;
-    if(result<0) {
-        copy(message,sizeof(message),"模块拒绝重载（-");n=len(message);
-        n+=number(message+n,0u-(uint32_t)result);copy(message+n,sizeof(message)-n,"）");
-    } else if(changed_count) {
-        copy(message,sizeof(message),"重载完成，更新 ");n=len(message);
-        n+=number(message+n,changed_count);copy(message+n,sizeof(message)-n," 项资源");
-    } else copy(message,sizeof(message),"模块已响应，重载完成");
-    toast(message);
-}
 static int next_config_dir(char dir[32]) {
     struct canopus_fs_stat stat;int rc;
     if(!U.ctx->fs || !U.ctx->fs->stat) return CANOPUS_SVC_ERR_UNSUPPORTED;
@@ -768,10 +742,13 @@ static int request_reload(void) {
     rc=next_config_dir(dir);
     if(!rc) rc=ensure_data();if(!rc) rc=rh_manager_data_refresh(U.data);
     if(!rc) rc=rh_manager_data_prepare_apply(U.data,dir);
-    if(rc) {set_error("资源映射生成失败");toast(U.error);U.error[0]=0;return render();}
+    /* A prepare failure used to be a toast with the page left intact. The page
+       is the only surface left, and a blocking error page would also drop the
+       reload button, so nothing is reported here. */
+    if(rc) return render();
     U.busy=1;
     rc=rh_module_request_reload_from(U.reload_generation,dir);
-    if(rc) {(void)rh_manager_data_complete_apply(U.data,0);U.busy=0;toast("重载失败");}
+    if(rc) {(void)rh_manager_data_complete_apply(U.data,0);U.busy=0;}
     rh_module_get_status_snapshot(&U.status);return render();
 }
 static int delete_tap(uint32_t when) {
@@ -779,10 +756,11 @@ static int delete_tap(uint32_t when) {
 #ifdef RH_MANAGER_UI_TEST
     probe_state.delete_taps++;
 #endif
-    if(!U.delete_armed || when-U.delete_at>500u) {U.delete_armed=1;U.delete_at=when;toast("双击删除");return render();}
+    if(!U.delete_armed || when-U.delete_at>500u) {U.delete_armed=1;U.delete_at=when;return render();}
     U.delete_armed=0;U.busy=1;rc=rh_manager_data_delete(U.data,U.detail_id);U.busy=0;
-    if(!rc) {TRY(navigate(RESOURCES,1));toast("资源包已删除");}
-    else toast(rc==RH_MANAGER_ERR_ACTIVE?"正在使用的资源包不能删除":rc==RH_MANAGER_ERR_INVALID?"资源包索引损坏，删除失败":"删除失败，请稍后重试");
+    /* Success returns to the list the pack left; a rejected delete leaves the
+       detail page and had only a toast for its reason. */
+    if(!rc) return navigate(RESOURCES,1);
     return render();
 }
 static int choose_option(uint32_t index) {
@@ -792,7 +770,9 @@ static int choose_option(uint32_t index) {
     probe_state.pick++;
 #endif
     TRY(rh_manager_data_option_get(U.data,U.mix_key,index,&option));
-    if(rh_manager_data_choose(U.data,U.mix_key,option.id)) {set_error("保存选择失败");toast("保存选择失败");U.error[0]=0;}
+    /* A failed save used to be a toast; the page keeps the old selection and
+       reports nothing while no non-blocking notice surface exists. */
+    (void)rh_manager_data_choose(U.data,U.mix_key,option.id);
     return render();
 }
 static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,
@@ -874,7 +854,7 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
 #ifdef RH_MANAGER_UI_TEST
             probe_state.drag++;
 #endif
-            if(from!=to && rh_manager_data_move(U.data,from,to)) toast("排序保存失败，已恢复原顺序");
+            (void)rh_manager_data_move(U.data,from,to);
             return render();
         }
         U.pressed=0;
@@ -910,19 +890,16 @@ static void posted(const struct canopus_context_v1 *ctx,void *cookie) {
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
     if(U.busy && U.status.reload_generation==U.reload_generation && U.status.reload_result!=1) {
         int success=U.status.reload_result==0;
-        int completion=rh_manager_data_complete_apply(U.data,success);U.busy=0;
-        if(completion) {
-            set_error(success?"刷新成功，但活动引用保护记录保存失败":"活动引用保护记录处理失败");
-            toast(U.error);U.error[0]=0;
-        } else reload_toast(U.status.reload_result,U.status.last_changed);
+        /* The completion warning used to be a toast. No non-blocking notice
+           surface exists after its removal, and a page error would hide the
+           list the user just refreshed, so the result is data-only here. */
+        (void)rh_manager_data_complete_apply(U.data,success);U.busy=0;
         if(U.opened && U.route!=INDEX) (void)load_route(U.route,1);
     }
     if(prior!=U.transfer.phase) {
         U.banner_hidden=0;
-        if(U.opened && U.transfer.phase==RH_XFER_PHASE_INSTALLED) {
-            installed_toast();
-            if(U.route==RESOURCES) (void)load_route(RESOURCES,1);
-        }
+        if(U.opened && U.transfer.phase==RH_XFER_PHASE_INSTALLED && U.route==RESOURCES)
+            (void)load_route(RESOURCES,1);
     }
     (void)render();
 }
@@ -933,13 +910,13 @@ static void changed(void *cookie,uint32_t changes) {
 static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,void *cookie) {
     uint32_t caps;int rc;(void)cookie;U.ctx=ctx;U.ui=ui;
     caps=ctx->ui->capabilities(ui);
-    {uint32_t need=CANOPUS_UI_CAP_NAVIGATION_HEADER|CANOPUS_UI_CAP_LAYOUT|CANOPUS_UI_CAP_VISUAL|CANOPUS_UI_CAP_STYLE|CANOPUS_UI_CAP_FONT|CANOPUS_UI_CAP_IMAGE|CANOPUS_UI_CAP_IMAGE_FIT_CONTAIN|CANOPUS_UI_CAP_POINTER_EVENTS|CANOPUS_UI_CAP_CAPTURE|CANOPUS_UI_CAP_TRANSLATE|CANOPUS_UI_CAP_VIRTUAL_CONTENT|CANOPUS_UI_CAP_SCROLL|CANOPUS_UI_CAP_TOAST|CANOPUS_UI_CAP_PROGRESS;
+    {uint32_t need=CANOPUS_UI_CAP_NAVIGATION_HEADER|CANOPUS_UI_CAP_LAYOUT|CANOPUS_UI_CAP_VISUAL|CANOPUS_UI_CAP_STYLE|CANOPUS_UI_CAP_FONT|CANOPUS_UI_CAP_IMAGE|CANOPUS_UI_CAP_IMAGE_FIT_CONTAIN|CANOPUS_UI_CAP_POINTER_EVENTS|CANOPUS_UI_CAP_CAPTURE|CANOPUS_UI_CAP_TRANSLATE|CANOPUS_UI_CAP_VIRTUAL_CONTENT|CANOPUS_UI_CAP_SCROLL|CANOPUS_UI_CAP_PROGRESS;
     if((caps&need)!=need) return CANOPUS_UI_ERR_UNSUPPORTED;}
     ctx->display->get_resolution(ctx,&U.width,&U.height);U.wide=U.width>=300;
     U.content_height=U.wide?424:444;U.row_width=U.wide?336:204;
     if((U.wide && (U.width!=336 || U.height!=480)) || (!U.wide && (U.width!=212 || U.height!=520))) return CANOPUS_UI_ERR_UNSUPPORTED;
     rc=rh_manager_assets_install(ctx);if(rc) return rc;
-    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=U.toast[0]=0;U.suppressed=0;U.delete_armed=0;U.banner_hidden=0;
+    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=0;U.suppressed=0;U.delete_armed=0;U.banner_hidden=0;
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
     rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
 }

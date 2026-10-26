@@ -51,7 +51,7 @@ static int32_t backend_apply(void *cookie,const struct canopus_ui_snapshot_v1 *s
         if(type==CANOPUS_UI_NODE_STATUS_ROW || type==CANOPUS_UI_NODE_ACTION_ROW || type==CANOPUS_UI_NODE_BUTTON || type==CANOPUS_UI_NODE_SWITCH_ROW)
             assert(!l->padding_left && !l->padding_right && !l->padding_top && !l->padding_bottom);
         if(type==CANOPUS_UI_NODE_IMAGE) assert(l->width>0 && l->height>0);
-        if(type==CANOPUS_UI_NODE_NAVIGATION_HEADER || type==CANOPUS_UI_NODE_TOAST)
+        if(type==CANOPUS_UI_NODE_NAVIGATION_HEADER)
             assert(!(s->visuals[i].flags&CANOPUS_UI_VISUAL_FLAG_VIRTUAL_CONTENT));
     }
     if(reject_apply) {reject_apply=0;return CANOPUS_UI_ERR_BACKEND;}
@@ -242,7 +242,10 @@ find_text("启动器背景");assert(refresh_count==reads);
         find_text("启动器背景");back();
     }
     fail_complete=1;tap(30,200);pump();status.reload_result=0;listener(listener_cookie,1);pump();assert(completed==2);
-    find_text("刷新成功，但活动引用保护记录保存失败");fail_complete=0;
+    /* The completion warning had only the toast surface, so a failed apply no
+       longer reports; the home page must stay rendered instead of turning
+       into a blocking error page. */
+    find_text("资源管理");fail_complete=0;
     activate_text("资源管理");assert_route(1);
     assert(ui.committed.nodes[find_text("系统样式")].event_id==0);
     event(1000,CANOPUS_UI_EVENT_PRESS,100,50,50,0);event(1000,CANOPUS_UI_EVENT_LONG_PRESS,600,50,50,0);
@@ -304,7 +307,7 @@ find_text("启动器背景");assert(refresh_count==reads);
         }
     }
     assert(bytes>=2064);
-    fail_delete=1;tap(31,20000);assert(deletes==0);tap(31,20400);assert(deletes==1);assert_route(2);assert(!strcmp(ui.committed.strings+ui.committed.nodes[find_type(CANOPUS_UI_NODE_TOAST,0)].primary_off,"正在使用的资源包不能删除"));
+    fail_delete=1;tap(31,20000);assert(deletes==0);tap(31,20400);assert(deletes==1);assert_route(2);
     fail_delete=0;tap(31,22000);tap(31,22400);assert(deletes==2);assert_route(1);
     /* 60 UTF-8 bytes are twenty CJK glyphs, which need multiple visual lines
        even though the previous byte threshold classified them as short. */
@@ -382,7 +385,7 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     s.phase=RH_XFER_PHASE_INSTALLING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在解压并登记");
     {uint32_t reads=refresh_count;
         s.phase=RH_XFER_PHASE_INSTALLED;assert(!rh_manager_set_transfer_state(&s));pump();
-        assert(refresh_count==reads+1);find_text("测试主题已安装");
+        assert(refresh_count==reads+1);
     }
     s.phase=RH_XFER_PHASE_ERROR;s.detail=6;assert(!rh_manager_set_transfer_state(&s));pump();
     find_text("传输中断");visible_copy("主题包完整性校验失败，请重新发送");
@@ -394,9 +397,9 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     {struct rh_transfer_ui_state idle={0};assert(!rh_manager_set_transfer_state(&idle));pump();assert_no_text("正在接收 · 20%");}
     host_back();assert_route(0);assert(!close_count);
     entry->on_close(&context,0);
-    /* A closed app shows no install toast; only a live transition announces. */
+    /* A closed app has no UI to announce the finished install to. */
     {struct rh_transfer_ui_state done={0};done.phase=RH_XFER_PHASE_INSTALLED;
-     assert(!rh_manager_set_transfer_state(&done));pump();assert_no_text("测试主题已安装");}
+     assert(!rh_manager_set_transfer_state(&done));pump();assert_no_text("已安装");}
     assert(!rh_manager_ui_set_data_hooks(&hooks));assert(!rh_manager_ui_register(&context));assert(subscription_count==1);
     {struct rh_manager_data_hooks changed_hooks=hooks;changed_hooks.cookie=0;assert(rh_manager_ui_set_data_hooks(&changed_hooks)==CANOPUS_SVC_ERR_STATE);}
     assert(!entry->on_open(&context,&ui,0));activate_text("资源管理");assert_route(1);

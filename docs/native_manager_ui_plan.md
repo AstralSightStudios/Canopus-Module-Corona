@@ -4,6 +4,8 @@
 
 实施时以实际 SDK 与原管理器代码为准：原生页面与桌面入口通过 `publish_native_app_stage` 分阶段注册；`ui.post` 仅安排前台 UI 工作，不是后台线程；连接是否就绪由未来传输层推送，不能把 `remote_listening` 当作设备已连接。
 
+已知缺口：Canopus 已移除 TOAST API（`CANOPUS_UI_NODE_TOAST` / `CANOPUS_UI_CAP_TOAST`），管理器因此没有任何非阻断临时提示面。以下反馈当前无 UI 承载，等待补充方案：删除失败原因、双击删除引导、重载结果、安装完成包名揭示、排序/选择保存失败文案、活动保护记录处理失败。现存提示面只剩页面级错误标签（命中即替换整页内容）与资源管理页的传输横幅。
+
 ---
 
 ## 1. 背景与总体决策
@@ -73,7 +75,7 @@ Manager 生成新代次配置 (calendar.cfg / backgrounds.cfg / mappings.tsv)
    ▼
 ctx->ui->post(ctx, rh_ui_async_update, NULL)
    ├── 刷新首页状态卡（正在工作 / 已加载 N 条规则 / 配置错误）
-   ├── 触发系统 CANOPUS_UI_NODE_TOAST 展示结果文案
+   ├── 结果文案无临时提示面（TOAST API 已移除，见文首已知缺口）
    └── 若刷新成功，执行 cleanup_inactive_generations 清理旧代次叠加目录
 ```
 
@@ -103,7 +105,7 @@ struct rh_transfer_ui_state {
 };
 ```
 
-- **本轮范围**：实现 `rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state)` 内部更新入口与资源管理页内嵌传输横幅渲染（见 §4.6）；后续接入 `canopusconnect_implementation.md` 的接收状态机时，只需在状态跳变或累计 ACK 写入时调用该接口，`ctx->ui->post` 会自动刷新横幅并在安装完成时提示包名 Toast。传输不再占用独立路由：接收器与页面解耦，UI 关闭不影响接收与续传。
+- **本轮范围**：实现 `rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state)` 内部更新入口与资源管理页内嵌传输横幅渲染（见 §4.6）；后续接入 `canopusconnect_implementation.md` 的接收状态机时，只需在状态跳变或累计 ACK 写入时调用该接口，`ctx->ui->post` 会自动刷新横幅。传输不再占用独立路由：接收器与页面解耦，UI 关闭不影响接收与续传。
 
 ---
 
@@ -117,7 +119,7 @@ struct rh_transfer_ui_state {
 | **内容视口 (`content_root`)** | `y = 68`，`212×444` | `y = 56`，`336×424` | 根 `NAVIGATION_PAGE` key 设为 `1u + route * 10000u`，切换路由自动重置共享视口 |
 | **原生列表行 (`ACTION_ROW` / `STATUS_ROW`)** | `204×96`，圆角 `24px`，`#222222`，行距 `8px` | `336×96`，圆角卡片，`#222222`，行距 `8px` | 两端均为**主标题（28px 白字）在上、副标题（24px 灰字）在下**的双行左对齐布局；原生行禁止设置非零 `padding` |
 | **样式属性 (`CAP_STYLE` / `CAP_VISUAL`)** | 支持圆角、裁剪、边框色/宽、透明度 (`FW_UI_STYLE_OPA`) | **仅支持圆角 (`12`) 与圆角裁剪 (`45`)**，无 `OPA` 与 `BORDER` | `.043` 提交 `opacity` 或 `border` 会触发整树 `ERR_UNSUPPORTED`；状态卡副标题统一使用底色预乘后的等效 RGB |
-| **任意字号 (`CAP_FONT`, `font_px`)** | 已支持（`native_font_create` + `DELETE` 事件引用计数回收） | 已支持（同左） | 仅用于 `TEXT`、`SECTION` 标题、`CHECKBOX` 主文本与 `TOAST`；不可用于原生 `ACTION_ROW` / `STATUS_ROW` |
+| **任意字号 (`CAP_FONT`, `font_px`)** | 已支持（`native_font_create` + `DELETE` 事件引用计数回收） | 已支持（同左） | 仅用于 `TEXT`、`SECTION` 标题与 `CHECKBOX` 主文本；不可用于原生 `ACTION_ROW` / `STATUS_ROW` |
 | **图片缩放 (`CAP_IMAGE_FIT_CONTAIN`)** | 已支持（Q8 独立缩放 + 尺寸解码查询 + 裁剪视口） | 已支持（同左） | 渲染前先确保目标 `.bin` 存在且非空，防止解码预检返回 `ERR_BACKEND` |
 | **指针捕获与位移 (`CAPTURE` / `TRANSLATE`)** | 已支持 | 已支持 | 用于资源管理页长按拖拽排序，以及底部图片按钮（`reload*.bin` / `del*.bin`）的点击识别 |
 | **虚拟列表 (`VIRTUAL_CONTENT` / `SCROLL`)** | 已支持 | 已支持 | 单次快照节点上限 `CANOPUS_UI_MAX_NODES = 32`、字符串池 `1536B`；所有长列表仅提交当前可见窗口 |
@@ -154,7 +156,7 @@ struct rh_transfer_ui_state {
    - `CANOPUS_UI_NODE_ACTION_ROW`：`label = "混搭微调"`，`detail = ""`，点击推入 `ROUTE_MIX_MATCH`。
 4. **底部重载按钮**：
    - 居中 `LIST` 容器 + `IMAGE`（Band 11 为 `reload.bin` `150×78`，Band 10 Pro 为 `reload-wide.bin` `324×80`），距屏幕底 `10px`（Band 11 内容坐标 `y=364`，Band 10 Pro `y=334`），与详情页删除按钮同位。
-   - 点击触发内部重载事务，完成后通过 `CANOPUS_UI_NODE_TOAST`（2000ms）提示结果。
+   - 点击触发内部重载事务；结果不再有临时提示（TOAST API 已移除），只有首页状态卡随之更新。
 
 ```text
 Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
@@ -205,7 +207,7 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
      3. 当手指进入视口上下边缘 `42px` 区域时，由 40ms 周期定时器调用 `CANOPUS_UI_CONTROL_SCROLL_TO` 平滑推进列表滚动。
    - 松开或取消（`RELEASE` / `CANCEL`）：
      1. 调用 `CANOPUS_UI_CONTROL_RELEASE_CAPTURE` 释放捕获。
-     2. 若为正常 `RELEASE` 且 `drag_from != drag_to`，重排数组并写入 `resource-order.json`；若写盘失败则回滚顺序并弹出 `TOAST` `"排序保存失败，已恢复原顺序"`。
+     2. 若为正常 `RELEASE` 且 `drag_from != drag_to`，重排数组并写入 `resource-order.json`；若写盘失败则回滚顺序（当前无失败文案，见文首已知缺口）。
 
 ```text
 Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
@@ -244,10 +246,10 @@ Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
    - 元数据长度超过系统双行项可显示宽度时，使用同字段标题的系统 SECTION/TEXT 分块完整展示；长说明与适用设备均可滚动，不截断原文。
 3. **底部删除按钮与 500ms 双击确认**：
    - `del.bin`（`150×78`）或 `del-wide.bin`（`324×80`）**悬浮于滚动列表之上**（复刻旧快应用 `position:absolute; bottom:10px`）：滚动视口铺满整个内容区（Band 11 `212×444` / Band 10 Pro `336×424`），按钮作为滚动容器之后的兄弟节点覆盖其上（Band 11 内容坐标 `y=364`，距屏幕底 `10px`；Band 10 Pro `y=334`）；滚动内容尾部保留 `90px`（Band 11）/ `100px`（Band 10 Pro）spacer，滚到底时末卡停在按钮上方 `10px`，滚动过程中卡片从按钮下方穿过。
-   - 首次点击记录 `delete_first_tap_ms = ctx->time->monotonic_ms(ctx)`，弹出 `TOAST` `"双击删除"`。
+   - 首次点击记录 `delete_first_tap_ms = ctx->time->monotonic_ms(ctx)`，当前无「双击删除」引导提示（TOAST API 已移除）。
    - `500ms` 内再次点击触发删除事务：
-     - 检查 `mappings.tsv`、`resource-active-generations.json` 的 `protectedThemes` 及 `calendar.cfg` 是否引用了该 `themeId`；若正在使用，拒绝删除并弹 `TOAST` `"正在使用的资源包不能删除"`。
-     - 否则清理 `resource-overrides.json` 中的引用、删除主题文件、更新 `interconnect-themes.json` / `resource-order.json` / `resource-files.json`，弹出 `TOAST` `"资源包已删除"` 并返回上一页。没有目录删除服务时仅保留空目录，文件或索引操作失败均不显示成功。
+     - 检查 `mappings.tsv`、`resource-active-generations.json` 的 `protectedThemes` 及 `calendar.cfg` 是否引用了该 `themeId`；若正在使用，拒绝删除（原因当前无 UI 承载）。
+     - 否则清理 `resource-overrides.json` 中的引用、删除主题文件、更新 `interconnect-themes.json` / `resource-order.json` / `resource-files.json` 并返回上一页。没有目录删除服务时仅保留空目录，文件或索引操作失败均不显示成功。
 
 ```text
 Band 11 (.155, 212x520)                  Band 10 Pro (.043, 336x480)
@@ -359,7 +361,7 @@ ROUTE_MIX_MATCH (Band 11)                ROUTE_MIX_MATCH_SELECT (Band 11)
    | `ERROR` (5) | `"传输中断"` | 错误码对应说明（`transfer_error` 映射，左对齐两行换行，`font_px=20`） |
    | `CANCELED` (6) | `"传输中断"` | `"任务已取消"` |
 
-3. **`INSTALLED` (4)**：横幅消失，`CANOPUS_UI_NODE_TOAST`（2000ms）提示 `"{包名}已安装"`（包名读取登记后的 `corona.json`，经 `rh_manager_data_last_installed` + `rh_manager_data_metadata`，缺失时回退 `"主题包已安装"`），并刷新资源列表让新包立即出现。包名只在此刻登场：协议握手不携带名称，接收/校验阶段设备端不存在名字。
+3. **`INSTALLED` (4)**：横幅消失并刷新资源列表，让新包立即出现。包名揭示（`"{包名}已安装"`）随 TOAST API 移除而取消；协议握手不携带名称，接收/校验阶段设备端不存在名字。
 4. **错误常驻与消除**：`ERROR / CANCELED` 横幅常驻（后台传输失败本来就无人围观，不能一闪而过），点按横幅卡片（`EV_DISMISS`，点击语义为 slop 内松开，与底部图片按钮一致）消除；任意后续 `phase` 跳变自动恢复横幅。
 5. **无常亮锁**：传输无需用户盯屏，`CANOPUS_WAKELOCK_SCREEN` 随传输页一并移除；接收进度由接收器持久化与跨重启续传保证，息屏无影响。
 
@@ -410,7 +412,7 @@ Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
 2. **Mirage 模拟器端到端验证 (`.043` Band 10 Pro & `.155` Band 11)**：
    - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `corona-0.3.0.canopus`，预置测试主题包。
    - 通过自动化触摸脚本依次打开并截图验收：
-     - **首页**：验证状态卡颜色、圆角裁剪、字号、右下角装饰图，以及底部 `reload*.bin` 按钮点击触发内部重载与 `TOAST`。
+     - **首页**：验证状态卡颜色、圆角裁剪、字号、右下角装饰图，以及底部 `reload*.bin` 按钮点击触发内部重载。
      - **资源管理 & 资源详情**：验证原生双行列表、长按拖拽排序、详情页 6 项 `STATUS_ROW` 及 `del*.bin` 双击删除保护。
      - **混搭微调 & 选择来源**：验证已微调项置顶、「默认」/「系统」/「主题包」的 `96×96 CONTAIN` 真实 `.bin` 图标预览与单选切换、返回后滚动位置恢复。
-     - **传输横幅**：通过测试钩子（长按首页卡片，每次推进一个 phase）驱动 `RECEIVING / VERIFYING / INSTALLING / INSTALLED / ERROR / CANCELED` 状态切换，在资源管理页验证横幅文案、原生 `PROGRESS` 进度条、安装完成 Toast 与错误横幅点按消除；`IDLE` 不渲染横幅（无「等待连接」页）。
+     - **传输横幅**：通过测试钩子（长按首页卡片，每次推进一个 phase）驱动 `RECEIVING / VERIFYING / INSTALLING / INSTALLED / ERROR / CANCELED` 状态切换，在资源管理页验证横幅文案、原生 `PROGRESS` 进度条与错误横幅点按消除；`INSTALLED` 只验证列表刷新（无安装完成提示）；`IDLE` 不渲染横幅（无「等待连接」页）。

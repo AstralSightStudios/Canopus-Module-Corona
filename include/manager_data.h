@@ -54,8 +54,8 @@ int rh_manager_data_order_get(struct rh_manager_data *, uint32_t index,
 int rh_manager_data_metadata(struct rh_manager_data *, const char *id,
                              struct rh_manager_metadata *);
 /* Theme id of the most recent install completed through install_step in this
-   catalog lifetime, empty before the first one. Display only: the name source
-   for the finished-transfer toast. */
+   catalog lifetime, empty before the first one. Display only: kept as the
+   catalog's own record, the UI has no notice surface to reveal it. */
 int rh_manager_data_last_installed(const struct rh_manager_data *, char id[65]);
 int rh_manager_data_move(struct rh_manager_data *, uint32_t from, uint32_t to);
 /* Mix items use stable partition: explicit selections first, then defaults.
