@@ -633,6 +633,7 @@
       "^phases_mask=127$",
       "^render_failures=0$",
       "^received_68_seen=1$",
+      "^notice=0$",
       "^reload=[1-9][0-9]*$",
       "^drag=(?:[2-9]|[1-9][0-9]+)$",
       "^delete=[1-9][0-9]*$",

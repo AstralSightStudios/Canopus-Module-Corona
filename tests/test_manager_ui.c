@@ -19,12 +19,28 @@ static rh_manager_state_listener listener;
 static void *listener_cookie;
 static uint32_t width=212,height=520,move_from,move_to,moves,selected,chooses,deletes,reloads,captured,released,largest_y,prepared,completed,failed_move;
 static int close_count,fail_delete,fail_complete,reject_apply,data_pending,dense_metadata,fail_create,fail_refresh,delete_protected;
+/* Reload notice coverage: the card is the only surface for a reload result, so
+ * the mock has to be able to fail each stage and to time a transaction out. */
+static int fail_prepare,fail_start,failed_complete,reject_reload;
 /* Set for the multi-page pass: the modelled host then answers ctx->ui->route. */
 static int multi_page;
 static uint32_t refresh_count,applies;
 static uint32_t subscription_count;
-static canopus_timer_callback_t timer_callback;
-static int32_t timer_id;
+/* The module may hold several timers at once: the drag edge timer, the hold
+ * timer, the reload watchdog and a notice dwell. Slots are addressed by id, so
+ * a destroyed timer cannot be fired by accident. */
+#define TIMERS 8
+static canopus_timer_callback_t timer_cb[TIMERS];
+static uint32_t timer_period[TIMERS];
+static int timer_live_ms(uint32_t ms) {int i;for(i=0;i<TIMERS;i++) if(timer_cb[i] && timer_period[i]==ms) return 1;return 0;}
+static int timer_live(void) {int i;for(i=0;i<TIMERS;i++) if(timer_cb[i]) return 1;return 0;}
+static void timer_fire(uint32_t ms) {
+    int i;
+    for(i=0;i<TIMERS;i++) if(timer_cb[i] && timer_period[i]==ms) {
+        canopus_timer_callback_t cb=timer_cb[i];cb(&context,(int32_t)i+1,0);return;
+    }
+    fprintf(stderr,"No live %ums timer\n",(unsigned)ms);assert(0);
+}
 static char applied_dir[64];
 #ifdef RH_MANAGER_UI_TEST
 static char probe_snapshot[257];static uint32_t probe_used;
@@ -80,9 +96,17 @@ static int32_t route_page(const struct canopus_context_v1 *c,uint32_t r) {(void)
 static int32_t publish_launcher(const struct canopus_context_v1 *c,const struct canopus_app_entry_v1 *e) {(void)c;assert(!strcmp(e->label,"Corona"));assert(e->icon);assert(!e->pages&&!e->page_count);return 0xCC;}
 static void resolution(const struct canopus_context_v1 *c,uint32_t *w,uint32_t *h) {(void)c;*w=width;*h=height;}
 static uint32_t clock_ms(const struct canopus_context_v1 *c) {(void)c;return 1000;}
-static int32_t timer_create(const struct canopus_context_v1 *c,uint32_t ms,int periodic,canopus_timer_callback_t cb,void *cookie) {(void)c;(void)cookie;assert((ms==40 && periodic)||(ms==450 && !periodic));timer_callback=cb;return ++timer_id;}
-static int32_t timer_start(const struct canopus_context_v1 *c,int32_t id) {(void)c;assert(id==timer_id);return 0;}
-static int32_t timer_destroy(const struct canopus_context_v1 *c,int32_t id) {(void)c;assert(id==timer_id);timer_callback=0;return 0;}
+static int32_t timer_create(const struct canopus_context_v1 *c,uint32_t ms,int periodic,canopus_timer_callback_t cb,void *cookie) {
+    int i;(void)c;(void)cookie;
+    /* 40ms is the drag edge timer, 450ms the long-press hold; 5000ms is the
+       reload watchdog and 2000/3500ms are the success and failure dwells. */
+    assert(periodic?(ms==40):(ms==450||ms==2000||ms==3500||ms==5000));
+    if(fail_start && ms>=2000) return -1;
+    for(i=0;i<TIMERS;i++) if(!timer_cb[i]) {timer_cb[i]=cb;timer_period[i]=ms;return (int32_t)i+1;}
+    assert(0);return -1;
+}
+static int32_t timer_start(const struct canopus_context_v1 *c,int32_t id) {(void)c;assert(id>0 && id<=TIMERS && timer_cb[id-1]);return 0;}
+static int32_t timer_destroy(const struct canopus_context_v1 *c,int32_t id) {(void)c;assert(id>0 && id<=TIMERS && timer_cb[id-1]);timer_cb[id-1]=0;timer_period[id-1]=0;return 0;}
 static const struct canopus_ui_obj ui_api={
     .capabilities=canopus_ui_context_capabilities,.tree_begin=canopus_ui_tree_begin,.tree_commit=canopus_ui_tree_commit,
     .tree_abort=canopus_ui_tree_abort,.end=canopus_ui_end,.navigation_page=canopus_ui_navigation_page,.section=canopus_ui_section,
@@ -120,7 +144,8 @@ void rh_manager_get_transfer_state(struct rh_transfer_ui_state *out) {*out=trans
 int rh_manager_subscribe(rh_manager_state_listener cb,void *cookie) {subscription_count++;listener=cb;listener_cookie=cookie;return 0;}
 void rh_manager_unsubscribe(rh_manager_state_listener cb,void *cookie) {(void)cb;(void)cookie;}
 int rh_module_request_reload_from(uint32_t generation,const char *dir) {
-    reloads++;status.reload_generation=generation;status.reload_result=1;
+    reloads++;if(reject_reload) return -9;
+    status.reload_generation=generation;status.reload_result=1;
     strcpy(applied_dir,dir);listener(listener_cookie,RH_MANAGER_CHANGED_STATUS);return 0;
 }
 int rh_module_request_reload(uint32_t generation) {return rh_module_request_reload_from(generation,"unused");}
@@ -154,8 +179,14 @@ int rh_manager_data_option_get(struct rh_manager_data *d,const char *key,uint32_
     o->selected=selected==i;return 0;
 }
 int rh_manager_data_choose(struct rh_manager_data *d,const char *key,const char *choice) {(void)d;(void)key;chooses++;selected=!strcmp(choice,"@system")?1:0;return 0;}
-int rh_manager_data_prepare_apply(struct rh_manager_data *d,const char *dir) {(void)d;prepared++;data_pending=1;assert(!strncmp(dir,"active/",7));return 0;}
-int rh_manager_data_complete_apply(struct rh_manager_data *d,int success) {(void)d;assert(success);completed++;data_pending=0;return fail_complete?-5:0;}
+int rh_manager_data_prepare_apply(struct rh_manager_data *d,const char *dir) {(void)d;prepared++;if(fail_prepare) return -7;data_pending=1;assert(!strncmp(dir,"active/",7));return 0;}
+int rh_manager_data_complete_apply(struct rh_manager_data *d,int success) {
+    (void)d;data_pending=0;
+    /* A watchdog rollback passes success=0 and must be accepted: it is the
+       staged-transaction abort, not a second completion. */
+    if(!success) {failed_complete++;return 0;}
+    completed++;return fail_complete?-5:0;
+}
 int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {(void)d;(void)id;deletes++;return fail_delete?-5:0;}
 int rh_manager_data_delete_check(struct rh_manager_data *d,const char *id) {(void)d;(void)id;return delete_protected?RH_MANAGER_ERR_ACTIVE:0;}
 const char *rh_manager_data_error(const struct rh_manager_data *d) {(void)d;return "";}
@@ -238,25 +269,69 @@ int main(int argc,char **argv) {
     /* CONTAIN images are native clickable viewports: use the child key,
        whose event_id remains zero, exactly as the firmware hit test does. */
     tap(31,100);assert(reloads==1 && prepared==1);assert(!strcmp(applied_dir,"active/2"));
+    /* The busy card: the status card is the reload action's only surface, so it
+       reports the transaction while the bottom button is disabled. */
+    find_text("正在重载");find_text("重新读取映射");
+    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(timer_live_ms(5000));
     tap(31,120);assert(reloads==1);pump();
     {uint32_t reads=refresh_count;
         activate_text("资源管理");assert_route(1);find_text("系统样式");assert(refresh_count==reads);
         back();activate_text("混搭微调");assert_route(3);
 find_text("启动器背景");assert(refresh_count==reads);
-        status.reload_result=0;listener(listener_cookie,1);pump();assert(completed==1 && refresh_count==reads+1);
+        status.last_changed=3;status.reload_result=0;listener(listener_cookie,1);pump();assert(completed==1 && refresh_count==reads+1);
         find_text("启动器背景");back();
     }
+    /* The outcome takes the card for one dwell and then yields to the module
+       state again; the reload watchdog is gone the moment it reports. */
+    find_text("重载完成");find_text("更新3项资源");
+    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(!timer_live_ms(5000) && timer_live_ms(2000));
+    timer_fire(2000);find_text("正在工作");find_text("已加载3条规则");
+    assert(!timer_live());
     fail_complete=1;tap(30,200);pump();status.reload_result=0;listener(listener_cookie,1);pump();assert(completed==2);
-    /* The completion warning had only the toast surface, so a failed apply no
-       longer reports; the home page must stay rendered instead of turning
-       into a blocking error page. */
+    /* A refresh whose protection record failed did work: it must not read as a
+       reload failure, and it keeps its own dwell. */
+    find_text("重载完成");find_text("保护记录未存");
+    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(timer_live_ms(2000));timer_fire(2000);
     find_text("资源管理");fail_complete=0;
+    /* Every failure the action can hit is a card, never a page error: a blocking
+       page would also drop the button the user needs to retry. The watchdog is
+       the only thing that keeps a lost generation from greying the action out
+       for the rest of the session. */
+    fail_refresh=1;tap(31,300);find_text("重载失败");find_text("读取资源失败");
+    assert(ui.committed.visuals[find_key(20)].background_rgb==0xdf9725);
+    assert(!timer_live_ms(5000) && timer_live_ms(3500));timer_fire(3500);fail_refresh=0;
+    fail_prepare=1;tap(31,320);find_text("重载失败");find_text("映射生成失败");
+    timer_fire(3500);fail_prepare=0;
+    reject_reload=1;{int failures=failed_complete;tap(31,340);assert(failed_complete==failures+1);}
+    find_text("重载失败");find_text("错误码 -9");timer_fire(3500);reject_reload=0;
+    {int failures=failed_complete;tap(31,360);assert(timer_live_ms(5000));
+     timer_fire(5000);assert(failed_complete==failures+1);assert(!timer_live_ms(5000));}
+    find_text("重载失败");find_text("模块无响应");
+    /* The action is usable again, and a late negative result keeps its code. */
+    {uint32_t before=reloads;tap(31,380);assert(reloads==before+1);assert(!timer_live_ms(3500));
+     status.reload_result=-7;listener(listener_cookie,1);pump();}
+    find_text("重载失败");find_text("错误码 -7");timer_fire(3500);
+    {uint32_t before=reloads;tap(31,400);assert(reloads==before+1);
+     status.last_changed=1;status.reload_result=0;listener(listener_cookie,1);pump();}
+    find_text("重载完成");find_text("更新1项资源");timer_fire(2000);find_text("正在工作");
+    assert(!timer_live());
+    /* No heartbeat timer means no dwell and no watchdog: the result stays until
+       the next tap replaces it, which is the documented degradation. */
+    fail_start=1;{uint32_t before=reloads;tap(31,420);assert(reloads==before+1);assert(!timer_live());}
+    find_text("正在重载");
+    status.last_changed=2;status.reload_result=0;listener(listener_cookie,1);pump();
+    find_text("更新2项资源");assert(!timer_live());fail_start=0;
+    tap(31,440);find_text("正在重载");status.reload_result=0;listener(listener_cookie,1);pump();
+    find_text("重载完成");timer_fire(2000);assert(!timer_live());
     activate_text("资源管理");assert_route(1);
     assert(ui.committed.nodes[find_text("系统样式")].event_id==0);
     event(1000,CANOPUS_UI_EVENT_PRESS,100,50,50,0);event(1000,CANOPUS_UI_EVENT_LONG_PRESS,600,50,50,0);
-    assert(captured==1 && timer_callback);
+    assert(captured==1 && timer_live_ms(40));
     event(1000,CANOPUS_UI_EVENT_MOVE,650,50,260,0);event(1000,CANOPUS_UI_EVENT_RELEASE,700,50,260,0);
-    assert(moves==1 && move_from==0 && move_to==2 && released==1 && !timer_callback);
+    assert(moves==1 && move_from==0 && move_to==2 && released==1 && !timer_live_ms(40));
     event(10,CANOPUS_UI_EVENT_SCROLL,800,0,0,38000);assert(largest_y>32767);
     event(10,CANOPUS_UI_EVENT_SCROLL,801,0,0,0);
     /* Overscroll must not rebuild. The firmware drives the bounce itself; a
@@ -289,13 +364,13 @@ find_text("启动器背景");assert(refresh_count==reads);
         uint32_t captures=captured,releases=released;
         event(10,CANOPUS_UI_EVENT_SCROLL,900,0,0,0);
         event(1001,CANOPUS_UI_EVENT_PRESS,1000,20,120,0);event(1001,CANOPUS_UI_EVENT_LONG_PRESS,1500,20,120,0);
-        assert(captured==captures+1 && timer_callback);
+        assert(captured==captures+1 && timer_live_ms(40));
         event(10,CANOPUS_UI_EVENT_SCROLL,1510,0,0,38000);find_key(1001);assert(ui.committed.string_used<=1536);
         reject_apply=1;assert(event_result(10,CANOPUS_UI_EVENT_SCROLL,1520,0,0,20000)==CANOPUS_UI_ERR_BACKEND);
         if(i==0) event(1001,CANOPUS_UI_EVENT_RELEASE,1600,20,120,0);
         else if(i==1) event(1001,CANOPUS_UI_EVENT_CANCEL,1600,20,120,0);
         else {back();assert_route(0);activate_text("资源管理");}
-        assert(released==releases+1 && !timer_callback && moves==1);
+        assert(released==releases+1 && !timer_live_ms(40) && moves==1);
     }
     dense_metadata=0;event(10,CANOPUS_UI_EVENT_SCROLL,1700,0,0,0);
     event(1001,CANOPUS_UI_EVENT_PRESS,1900,20,120,0);event(1001,CANOPUS_UI_EVENT_RELEASE,1910,20,120,0);

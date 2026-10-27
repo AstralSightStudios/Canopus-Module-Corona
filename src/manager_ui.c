@@ -11,6 +11,14 @@ enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL, EV_DISM
        EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000, EV_CHOOSE=3000000 };
 enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_BANNER=60, KEY_ROW=1000, OPTION_SLOTS=5,
        ROW_STEP=104, BANNER_H=96, WINDOW=7, EDGE=42, SLOP=8 };
+/* Reload feedback lives in the home status card: the removal of the TOAST API
+ * left the bottom action without any other surface. A result is transient, so
+ * it yields to the real module state after a short dwell; a failure keeps its
+ * error code on screen longer because that code is the only place it appears. */
+enum { RH_NOTICE_NONE=0, RH_NOTICE_DONE, RH_NOTICE_PROTECT_FAILED,
+       RH_NOTICE_LOAD_FAILED, RH_NOTICE_PREPARE_FAILED, RH_NOTICE_REJECTED,
+       RH_NOTICE_MODULE_FAILED, RH_NOTICE_TIMEOUT };
+enum { RELOAD_WATCHDOG_MS=5000, NOTICE_OK_MS=2000, NOTICE_FAIL_MS=3500 };
 /* UI state is shared across routes. Catalog and metadata are never duplicated
  * into page models, and only a visible subset enters the bounded UI tree. */
 static struct {
@@ -25,6 +33,10 @@ static struct {
     int32_t scroll[ROUTES];
     uint32_t generation, reload_generation, subscribed, opened, wide, busy, render_failed;
     uint32_t mix_index, count, shown;
+    /* Reload result shown in the home status card, plus its dwell timer and the
+       watchdog that gives the action back when a generation never reports. */
+    uint32_t notice, notice_changed;
+    int32_t notice_code, notice_timer, reload_timer;
     /* Content span the committed tree actually builds. While the whole viewport
        stays inside it the tree is reusable, so a scroll sample costs no rebuild. */
     int32_t window_from, window_to, window_total, viewport;
@@ -38,7 +50,7 @@ static struct {
        page; confirm_error carries the reason a confirm attempt still failed. */
     int32_t delete_blocked;
     char confirm_error[96];
-} U = { .edge_timer=-1, .hold_timer=-1 };
+} U = { .notice_timer=-1, .reload_timer=-1, .edge_timer=-1, .hold_timer=-1 };
 #ifdef RH_MANAGER_UI_TEST
 /* Compiled only into the emulator acceptance artifact. A long hold enters
  * receive and steps its copied state; no Connect listener is registered. */
@@ -99,6 +111,7 @@ static void write_probe(int rc) {
     p=probe_field(p,"scroll",probe_state.scroll);
     p=probe_field(p,"routes_mask",probe_state.routes_mask);p=probe_field(p,"phases_mask",probe_state.phases_mask);
     p=probe_field(p,"render_failures",probe_state.render_failures);
+    p=probe_field(p,"notice",U.notice);
     p=probe_field(p,"received_68_seen",probe_state.received_68_seen);total=(uint32_t)(p-data);
     if(!U.ctx->fs || !U.ctx->fs->open || !U.ctx->fs->write || !U.ctx->fs->close) return;
     fd=U.ctx->fs->open(U.ctx,"ui-probe.txt",CANOPUS_FS_WRITE);if(fd<0) return;
@@ -106,11 +119,35 @@ static void write_probe(int rc) {
     (void)U.ctx->fs->close(U.ctx,fd);
 }
 #endif
+static int render(void);
 static void set_error(const char *fallback) {
     const char *s=U.data?rh_manager_data_error(U.data):0;
     copy(U.error,sizeof(U.error),s && *s?s:fallback);
 }
-static int render(void);
+/* A failure is anything at or past the first failure kind; the two success
+ * kinds come first so one comparison separates the dwell times. */
+static int notice_failed(uint32_t kind) { return kind>=RH_NOTICE_LOAD_FAILED; }
+static void notice_timer_stop(void) {
+    if(U.notice_timer>=0) {(void)U.ctx->time->timer_destroy(U.ctx,U.notice_timer);U.notice_timer=-1;}
+}
+static void notice_clear(void) {
+    notice_timer_stop();U.notice=RH_NOTICE_NONE;U.notice_changed=0;U.notice_code=0;
+}
+static void notice_expire(const struct canopus_context_v1 *ctx,int32_t timer,void *cookie) {
+    (void)ctx;(void)cookie;if(timer!=U.notice_timer) return;
+    notice_clear();(void)render();
+}
+static void notice_set(uint32_t kind,uint32_t changed,int32_t code) {
+    notice_clear();U.notice=kind;U.notice_changed=changed;U.notice_code=code;
+    if(!U.ctx || !U.ctx->time || !U.ctx->time->timer_create) return;
+    /* No heartbeat timer means no expiry: the result then stays until the next
+       reload replaces it. A stuck notice is a smaller lie than a missing one. */
+    U.notice_timer=U.ctx->time->timer_create(U.ctx,notice_failed(kind)?NOTICE_FAIL_MS:NOTICE_OK_MS,0,notice_expire,0);
+    if(U.notice_timer>=0 && U.ctx->time->timer_start(U.ctx,U.notice_timer)<0) notice_timer_stop();
+}
+static void reload_timer_stop(void) {
+    if(U.reload_timer>=0) {(void)U.ctx->time->timer_destroy(U.ctx,U.reload_timer);U.reload_timer=-1;}
+}
 static int build_confirm(struct canopus_ui_tree_v1 *t);
 static void cancel_gesture(void);
 static int build_banner(struct canopus_ui_tree_v1 *t);
@@ -239,23 +276,51 @@ static int navigate(uint32_t route,int refresh) {
 }
 static int build_home(struct canopus_ui_tree_v1 *t) {
     const char *title,*subtitle; char count[48]; uint32_t color,fg;
-    enum rh_manager_asset asset=RH_MANAGER_ASSET_STATUS_RUNNING;
     int state=U.status.state, cardw=U.wide?324:204;
-    if(state==RH_MGR_STATE_RUNNING) {
+    /* The decoration answers "which module state". A transient reload notice
+       keeps its own state's illustration instead of claiming a new one, so a
+       failed reload never looks like a crashed module. */
+    enum rh_manager_asset asset=state==RH_MGR_STATE_CONFIG_ERROR?RH_MANAGER_ASSET_STATUS_CONFIG_ERROR:
+        state==RH_MGR_STATE_UNRESPONSIVE?RH_MANAGER_ASSET_STATUS_UNRESPONSIVE:
+        RH_MANAGER_ASSET_STATUS_RUNNING;
+    uint16_t subfont;
+    if(U.busy || U.notice!=RH_NOTICE_NONE) {
+        /* 7 glyphs at font 17 is all the 134px subtitle column holds, so every
+           result string below is budgeted to that width on the narrow target. */
+        subfont=U.wide?24:17;
+        if(U.busy) {title="正在重载";subtitle="重新读取映射";color=0x1da362;fg=0xc6e8d8;}
+        else if(notice_failed(U.notice)) {
+            color=0xdf9725;fg=0xf7e5c8;title="重载失败";
+            if(U.notice==RH_NOTICE_TIMEOUT) subtitle="模块无响应";
+            else if(U.notice==RH_NOTICE_PREPARE_FAILED) subtitle="映射生成失败";
+            else if(U.notice==RH_NOTICE_LOAD_FAILED) subtitle="读取资源失败";
+            else {
+                uint32_t n;int32_t code=U.notice_code<0?(int32_t)(0u-(uint32_t)U.notice_code):U.notice_code;
+                copy(count,sizeof(count),"错误码 -");n=len(count);n+=number(count+n,(uint32_t)code);subtitle=count;
+            }
+        } else {
+            color=0x1da362;fg=0xc6e8d8;title="重载完成";
+            if(U.notice==RH_NOTICE_PROTECT_FAILED) subtitle="保护记录未存";
+            else if(!U.notice_changed) subtitle="模块已响应";
+            else {
+                uint32_t n;copy(count,sizeof(count),"更新");n=len(count);
+                n+=number(count+n,U.notice_changed);copy(count+n,sizeof(count)-n,"项资源");subtitle=count;
+            }
+        }
+    } else if(state==RH_MGR_STATE_RUNNING) {
         uint32_t n;copy(count,sizeof(count),"已加载");n=len(count);n+=number(count+n,U.status.active_rules);copy(count+n,sizeof(count)-n,"条规则");
-        title="正在工作";subtitle=count;color=0x1da362;fg=0xc6e8d8;
+        title="正在工作";subtitle=count;color=0x1da362;fg=0xc6e8d8;subfont=U.wide?24:17;
     } else if(state==RH_MGR_STATE_CONFIG_ERROR) {
-        title="配置错误";subtitle="模块已安装";color=0xdf9725;fg=0xf7e5c8;asset=RH_MANAGER_ASSET_STATUS_CONFIG_ERROR;
+        title="配置错误";subtitle="模块已安装";color=0xdf9725;fg=0xf7e5c8;subfont=U.wide?26:24;
     } else if(state==RH_MGR_STATE_UNRESPONSIVE) {
-        title="模块异常";subtitle="未检测到模块";color=0xda593c;fg=0xf6d5ce;asset=RH_MANAGER_ASSET_STATUS_UNRESPONSIVE;
-    } else {title="检测失败";subtitle="请稍后重载";color=0x262626;fg=0xbfbfbf;}
+        title="模块异常";subtitle="未检测到模块";color=0xda593c;fg=0xf6d5ce;subfont=U.wide?26:21;
+    } else {title="检测失败";subtitle="请稍后重载";color=0x262626;fg=0xbfbfbf;subfont=U.wide?26:24;}
     TRY(section(t,20));TRY(box(t,20,cardw,100,((int)U.width-cardw)/2,U.wide?12:18,color,1,32,1));
     if(state!=RH_MGR_STATE_UNAVAILABLE) {
         TRY(image_asset(t,24,asset,U.wide?138:92,U.wide?145:97,U.wide?186:133,U.wide?-7:1));
     }
     TRY(label_box(t,21,title,U.wide?183:134,U.wide?42:40,14,U.wide?12:14,U.wide?32:30,0xffffff));
-    TRY(label_box(t,22,subtitle,U.wide?183:134,U.wide?34:32,14,54,
-                  U.wide?(state==RH_MGR_STATE_RUNNING?24:26):(state==RH_MGR_STATE_RUNNING?17:state==RH_MGR_STATE_UNRESPONSIVE?21:24),fg));
+    TRY(label_box(t,22,subtitle,U.wide?183:134,U.wide?34:32,14,54,subfont,fg));
     TRY(U.ctx->ui->end(t));
     TRY(row(t,40,"资源管理","排序与管理资源包",EV_RESOURCES));TRY(box(t,40,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?122:128,0,0,-1,0));
     TRY(row(t,41,"混搭微调","自由搭配资源样式",EV_MIX));TRY(box(t,41,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,U.wide?226:232,0,0,-1,0));
@@ -747,21 +812,43 @@ static int next_config_dir(char dir[32]) {
         if(rc<0) return rc;
     }
 }
+static void reload_timeout(const struct canopus_context_v1 *ctx,int32_t timer,void *cookie) {
+    (void)ctx;(void)cookie;if(timer!=U.reload_timer) return;
+    reload_timer_stop();
+    if(!U.busy) return;
+    /* The generation never reported back. Roll the staged catalog back or every
+       later prepare is refused by a stuck apply, refresh from disk because the
+       module may still commit unobserved, and give the action back. Watching
+       this here is what keeps the button from greying out for good. */
+    (void)rh_manager_data_complete_apply(U.data,0);U.busy=0;
+    (void)rh_manager_data_refresh(U.data);
+    notice_set(RH_NOTICE_TIMEOUT,0,0);
+    rh_module_get_status_snapshot(&U.status);(void)render();
+}
+static void reload_watchdog(void) {
+    reload_timer_stop();
+    if(!U.ctx || !U.ctx->time || !U.ctx->time->timer_create) return;
+    U.reload_timer=U.ctx->time->timer_create(U.ctx,RELOAD_WATCHDOG_MS,0,reload_timeout,0);
+    if(U.reload_timer>=0 && U.ctx->time->timer_start(U.ctx,U.reload_timer)<0) reload_timer_stop();
+}
 static int request_reload(void) {
     int rc;char dir[32];if(U.busy) return 0;
 #ifdef RH_MANAGER_UI_TEST
     probe_state.reload++;
 #endif
+    /* A second tap replaces a lingering result immediately; without this the
+       card would keep the last outcome while a new transaction is running. */
+    notice_clear();
     rc=next_config_dir(dir);
-    if(!rc) rc=ensure_data();if(!rc) rc=rh_manager_data_refresh(U.data);
-    if(!rc) rc=rh_manager_data_prepare_apply(U.data,dir);
-    /* A prepare failure used to be a toast with the page left intact. The page
-       is the only surface left, and a blocking error page would also drop the
-       reload button, so nothing is reported here. */
-    if(rc) return render();
+    if(!rc) rc=ensure_data();
+    if(!rc) rc=rh_manager_data_refresh(U.data);
+    if(rc) {notice_set(RH_NOTICE_LOAD_FAILED,0,rc);return render();}
+    rc=rh_manager_data_prepare_apply(U.data,dir);
+    if(rc) {notice_set(RH_NOTICE_PREPARE_FAILED,0,rc);return render();}
     U.busy=1;
     rc=rh_module_request_reload_from(U.reload_generation,dir);
-    if(rc) {(void)rh_manager_data_complete_apply(U.data,0);U.busy=0;}
+    if(rc) {(void)rh_manager_data_complete_apply(U.data,0);U.busy=0;notice_set(RH_NOTICE_REJECTED,0,rc);}
+    else reload_watchdog();
     rh_module_get_status_snapshot(&U.status);return render();
 }
 /* The confirmation action is a stock ACTION_ROW, not the detail page's bitmap
@@ -955,10 +1042,13 @@ static void posted(const struct canopus_context_v1 *ctx,void *cookie) {
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
     if(U.busy && U.status.reload_generation==U.reload_generation && U.status.reload_result!=1) {
         int success=U.status.reload_result==0;
-        /* The completion warning used to be a toast. No non-blocking notice
-           surface exists after its removal, and a page error would hide the
-           list the user just refreshed, so the result is data-only here. */
-        (void)rh_manager_data_complete_apply(U.data,success);U.busy=0;
+        int completion;reload_timer_stop();
+        completion=rh_manager_data_complete_apply(U.data,success);U.busy=0;
+        /* Success with a failed protection record is its own kind: the refresh
+           did work, so the card must not claim a reload failure. */
+        if(!success) notice_set(RH_NOTICE_MODULE_FAILED,0,U.status.reload_result);
+        else if(completion) notice_set(RH_NOTICE_PROTECT_FAILED,0,completion);
+        else notice_set(RH_NOTICE_DONE,U.status.last_changed,0);
         if(U.opened && U.route!=INDEX) (void)load_route(U.route,1);
     }
     if(prior!=U.transfer.phase) {
@@ -983,6 +1073,7 @@ static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     rc=rh_manager_assets_install(ctx);if(rc) return rc;
     U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=0;U.suppressed=0;U.banner_hidden=0;
     U.delete_blocked=0;U.confirm_error[0]=0;
+    reload_timer_stop();notice_clear();
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
     rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
 }
@@ -994,7 +1085,8 @@ static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     (void)back();return 0;
 }
 static void on_close(const struct canopus_context_v1 *ctx,void *cookie) {
-    (void)ctx;(void)cookie;cancel_gesture();U.opened=0;U.ui=0;
+    (void)ctx;(void)cookie;cancel_gesture();reload_timer_stop();notice_timer_stop();
+    U.notice=RH_NOTICE_NONE;U.opened=0;U.ui=0;
 }
 /* One firmware page per route, so a route change is a stock push/pop. A
  * backend without ctx->ui->route ignores page_count and replaces the tree in
