@@ -22,7 +22,7 @@ include_dirs = ["include"]
 
 [targets]
 # Initial native UI targets; each requires its own emulator acceptance run.
-include = ["xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043", "xiaomi-band-11-4.100.179"]
+include = ["xiaomi-band-11-4.100.155", "xiaomi-band-10-pro-3.101.043", "xiaomi-band-11-4.100.179", "redmi-watch-6-3.100.043"]
 [capabilities]
 required = []
 [resources]

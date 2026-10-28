@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 
 P67_TARGET = 'xiaomi-band-10-pro-3.101.043'
+P65_TARGET = 'redmi-watch-6-3.100.043'
 
 
 def stage_resources(root, project, manifest, targets):
@@ -40,12 +41,33 @@ def target_build_environment(target, environ):
 def background_metadata(targets, diagnostics=False):
     surfaces = ['launcher', 'control_center', 'notifications']
     p67 = P67_TARGET in targets
-    if p67:
+    if p67 or P65_TARGET in targets:
         surfaces.append('widgets')
     return {
         'background_targets': surfaces,
-        'background_blur_mode': 'active_module_owned_snapshot_static_rgb565',
-        'background_blur_device_status': 'NOT_PROBED',
-        'background_device_status': 'NOT_PROBED',
+        'background_blur_mode': ('active_module_owned_snapshot_static_rgb565' if surfaces else 'UNSUPPORTED'),
+        'background_blur_device_status': 'NOT_PROBED' if surfaces else 'UNSUPPORTED',
+        'background_device_status': 'NOT_PROBED' if surfaces else 'UNSUPPORTED',
         **({'p67_blur_diagnostics': diagnostics} if p67 else {}),
+    }
+
+
+def feature_metadata(targets):
+    """Exact-target support; aggregate font support requires every target."""
+    features = {
+        target: {
+            'font_reload': True,
+            'native_backgrounds': True,
+            'calendar': True,
+            'device_status': 'NOT_PROBED',
+        }
+        for target in targets
+    }
+    font_reload = all(features[target]['font_reload'] for target in targets)
+    return {
+        'target_features': features,
+        'font_reload': font_reload,
+        'font_reload_device_status': ('UNSUPPORTED' if not font_reload else
+            'NOT_PROBED' if P65_TARGET in targets or any(target.endswith(('4.100.177', '4.100.179')) for target in targets)
+            else 'USER_REPORTED_PASS'),
     }

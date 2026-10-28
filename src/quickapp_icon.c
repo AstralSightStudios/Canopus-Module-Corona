@@ -1,9 +1,26 @@
 #include "resource_hook_quickapp.h"
+#include "resource_hook_target.h"
 
+#if !RH_HAS_QUICKAPP_ICONS
+int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
+    (void)package;
+    if (out) out[0] = 0;
+    return -2;
+}
+#else
 /* Independently recovered from the exact AP IDBs, not a relocation rule.
  * Slot 3 is the active package-name registry; slot 4 is a different registry.
  * See targets/<exact-target>/quickapp-icons.md for instruction fingerprints. */
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+#define QA_SERVICE_SLOT RH_P65_QA_SERVICE_SLOT
+#define QA_REGISTRY_SLOT RH_P65_QA_REGISTRY_SLOT
+#define QA_SERVICE RH_P65_QA_SERVICE
+#define QA_LOOKUP RH_P65_QA_LOOKUP
+#define QA_PACKAGE_OFFSET RH_P65_QA_PACKAGE_OFFSET
+#define QA_ICON_OFFSET RH_P65_QA_ICON_OFFSET
+#define QA_APP_ROOT RH_P65_QA_APP_ROOT
+#define QA_FLASH_END RH_P65_QA_FLASH_END
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043
 #define QA_SERVICE_SLOT 0x200eb658u
 #define QA_REGISTRY_SLOT 0x200eb650u
 #define QA_SERVICE 0x2cdbb054u
@@ -182,3 +199,4 @@ int rh_platform_quickapp_icon_path(const char *package, char out[RH_PATH]) {
     for (i = 0; i <= (uint32_t)length; ++i) out[i] = path[i];
     return 1;
 }
+#endif /* RH_HAS_QUICKAPP_ICONS */

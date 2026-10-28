@@ -13,4 +13,5 @@ for variant in production probe; do
         "$ROOT/tests/test_manager_ui.c" -o "$ROOT/build/test_manager_ui_$variant"
     "$ROOT/build/test_manager_ui_$variant"
     "$ROOT/build/test_manager_ui_$variant" --wide
+    "$ROOT/build/test_manager_ui_$variant" --p65
 done

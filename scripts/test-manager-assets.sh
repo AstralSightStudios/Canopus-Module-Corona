@@ -26,7 +26,7 @@ files, _, _ = generator['build_resources']()
 
 # The shipped .bin resources must be byte-identical to the source PNG pixels.
 for name, source in generator['ASSETS']:
-    width, height, rgba = generator['read_png'](root / 'manager/src/common' / source)
+    width, height, rgba = generator['read_png'](root / 'assets/manager' / source)
     image = (res_dir / f'{name}.bin').read_bytes()
     assert image == generator['to_lvgl'](width, height, rgba), name
     generator['verify_image'](image, width, height, rgba)

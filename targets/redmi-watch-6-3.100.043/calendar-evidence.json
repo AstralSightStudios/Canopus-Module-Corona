@@ -1,0 +1,403 @@
+{
+  "schema": 1,
+  "target": "redmi-watch-6-3.100.043",
+  "firmware_sha256": "a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858",
+  "device": "NOT_PROBED",
+  "status": "STATIC_RECOVERED",
+  "functions": [
+    {
+      "macro": "RH_P65_CN_CLOCK",
+      "entry": "0xc4c205c",
+      "callable": "0xc4c205d",
+      "prototype": "int(uint32_t clock_id, void *timespec64)",
+      "file_offset": "0x40205c",
+      "witness": {
+        "hex": "b0b584b00c4600af00293cd0122300f00700c340db0722d4002839d1384600f0",
+        "size": 32,
+        "sha256": "f068f451e0607f1bba28d3e23cf2f79e79dfb4a44173ad86b0eb40e816520054"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_LOCALTIME",
+      "entry": "0xc761a2c",
+      "callable": "0xc761a2d",
+      "prototype": "void *(uint32_t seconds_lo, uint32_t seconds_hi, void *tm)",
+      "file_offset": "0x6a1a2c",
+      "witness": {
+        "hex": "80b582b000afc7e9000138461146a7f5dbf90837bd4680bd80b4034b00af1878",
+        "size": 32,
+        "sha256": "4291099ba39a616f2161470ee8046c58da657cb164a1324bddc97fe217900228"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_LOCALIZED",
+      "entry": "0xc4f8458",
+      "callable": "0xc4f8459",
+      "prototype": "const char *(const char *key)",
+      "file_offset": "0x438458",
+      "witness": {
+        "hex": "90b50022052483b0014602af012310460094fff78dfe0437bd4690bd90b58c46",
+        "size": 32,
+        "sha256": "6ce6878bec253c07e38d98017c438abadf1ee9ac908ad63460725b6be5cd7f68"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_ROOT_CREATE",
+      "entry": "0xc8bef18",
+      "callable": "0xc8bef19",
+      "prototype": "void *(void *parent)",
+      "file_offset": "0x7fef18",
+      "witness": {
+        "hex": "5ff800f0797b38005ff800f039f437005ff800f0c14838005ff800f0d1723600",
+        "size": 32,
+        "sha256": "0f1f8ed40d71b28d185c3d8066136c900e8a3ebe30b07b440bf520c58b6a711a"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_SIZE",
+      "entry": "0x378738",
+      "callable": "0x378739",
+      "prototype": "void(void *object, int32_t width, int32_t height)",
+      "file_offset": "0x12750",
+      "witness": {
+        "hex": "f0b583b000af0d461646002301213a1d044604f06dff012816d020b900222946",
+        "size": 32,
+        "sha256": "0ef4e24aac45c8bd488c3cf0e4c715574b715949f96d92537a5ceec71e10e163"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_IMAGE_CREATE",
+      "entry": "0xc78a960",
+      "callable": "0xc78a961",
+      "prototype": "void *(void *parent)",
+      "file_offset": "0x6ca960",
+      "witness": {
+        "hex": "98b503460c4600af1946044834f100f92146044632f1d8fc204698bda042223c",
+        "size": 32,
+        "sha256": "8e54a4b545001a3b9eea014101f5d2416447c692f4a5f33a63a582b3d9e7a4bb"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_IMAGE_SOURCE",
+      "entry": "0xc78acf0",
+      "callable": "0xc78acf1",
+      "prototype": "void(void *image, const void *source)",
+      "file_offset": "0x6cacf0",
+      "witness": {
+        "hex": "2de9f0430e4691b004af044633f17cfb30468ff7bff90228054651d8304607f1",
+        "size": 32,
+        "sha256": "beb48fa25bca964711743396ec2c56f15d1a708d0351ddd78556880ca50d4310"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_IMAGE_INFO",
+      "entry": "0xc71d194",
+      "callable": "0xc71d195",
+      "prototype": "int(const void *source, void *header12)",
+      "file_offset": "0x65d194",
+      "witness": {
+        "hex": "b0b5044692b000af48220d463846002124f072fc2046bc60fcf76aff03462946",
+        "size": 32,
+        "sha256": "5d3450d365043e6e0c7f9ec052fa9f937a97bff9b23469af40ce4a2d4adb7a78"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_LABEL_CREATE",
+      "entry": "0xc78bcb4",
+      "callable": "0xc78bcb5",
+      "prototype": "void *(void *parent)",
+      "file_offset": "0x6cbcb4",
+      "witness": {
+        "hex": "98b5014600af044832f158ff0446002131f130fb204698bd4448223c80b54165",
+        "size": 32,
+        "sha256": "3f41671ecc0f8a5a3cb2297bf89785ca877827dcb54eedd2c58ae92e2141acfe"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_LABEL_TEXT",
+      "entry": "0xc78c878",
+      "callable": "0xc78c879",
+      "prototype": "void(void *label, const char *text)",
+      "file_offset": "0x6cc878",
+      "witness": {
+        "hex": "2de9f0410d4600af044631f1b9fd95b32846b5f70bf9636b461cab421fd04bb1",
+        "size": 32,
+        "sha256": "62a9cce16a94709a7a5088c3481e9bcd39a1e70f04641e11cf3bcc02ff82477c"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_COLOR",
+      "entry": "0x37f3c4",
+      "callable": "0x37f3c5",
+      "prototype": "void(void *object, uint32_t packed_bgr, uint32_t selector)",
+      "file_offset": "0x193dc",
+      "witness": {
+        "hex": "8c4680b54ff0000e84b0134600af4fea1c4287f80fe0a7f80cc0ba73fa685821",
+        "size": 32,
+        "sha256": "5cf3f13afcbf2797f03116e53f8b9e6a7343d3ae94d4c3553970382f11649b04"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_TEXT_ALIGN",
+      "entry": "0x37f450",
+      "callable": "0x37f451",
+      "prototype": "void(void *object, uint32_t align, uint32_t selector)",
+      "file_offset": "0x19468",
+      "witness": {
+        "hex": "8c4680b582b0134600af5e216246fef7d3ff0837bd4680bd8c4680b582b01346",
+        "size": 32,
+        "sha256": "68efd2bb39abfe9e838acbc811628a10eaf638de981a99fdddcf8c0beea4f8e4"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_FONT_STYLE",
+      "entry": "0x37f408",
+      "callable": "0x37f409",
+      "prototype": "void(void *object, const void *font, uint32_t selector)",
+      "file_offset": "0x19420",
+      "witness": {
+        "hex": "8c4680b582b0134600af5a216246fef7f7ff0837bd4680bd8c4680b582b01346",
+        "size": 32,
+        "sha256": "662ce2c4afe8d71e88c0fcdc0886a86693f35fc2a9840a2e46fb82c0bafa9043"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_FONT_RESOLVE",
+      "entry": "0xc8bcd40",
+      "callable": "0xc8bcd41",
+      "prototype": "void *(const void *style)",
+      "file_offset": "0x7fcd40",
+      "witness": {
+        "hex": "5ff800f085da121c5ff800f09dbd021c5ff800f0155d031c5ff800f06f943600",
+        "size": 32,
+        "sha256": "03a3294f3687326ff39465de29e7b1be8cad3e2b90e824ee78050ad6a11b3eae"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_FONT_CREATE",
+      "entry": "0xc795db8",
+      "callable": "0xc795db9",
+      "prototype": "void *(void *manager, const void *key8)",
+      "file_offset": "0x6d5db8",
+      "witness": {
+        "hex": "2de9f04784b004af06460d46a8f7fef940b3044605e021463046a8f707fa0446",
+        "size": 32,
+        "sha256": "05f4d96894b283980595344374b9e9c60cabca4c9da2e342cbf19583e0e5422c"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_FONT_RELEASE",
+      "entry": "0xc795fe4",
+      "callable": "0xc795fe5",
+      "prototype": "int(void *manager, void *font)",
+      "file_offset": "0x6d5fe4",
+      "witness": {
+        "hex": "2de9f04100f10c0584b0064604af28468846a8f7e5f860b18045044602d118e0",
+        "size": 32,
+        "sha256": "c77129412073afb0807acd1d935c1713c87ef9f42df0def542aeb3723e61f235"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_ALIGN",
+      "entry": "0x378964",
+      "callable": "0x378965",
+      "prototype": "void(void *object, uint32_t align, int32_t x, int32_t y)",
+      "file_offset": "0x1297c",
+      "witness": {
+        "hex": "f0b5044683b0164600af00221d4606f02dfa0023082120463a1d04f053fe0128",
+        "size": 32,
+        "sha256": "277560e06f33f2b20f506f3e04695425f90876740fde66e575ea1165e70752c3"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_DRAW_BUF_CREATE",
+      "entry": "0xc719550",
+      "callable": "0xc719551",
+      "prototype": "void *(uint32_t width, uint32_t height, uint32_t format, uint32_t stride)",
+      "file_offset": "0x659550",
+      "witness": {
+        "hex": "2de9f04f89b0814606af1820884615461e4628f0ddfa0446002836d0002e39d0",
+        "size": 32,
+        "sha256": "958d565a2f715397a373ecf9b446096a4fafa4ce1dcc6d9d241cf6d4465f75d4"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_DRAW_BUF_DESTROY",
+      "entry": "0xc719798",
+      "callable": "0xc719799",
+      "prototype": "void(void *buffer)",
+      "file_offset": "0x659798",
+      "witness": {
+        "hex": "f0b190b583b043880446db0602af0bd50c4bd3f8dc300bb140699847204628f0",
+        "size": 32,
+        "sha256": "ba234fa8aef4ee351ec2cebfea8e67979dc6847b92fe5b3e7403aef099dd959b"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_SNAPSHOT",
+      "entry": "0xc7417c0",
+      "callable": "0xc7417c1",
+      "prototype": "int(void *object, uint32_t format, void *buffer)",
+      "file_offset": "0x6817c0",
+      "witness": {
+        "hex": "2de9f04f2ded028b1729a7b002af21d8744b8846cb40db071cd5054691467cf1",
+        "size": 32,
+        "sha256": "aa08a2890c7c55b049fd6ae09c3f6975f94f836007dd38cf4e2b640e2653ac84"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_OBJECT_DELETE",
+      "entry": "0x37ff28",
+      "callable": "0x37ff29",
+      "prototype": "void(void *object)",
+      "file_offset": "0x19f40",
+      "witness": {
+        "hex": "90f83330d90600d570472de9f041044682b002aff9f7b2fb6668002e46d094f8",
+        "size": 32,
+        "sha256": "756f9ba7abddf9131f49c50d3148d3df9ca11cdf84b1df74fcde968cf5c5a51d"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_GPU_FINISH",
+      "entry": "0xc8bc080",
+      "callable": "0xc8bc081",
+      "prototype": "int(void)",
+      "file_offset": "0x7fc080",
+      "witness": {
+        "hex": "5ff800f0419e38005ff800f0811f061c5ff800f029a536005ff800f049943600",
+        "size": 32,
+        "sha256": "7572fc952da86acf373fa9419bdea9fc3094189a37825756fd4b834d0db8c2ac"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_NATIVE_WAIT",
+      "entry": "0xc72ef2c",
+      "callable": "0xc72ef2d",
+      "prototype": "void(void *vg_unit)",
+      "file_offset": "0x66ef2c",
+      "witness": {
+        "hex": "f0b585b004af04468df1a4f888b105460b2896bf0f4b104953f820100f4e0291",
+        "size": 32,
+        "sha256": "0bdc5ffb2c4a4a7e4d32d13defcf466b8ff19001fd5f1ccbfd48373d50bdb182"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_VG_DISPATCH",
+      "entry": "0xc7287f8",
+      "callable": "0xc7287f9",
+      "prototype": "int(void *draw_unit, void *layer)",
+      "file_offset": "0x6687f8",
+      "witness": {
+        "hex": "2de9f04190b00d46816900af21b100204037bd46bde8f081044602222846f0f7",
+        "size": 32,
+        "sha256": "b90bc09a388a9073c8d447611aa07656562afcd94b8dc20c7b895cdc11a7e222"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_SW_DISPATCH",
+      "entry": "0xc7222bc",
+      "callable": "0xc7222bd",
+      "prototype": "int(void *draw_unit, void *layer)",
+      "file_offset": "0x6622bc",
+      "witness": {
+        "hex": "f8b50d46816900af09b10020f8bd044601222846f6f78efb0646a0b12846f6f7",
+        "size": 32,
+        "sha256": "e3b9075962303fcc6a5d4c866a708ef34727319d42e474d25fa03e3aa958a40a"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_BUF_INVALIDATE",
+      "entry": "0xc7191c4",
+      "callable": "0xc7191c5",
+      "prototype": "void(void *pixels, uint32_t size, uint32_t format, uint32_t area)",
+      "file_offset": "0x6591c4",
+      "witness": {
+        "hex": "98b5034c00afd4f8e44004b1a04798bd3000453c2de9f04f87b0814602af0029",
+        "size": 32,
+        "sha256": "6d6b7ef905ab5224759896f79a2a33f2a945c8ccd361f5d1e066f7d97d463ed3"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_CACHE_INVALIDATE",
+      "entry": "0xc72f020",
+      "callable": "0xc72f021",
+      "prototype": "void(void *pixels, uint32_t size, uint32_t format, uint32_t area)",
+      "file_offset": "0x66f020",
+      "witness": {
+        "hex": "80b400afbd465df8047b704780b400afbd465df8047b704780b500afeaf7acf8",
+        "size": 32,
+        "sha256": "eecf5acf48a5baf0724a3ca3fe41f1903a68a94a7292062fcfd2c6641b916eef"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_CACHE_CLEAN",
+      "entry": "0xc72f02c",
+      "callable": "0xc72f02d",
+      "prototype": "void(void *draw_buf, const void *area)",
+      "file_offset": "0x66f02c",
+      "witness": {
+        "hex": "80b400afbd465df8047b704780b500afeaf7acf8024a034bc0e9032380bd00bf",
+        "size": 32,
+        "sha256": "c51126c208d6d19f658616494aa2c26ce0dbb6a43598d7ca3160a4de6118c252"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_PREMULTIPLY",
+      "entry": "0xc719b70",
+      "callable": "0xc719b71",
+      "prototype": "int(void *draw_buf)",
+      "file_offset": "0x659b70",
+      "witness": {
+        "hex": "2de9f04f83b0044602af88b34188ca070b462dd411f002054ad04578ea1fd2b2",
+        "size": 32,
+        "sha256": "89237940bc458698d557c9f6357aa63a6e9d5ebb10200c28397a6955f687bd9b"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_LAUNCHER_UPDATE",
+      "entry": "0xc7ec744",
+      "callable": "0xc7ec745",
+      "prototype": "int(uint32_t app_id)",
+      "file_offset": "0x72c744",
+      "witness": {
+        "hex": "2de9f04383b0054602af454851f738fd002871d00446424e06e02146304651f7",
+        "size": 32,
+        "sha256": "3c50e089c08a593eceabfbbfdb4e87240557afdb7645f6e06075f726032d5d72"
+      }
+    },
+    {
+      "macro": "RH_P65_CN_GENERATE",
+      "entry": "0xc7efc8c",
+      "callable": "0xc7efc8d",
+      "prototype": "int(void)",
+      "file_offset": "0x72fc8c",
+      "witness": {
+        "hex": "2de9f0419ab05e4b5e4a062000af5e4914f5dafe07f108010020d2f4d9f9d7e9",
+        "size": 32,
+        "sha256": "e82134b59817e50aac67e5391f246a3c93a65240c3a4cf162a359985e4f3963e"
+      }
+    }
+  ],
+  "globals": {
+    "EDGE": "0x60",
+    "FONT_DAY": "0x3c4798a0",
+    "FONT_WEEK": "0x3c479810",
+    "UIKIT_SLOT": "0x3c450210",
+    "DRAW_UNITS": "0x3c450134",
+    "HANDLER_TABLE": "0x3c450108"
+  },
+  "contracts": [
+    "P65 stock calendar generator0xc7efc8c renders96x96 launcher_icon.bin background; localtime resulttm mday+12/month+16/year+20/Sundayweekday+24. Day style0x3c4798a0=>Medium46, weekdaystyle0x3c479810=>Medium20.",
+    "Stock delayed0xc7efe50 saves snapshot to /data/quickapp/app/perpetual_calendar/calendar_icon.bin then launcher_update0xc7ec744(69). Module writes independent alternating filebanks; never overwrites stock and uses no appdescriptorRAM hook.",
+    "P65 image source+52,width+64,height+68,type+92. ARGB8888 buffer header12,data_size+12,pixels+16,originalallocation+20. Mutablebit2,allocatedbit16,premultipliedbit1. Native premultiply0xc719b70 performsRGB*alpha>>8 and setsbit1.",
+    "Image snapshot_to_buf0xc7417c0 with caller-owned buffer protects lifetime across failed GPUfinish; native allocating snapshot0xc7419b4 frees on failed draw before caller fence so is not used.",
+    "Healthy serializedUI only: successful GPUfinish then inspect all drawunitsactive+24/dispatcher+12; exactnativewait0xc72ef2c drains CPUglyph/image/gradient references before deleting tree,freeing buffer,releasing managed wrappers. FailedGPUfinish retains exactlyone bounded rendergeneration until retry/reset.",
+    "Image contexts retain BIN naturaldimensions and configsize applies onlytext. Explicittextsizes use owned managed40-bytewrappers(manager,key8), released after labeldeletion and pendingCPUglyphdrain. No backendfontcache mutation.",
+    "Coordinator renders onlycustom calendar. Restore defaults clearsbankredirection before targetedstocklauncherrefresh; no native stockregeneration or writingoriginalfile."
+  ],
+  "cache_contract": "Installed drawbuf handler table0x3c450108+12=>0xc72f021 invalidate,+16=>0xc72f02d clean. Both exactP65 platformhandlers are no-op bodies; knownidentities required before drawing. Cleandescriptor before snapshot,invalidatepixelrange afterGPUfinish before nativepremultiply/filewrite. Independently decompiled no-op bodies, aligned with blur-agent recovery.",
+  "stock_file_preflight": "Native launcher onlyselects generatedlogicalkey if originalstockproducerfileexists; customrender read-onlyopens it beforeallocating/drawing,missingfile fails and preserves priorpublication. Module nevercreates/overwritesstock to satisfy access.",
+  "validation": [
+    "build/p65-tests/bin/python tests/test_p65_calendar_native.py:9testsPASS; originalnativepremultiplyexecuted, otherLVGL/GPU/OSleavesmodeled. NoGPUorrealdeviceclaim."
+  ]
+}

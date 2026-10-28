@@ -5,7 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus-Private"}
 CC=${CC:-cc}
 mkdir -p "$ROOT/build"
-for target in 155 179 1043; do
+for target in 155 179 1043 P65; do
     DEFINE=-DRH_TARGET_$target=1
     "$CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         "$DEFINE" -DRH_NATIVE_MANAGER=1 -DCANOPUS_HOST=1 \

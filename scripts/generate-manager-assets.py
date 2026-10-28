@@ -125,7 +125,7 @@ def build_resources():
     """Return {filename: image_bytes} and the .inc metadata text."""
     records, files, raw_total = [], {}, 0
     for name, source in ASSETS:
-        path = ROOT / 'manager/src/common' / source
+        path = ROOT / 'assets/manager' / source
         width, height, rgba = read_png(path)
         image = to_lvgl(width, height, rgba)
         verify_image(image, width, height, rgba)

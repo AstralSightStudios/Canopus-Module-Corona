@@ -4,12 +4,15 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
+import sys
 import subprocess
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = os.environ.get('RESOURCE_HOOK_TARGET', 'xiaomi-band-11-4.100.139')
@@ -51,6 +54,27 @@ class FirmwareSelection(unittest.TestCase):
     def test_new_targets_have_no_unrelated_firmware_suites(self):
         self.assertEqual(self.suites('xiaomi-band-11-4.100.177'), {})
         self.assertEqual(set(self.suites('xiaomi-band-11-4.100.179')), {'test_calendar_native'})
+        self.assertEqual(set(self.suites('redmi-watch-6-3.100.043')), {'firmware_p65', 'firmware_p65_features', 'firmware_p65_font', 'test_p65_calendar_native', 'test_p65_blur'})
+
+    def test_p65_payload_release_metadata_without_compilation(self):
+        script = (ROOT / 'scripts/build-install-payload.sh').read_text()
+        block = re.search(r'python3 - "\$STAGE" "\$TARGET_ID" "\$FIRMWARE" "\$ROOT/Canopus.toml" <<\'PY\'\n(.*?)\nPY',
+                          script, re.S)
+        self.assertIsNotNone(block)
+        target = 'redmi-watch-6-3.100.043'
+        with tempfile.TemporaryDirectory(prefix='p65-release-metadata-') as temporary:
+            command = ['release-metadata', temporary, target, verifier.TARGETS[target],
+                       str(ROOT / 'Canopus.toml')]
+            with mock.patch.object(sys, 'argv', command), mock.patch.dict(os.environ, {}, clear=True):
+                exec(compile(block[1], 'payload-release-metadata', 'exec'), {})
+            metadata = json.loads((Path(temporary) / 'release.json').read_text())
+        self.assertEqual(metadata['target'], target)
+        self.assertEqual(metadata['firmware_sha256'], verifier.TARGETS[target])
+        self.assertTrue(metadata['font_reload'])
+        self.assertEqual(metadata['font_reload_device_status'], 'NOT_PROBED')
+        self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
+        self.assertEqual(metadata['target_features'][target]['device_status'], 'NOT_PROBED')
+        self.assertTrue(metadata['target_features'][target]['calendar'])
 
     def test_unknown_native_target_refused(self):
         with self.assertRaisesRegex(ValueError, 'unsupported target'):
@@ -128,11 +152,19 @@ class Delivery(unittest.TestCase):
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)
         self.assertEqual(metadata['version'], manifest['module']['version'])
         self.assertEqual(metadata['physical_device'], 'NOT_PROBED')
+        p65 = TARGET == 'redmi-watch-6-3.100.043'
         self.assertEqual(metadata['font_reload_device_status'],
-                         'NOT_PROBED' if TARGET.endswith(('4.100.177', '4.100.179')) else 'USER_REPORTED_PASS')
+                         'NOT_PROBED' if p65 or TARGET.endswith(('4.100.177', '4.100.179')) else 'USER_REPORTED_PASS')
         self.assertEqual(metadata['receipt_format_version'], 2)
         self.assertEqual(metadata['format'], 'elf-cmi2')
         self.assertTrue(metadata['font_reload'])
+        if p65:
+            self.assertEqual(metadata['target_features'][TARGET], {
+                'font_reload': True, 'native_backgrounds': True,
+                'calendar': True, 'device_status': 'NOT_PROBED',
+            })
+            self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
+            self.assertEqual(metadata['background_device_status'], 'NOT_PROBED')
         self.assertEqual(metadata['module_build_id'], 'resource-hook-0.3.0')
         self.assertEqual(metadata['gpu_recovery'], 'UNSUPPORTED')
         self.assertEqual(metadata['framework_restart_safety'], 'UNSUPPORTED')
@@ -150,7 +182,7 @@ class Delivery(unittest.TestCase):
         source = ROOT / 'targets' / TARGET
         expected = [item for item in source.iterdir()
                     if item.is_file() and item.suffix in ('.json', '.md')]
-        if not TARGET.endswith(('4.100.177', '4.100.179')):
+        if TARGET != 'redmi-watch-6-3.100.043' and not TARGET.endswith(('4.100.177', '4.100.179')):
             self.assertTrue(any(item.name.startswith('font-reload') for item in expected))
         for item in expected:
             self.assertEqual((PAYLOAD / 'evidence' / item.name).read_bytes(), item.read_bytes())

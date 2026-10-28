@@ -1,0 +1,793 @@
+{
+  "schema": 1,
+  "target": "redmi-watch-6-3.100.043",
+  "status": "STATIC_RECOVERED",
+  "device": "NOT_PROBED",
+  "production_approval": false,
+  "provenance": {
+    "ota_file": "miwear.watch.p65_v3.100.043_full_662aa7db.bin",
+    "ota_sha256": "662aa7db5dd7ec98c4b7da0f7bec3066478ff45563c57b4cf3f16a2558cbc987",
+    "extraction": "ZIP member vela_ap.bin; no byte patching",
+    "ap_size": 11793540,
+    "ap_sha256": "a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858",
+    "loader": "../../mifw/best1503_vela.py",
+    "method": "IDA static decompilation/disassembly of exact AP; explicitly reconstructed startup copy ranges. Framework CANDIDATE cache addresses were rejected after inspecting actual bodies."
+  },
+  "runtime_mapping": [
+    {
+      "kind": "XIP",
+      "file_offset": "0x0",
+      "vma": "0x0c0c0000",
+      "size": "0xb3f484"
+    },
+    {
+      "kind": "SRAM execute alias",
+      "file_offset": "0xde78",
+      "vma": "0x00373e60",
+      "cached_vma": "0x20173e60",
+      "size": "0x21a60",
+      "copy_evidence": "0x0c0c028c: source 0x2c0cde78..0x2c0ef8d8 copied to0x20173e60; executable alias also pinned by XIP thunk0x0c8be138 ->0x0037d539."
+    },
+    {
+      "kind": "SRAM data",
+      "file_offset": "0x2f8d8",
+      "vma": "0x201958c0",
+      "size": "0x4e4"
+    },
+    {
+      "kind": "PSRAM cached and execute aliases",
+      "file_offset": "0x2fdc4",
+      "vma": "0x3c000000",
+      "execute_vma": "0x1c000000",
+      "size": "0x3d2080",
+      "copy_evidence": "0x0c0c0314: source0x2c0efdc4..0x2c4c1e44 copied to0x3c000000; XIP thunk0x0c8bef00 publishes native open0x1c1580e5."
+    },
+    {
+      "kind": "PSRAM BSS",
+      "vma": "0x3c3d2080",
+      "end": "0x3c4df960"
+    }
+  ],
+  "functions": [
+    {
+      "name": "lvgl_posix_open",
+      "entry": "0x0c7357d4",
+      "callable": "0x0c7357d5",
+      "file_offset": "0x6757d4",
+      "prototype": "void *open_cb(void *driver, const char *path, unsigned mode)",
+      "witness": {
+        "size": 32,
+        "hex": "f0b5012ac5b00b4604af1bd0022a17d0032a14bf002407244ff48071134a3846",
+        "sha256": "ed11cc01bef28ef5c68f84cf46976e46af806905806b563fb6b96cdac1453412",
+        "instructions": [
+          "PUSH            {R4-R7,LR}; Mode 1->6, 2->1, 3->7; snprintf buffer[256] with \"/%s\" path (format string at 0x3c1bf31c); prepends one slash to the supplied path; open(buffer, flags, 0666); success returns fd+1; failure logs errno and returns NULL. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "CMP             R2, #1",
+          "SUB             SP, SP, #0x114",
+          "MOV             R3, R1",
+          "ADD             R7, SP, #0x10",
+          "BEQ             loc_C735818",
+          "CMP             R2, #2",
+          "BEQ             loc_C735814",
+          "CMP             R2, #3",
+          "ITE NE",
+          "MOVNE           R4, #0",
+          "MOVEQ           R4, #7",
+          "MOV.W           R1, #0x100",
+          "LDR             R2, =0x3C1BF31C",
+          "MOV             R0, R7"
+        ]
+      },
+      "meaning": "Mode 1->6, 2->1, 3->7; snprintf buffer[256] with \"/%s\" path (format string at 0x3c1bf31c); prepends one slash to the supplied path; open(buffer, flags, 0666); success returns fd+1; failure logs errno and returns NULL."
+    },
+    {
+      "name": "lv_fs_posix_init",
+      "entry": "0x0c7358f4",
+      "callable": "0x0c7358f5",
+      "file_offset": "0x6758f4",
+      "prototype": "void init(void)",
+      "witness": {
+        "size": 32,
+        "hex": "f8b5104800af08f025fb2f2100250d480d4e01700d49456081610d4d0d490e4c",
+        "sha256": "f4aef446549a48d90d41eb5d6a81b88a97ed917e2eb0aacf685377c35a2f4a31",
+        "instructions": [
+          "PUSH            {R3-R7,LR}; Clears 52-byte driver at 0x3c4501d0; sets letter /, cache_size 0, open_cb +12 to 0xc7357d5; registers driver. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "LDR             R0, =byte_3C4501D0",
+          "ADD             R7, SP, #0",
+          "BL              sub_C73DF48",
+          "MOVS            R1, #0x2F ; '/'",
+          "MOVS            R5, #0",
+          "LDR             R0, =byte_3C4501D0",
+          "LDR             R6, =(p65_lvgl_posix_open+1)",
+          "STRB            R1, [R0]",
+          "LDR             R1, =(sub_C7356E8+1)",
+          "STR             R5, [R0,#(byte_3C4501D0+4 - 0x3C4501D0)]",
+          "STR             R1, [R0,#(byte_3C4501D0+0x18 - 0x3C4501D0)]",
+          "LDR             R5, =(sub_C73589C+1)",
+          "LDR             R1, =(sub_C735690+1)",
+          "LDR             R4, =(sub_C735788+1)"
+        ]
+      },
+      "meaning": "Clears 52-byte driver at 0x3c4501d0; sets letter /, cache_size 0, open_cb +12 to 0xc7357d5; registers driver."
+    },
+    {
+      "name": "lv_image_decoder_init",
+      "entry": "0x0c71d0f8",
+      "callable": "0x0c71d0f9",
+      "file_offset": "0x65d0f8",
+      "prototype": "void init(void)",
+      "witness": {
+        "size": 32,
+        "hex": "f0b5174d89b0174c284602af182120f04dff94e8070087e807003b1d93e80300",
+        "sha256": "f322dfeb33411b43393f11aebc9097c16c04b904ae094f8fd495774440d03cae",
+        "instructions": [
+          "PUSH            {R4-R7,LR}; Initializes decoder list then stores image cache from class 0x3c20c7f0 at 0x3c45012c and header cache class 0x3c20c7c8 at 0x3c450130; both payload_size=24. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "LDR             R5, =unk_3C450120",
+          "SUB             SP, SP, #0x24",
+          "LDR             R4, =0x3C1DF7C8",
+          "MOV             R0, R5",
+          "ADD             R7, SP, #8",
+          "MOVS            R1, #0x18",
+          "BL              sub_C73DFA4",
+          "LDM.W           R4, {R0-R2}",
+          "STM.W           R7, {R0-R2}",
+          "ADDS            R3, R7, #0x1C+var_18",
+          "LDM.W           R3, {R0,R1}"
+        ]
+      },
+      "meaning": "Initializes decoder list then stores image cache from class 0x3c20c7f0 at 0x3c45012c and header cache class 0x3c20c7c8 at 0x3c450130; both payload_size=24."
+    },
+    {
+      "name": "lv_cache_drop",
+      "entry": "0x0c73baa8",
+      "callable": "0x0c73baa9",
+      "file_offset": "0x67baa8",
+      "prototype": "void drop(void *cache, const void *key, void *user_data)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f0410446164682b000f11c08404600af796005f002fe2368324620467968",
+        "sha256": "b4f9e740b45e783b868d2721cb2da1fbb292cbbea9cc962cb572cf7efbeba06a",
+        "instructions": [
+          "PUSH.W          {R4-R8,LR}; Locks cache+28; class+12 lookup. Zero refs: class+20 unlinks, cache+24 destroy(payload,user_data), frees entry. Nonzero refs: marks entry+12 invalid, class+20 unlinks without payload free. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R4, R0",
+          "MOV             R6, R2",
+          "SUB             SP, SP, #8",
+          "ADD.W           R8, R0, #0x1C",
+          "MOV             R0, R8",
+          "ADD             R7, SP, #0",
+          "STR             R1, [R7,#8+var_4]",
+          "BL              sub_C7416C4",
+          "LDR             R3, [R4]",
+          "MOV             R2, R6",
+          "MOV             R0, R4",
+          "LDR             R1, [R7,#8+var_4]"
+        ]
+      },
+      "meaning": "Locks cache+28; class+12 lookup. Zero refs: class+20 unlinks, cache+24 destroy(payload,user_data), frees entry. Nonzero refs: marks entry+12 invalid, class+20 unlinks without payload free."
+    },
+    {
+      "name": "lv_cache_release",
+      "entry": "0x0c73b99c",
+      "callable": "0x0c73b99d",
+      "file_offset": "0x67b99c",
+      "prototype": "void release(void *cache, void *entry, void *user_data)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f0410c46154600f11c0600af8046304605f089fe2046294600f01ff92046",
+        "sha256": "dc8bcb430aff960348e49761bc00242e88e6e9226ebbd8da7ec7038b4e07decb",
+        "instructions": [
+          "PUSH.W          {R4-R8,LR}; Locks cache+28; decrements entry+4; if refs zero and invalid byte+12, destroys data(entry-entry.offset+8) and frees. Leaves referenced invalid entries alive. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R4, R1",
+          "MOV             R5, R2",
+          "ADD.W           R6, R0, #0x1C",
+          "ADD             R7, SP, #0",
+          "MOV             R8, R0",
+          "MOV             R0, R6",
+          "BL              sub_C7416C4",
+          "MOV             R0, R4",
+          "MOV             R1, R5",
+          "BL              sub_C73BBF8",
+          "MOV             R0, R4"
+        ]
+      },
+      "meaning": "Locks cache+28; decrements entry+4; if refs zero and invalid byte+12, destroys data(entry-entry.offset+8) and frees. Leaves referenced invalid entries alive."
+    },
+    {
+      "name": "lv_cache_lru_unlink",
+      "entry": "0x0c73b594",
+      "callable": "0x0c73b595",
+      "file_offset": "0x67b594",
+      "prototype": "void unlink(void *cache, void *entry, void *user_data)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f041044600af10b3084601b300f015fb054604f120062946304604f090fa",
+        "sha256": "6169dd29621930f0eec348a4685a9f40d29b62bb68c068573242e59a5e9383f7",
+        "instructions": [
+          "PUSH.W          {R4-R8,LR}; Cache RB tree +32, LL +44. Finds RB node by payload, loads list-node pointer from RB.data + cache.node_size(+40)-4, erases RB and LL, frees list node, decrements cache+12. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R4, R0",
+          "ADD             R7, SP, #0",
+          "CBZ             R0, locret_C73B5E4",
+          "MOV             R0, R1",
+          "CBZ             R1, locret_C73B5E4",
+          "BL              sub_C73BBD0",
+          "MOV             R5, R0",
+          "ADD.W           R6, R4, #0x20 ; ' '",
+          "MOV             R1, R5",
+          "MOV             R0, R6",
+          "BL              sub_C73FAD4"
+        ]
+      },
+      "meaning": "Cache RB tree +32, LL +44. Finds RB node by payload, loads list-node pointer from RB.data + cache.node_size(+40)-4, erases RB and LL, frees list node, decrements cache+12."
+    },
+    {
+      "name": "lv_cache_lru_init_image",
+      "entry": "0x0c73b66c",
+      "callable": "0x0c73b66d",
+      "file_offset": "0x67b66c",
+      "prototype": "int init(void *cache)",
+      "witness": {
+        "size": 32,
+        "hex": "f0b583b0456802af15b3836804467bb106696eb183695bb1284600f0f1fa0246",
+        "sha256": "67bbc784e518fa28cd53834d21bb21190f0cf67ab482859a2a1b1a8d86d86cd4",
+        "instructions": [
+          "PUSH            {R4-R7,LR}; Initializes RB tree +32, then LL at cache+44 with node_size 4 (list head cache+48). Static recovered for exact P65 AP; device NOT_PROBED.",
+          "SUB             SP, SP, #0xC",
+          "LDR             R5, [R0,#4]",
+          "ADD             R7, SP, #8",
+          "CBZ             R5, loc_C73B6BC",
+          "LDR             R3, [R0,#8]",
+          "MOV             R4, R0",
+          "CBZ             R3, loc_C73B69C",
+          "LDR             R6, [R0,#0x10]",
+          "CBZ             R6, loc_C73B69C",
+          "LDR             R3, [R0,#0x18]",
+          "CBZ             R3, loc_C73B69C",
+          "MOV             R0, R5",
+          "BL              sub_C73BC6C",
+          "MOV             R2, R0"
+        ]
+      },
+      "meaning": "Initializes RB tree +32, then LL at cache+44 with node_size 4 (list head cache+48)."
+    },
+    {
+      "name": "lv_image_set_src",
+      "entry": "0x0c78acf0",
+      "callable": "0x0c78acf1",
+      "file_offset": "0x6cacf0",
+      "prototype": "void set_src(void *image, const void *source)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f0430e4691b004af044633f17cfb30468ff7bff90228054651d8304607f1",
+        "sha256": "beb48fa25bca964711743396ec2c56f15d1a708d0351ddd78556880ca50d4310",
+        "instructions": [
+          "PUSH.W          {R4-R9,LR}; Classifies source; source pointer +52, source_type lower 2 bits of byte +92, width/height +64/+68. File source is type1; same pointer accepted after get_info. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R6, R1",
+          "SUB             SP, SP, #0x44",
+          "ADD             R7, SP, #0x10",
+          "MOV             R4, R0",
+          "BL              sub_C8BE3F8",
+          "MOV             R0, R6",
+          "BL              sub_C71A084",
+          "CMP             R0, #2",
+          "MOV             R5, R0",
+          "BHI             loc_C78ADB0",
+          "MOV             R0, R6",
+          "ADD.W           R1, R7, #0x34+var_28"
+        ]
+      },
+      "meaning": "Classifies source; source pointer +52, source_type lower 2 bits of byte +92, width/height +64/+68. File source is type1; same pointer accepted after get_info."
+    },
+    {
+      "name": "lv_image_decoder_get_info",
+      "entry": "0x0c71d194",
+      "callable": "0x0c71d195",
+      "file_offset": "0x65d194",
+      "prototype": "int get_info(const void *source, void *header)",
+      "witness": {
+        "size": 32,
+        "hex": "b0b5044692b000af48220d463846002124f072fc2046bc60fcf76aff03462946",
+        "sha256": "5d3450d365043e6e0c7f9ec052fa9f937a97bff9b23469af40ce4a2d4adb7a78",
+        "instructions": [
+          "PUSH            {R4,R5,R7,LR}; Zeroes 72-byte decode context, sets source+8 and classified type+12, returns decoder_get_info(ctx,header)!=0; header is 12 bytes. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R4, R0",
+          "SUB             SP, SP, #0x48",
+          "ADD             R7, SP, #0",
+          "MOVS            R2, #0x48 ; 'H'",
+          "MOV             R5, R1",
+          "MOV             R0, R7",
+          "MOVS            R1, #0",
+          "BL              sub_C741A8C",
+          "MOV             R0, R4",
+          "STR             R4, [R7,#0x48+var_40]",
+          "BL              sub_C71A084",
+          "MOV             R3, R0",
+          "MOV             R1, R5"
+        ]
+      },
+      "meaning": "Zeroes 72-byte decode context, sets source+8 and classified type+12, returns decoder_get_info(ctx,header)!=0; header is 12 bytes."
+    },
+    {
+      "name": "lv_image_decoder_get_info_inner",
+      "entry": "0x0c71cf14",
+      "callable": "0x0c71cf15",
+      "file_offset": "0x65cf14",
+      "prototype": "void *get_info(void *ctx, void *header)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f04f0e4605468bb00c220021304602af24f0b1fd95f80c90d5f808a0b9f1",
+        "sha256": "49b144380cbb8cf9397aab064f9486dc87cf3a2e7927368ced8a83aab3418214",
+        "instructions": [
+          "PUSH.W          {R4-R11,LR}; For file source: searches header cache, releases ref after copying header; miss opens file with mode2, invokes decoder callbacks, inserts header cache entry and returns decoder only on successful insertion. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R6, R1",
+          "MOV             R5, R0",
+          "SUB             SP, SP, #0x2C",
+          "MOVS            R2, #0xC",
+          "MOVS            R1, #0",
+          "MOV             R0, R6",
+          "ADD             R7, SP, #8",
+          "BL              sub_C741A8C",
+          "LDRB.W          R9, [R5,#0xC]",
+          "LDR.W           R10, [R5,#8]",
+          "CMP.W           R9, #1"
+        ]
+      },
+      "meaning": "For file source: searches header cache, releases ref after copying header; miss opens file with mode2, invokes decoder callbacks, inserts header cache entry and returns decoder only on successful insertion."
+    },
+    {
+      "name": "lv_obj_tree_walk",
+      "entry": "0x00380178",
+      "callable": "0x00380179",
+      "file_offset": "0x1a190",
+      "prototype": "void walk(void *root, int (*cb)(void *,void *), void *cookie)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f0410d46164600af80b311468046a8470138c0b2012815d9d8f8083093b1",
+        "sha256": "505808185bd0868741d7bd0f3cc2f4596a9dd45118f1e7ee668d6bd1c3b8604e",
+        "instructions": [
+          "PUSH.W          {R4-R8,LR}; NULL root iterates display list; each display has screens+684/count+712. Object class+0,parent+4,spec+8; spec child_count+44. Callback return1 skips children,2 stops one subtree. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R5, R1",
+          "MOV             R6, R2",
+          "ADD             R7, SP, #0",
+          "CBZ             R0, loc_3801E6",
+          "MOV             R1, R2",
+          "MOV             R8, R0",
+          "BLX             R5",
+          "SUBS            R0, #1",
+          "UXTB            R0, R0",
+          "CMP             R0, #1",
+          "BLS             locret_3801BE",
+          "LDR.W           R3, [R8,#8]",
+          "CBZ             R3, locret_3801BE"
+        ]
+      },
+      "meaning": "NULL root iterates display list; each display has screens+684/count+712. Object class+0,parent+4,spec+8; spec child_count+44. Callback return1 skips children,2 stops one subtree."
+    },
+    {
+      "name": "lv_obj_get_style_prop",
+      "entry": "0x0037d538",
+      "callable": "0x0037d539",
+      "file_offset": "0x17550",
+      "prototype": "unsigned get_style(void *obj, unsigned part, unsigned prop)",
+      "witness": {
+        "size": 32,
+        "hex": "b0b584b00025048e00af21433b1d14467d60fff791fd012847d0392c0cd8212c",
+        "sha256": "d292fa08afa186c558c462db54d25a37c6d8c6f5dee442e43f7dc568cfc405ca",
+        "instructions": [
+          "PUSH            {R4,R5,R7,LR}; Includes obj state at +48; resolves requested prop through 0x37d070. Property40 is image background and falls back to0. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "SUB             SP, SP, #0x10",
+          "MOVS            R5, #0",
+          "LDRH            R4, [R0,#0x30]",
+          "ADD             R7, SP, #0",
+          "ORRS            R1, R4",
+          "ADDS            R3, R7, #0x10+var_C",
+          "MOV             R4, R2",
+          "STR             R5, [R7,#0x10+var_C]",
+          "BL              sub_37D070",
+          "CMP             R0, #1",
+          "BEQ             loc_37D5E2",
+          "CMP             R4, #0x39 ; '9'",
+          "BHI             loc_37D570",
+          "CMP             R4, #0x21 ; '!'"
+        ]
+      },
+      "meaning": "Includes obj state at +48; resolves requested prop through 0x37d070. Property40 is image background and falls back to0."
+    },
+    {
+      "name": "lv_obj_refresh_style",
+      "entry": "0x0037dd54",
+      "callable": "0x0037dd55",
+      "file_offset": "0x17d6c",
+      "prototype": "void refresh_style(void *obj, unsigned selector, unsigned prop)",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f04f154685b000af0c460646fbf79ffc284617f082fc8046284617f07efc",
+        "sha256": "edada1cd50b74a997966d854f0caf84754bdd64e970b38c6ebacb2432e4e03f5",
+        "instructions": [
+          "PUSH.W          {R4-R11,LR}; Explicit style refresh with property flags, invalidation and child propagation; identical requested prop and selector contract, no setter ownership change. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "MOV             R5, R2",
+          "SUB             SP, SP, #0x14",
+          "ADD             R7, SP, #0",
+          "MOV             R4, R1",
+          "MOV             R6, R0",
+          "BL              sub_3796A4",
+          "MOV             R0, R5",
+          "BL              sub_395670",
+          "MOV             R8, R0",
+          "MOV             R0, R5",
+          "BL              sub_395670"
+        ]
+      },
+      "meaning": "Explicit style refresh with property flags, invalidation and child propagation; identical requested prop and selector contract, no setter ownership change."
+    },
+    {
+      "name": "lv_display_get_horizontal_resolution",
+      "entry": "0x00374fd8",
+      "callable": "0x00374fd9",
+      "file_offset": "0xeff0",
+      "prototype": "int width(void *display)",
+      "witness": {
+        "size": 32,
+        "hex": "80b400af48b190f8ec329b074cbf40680068bd465df8047b7047044b58690028",
+        "sha256": "3517535b9311294f2f55b3cb5e614e38d13f26c7ec526c621060ca5d0fead0db",
+        "instructions": [
+          "PUSH            {R7}; NULL uses slot0x3c450044; byte(display+748)&2 swaps +0/+4 axes. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "ADD             R7, SP, #0",
+          "CBZ             R0, loc_374FF2",
+          "LDRB.W          R3, [R0,#0x2EC]",
+          "LSLS            R3, R3, #0x1E",
+          "ITE MI",
+          "LDRMI           R0, [R0,#4]",
+          "LDRPL           R0, [R0]",
+          "MOV             SP, R7",
+          "POP.W           {R7}",
+          "BX              LR",
+          "LDR             R3, =byte_3C450030",
+          "LDR             R0, [R3,#(dword_3C450044 - 0x3C450030)]",
+          "CMP             R0, #0"
+        ]
+      },
+      "meaning": "NULL uses slot0x3c450044; byte(display+748)&2 swaps +0/+4 axes."
+    },
+    {
+      "name": "lv_display_get_vertical_resolution",
+      "entry": "0x00375008",
+      "callable": "0x00375009",
+      "file_offset": "0xf020",
+      "prototype": "int height(void *display)",
+      "witness": {
+        "size": 32,
+        "hex": "80b400af48b190f8ec329b074cbf00684068bd465df8047b7047044b58690028",
+        "sha256": "b050f1e4b56a02fe18257248db295cc825e0c367fdc48feeb7eb47922c841eea",
+        "instructions": [
+          "PUSH            {R7}; NULL uses slot0x3c450044; byte(display+748)&2 swaps +4/+0 axes. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "ADD             R7, SP, #0",
+          "CBZ             R0, loc_375022",
+          "LDRB.W          R3, [R0,#0x2EC]",
+          "LSLS            R3, R3, #0x1E",
+          "ITE MI",
+          "LDRMI           R0, [R0]",
+          "LDRPL           R0, [R0,#4]",
+          "MOV             SP, R7",
+          "POP.W           {R7}",
+          "BX              LR",
+          "LDR             R3, =byte_3C450030",
+          "LDR             R0, [R3,#(dword_3C450044 - 0x3C450030)]",
+          "CMP             R0, #0"
+        ]
+      },
+      "meaning": "NULL uses slot0x3c450044; byte(display+748)&2 swaps +4/+0 axes."
+    },
+    {
+      "name": "lv_display_is_invalidation_enabled",
+      "entry": "0x00375c8c",
+      "callable": "0x00375c8d",
+      "file_offset": "0xfca4",
+      "prototype": "int enabled(void *display)",
+      "witness": {
+        "size": 32,
+        "hex": "b0b582b002af40b10446d4f860020028d4bf00200120bd46b0bd074b5c69002c",
+        "sha256": "855681832920abf0ba8f0edbda1ac21945b63e7e1b3142763c4c654496e407ad",
+        "instructions": [
+          "PUSH            {R4,R5,R7,LR}; NULL uses default slot; signed display+608>0. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "SUB             SP, SP, #8",
+          "ADD             R7, SP, #8",
+          "CBZ             R0, loc_375CA6",
+          "MOV             R4, R0",
+          "LDR.W           R0, [R4,#0x260]",
+          "CMP             R0, #0",
+          "ITE LE",
+          "MOVLE           R0, #0",
+          "MOVGT           R0, #1",
+          "MOV             SP, R7",
+          "POP             {R4,R5,R7,PC}",
+          "LDR             R3, =byte_3C450030",
+          "LDR             R4, [R3,#(dword_3C450044 - 0x3C450030)]",
+          "CMP             R4, #0"
+        ]
+      },
+      "meaning": "NULL uses default slot; signed display+608>0."
+    },
+    {
+      "name": "lv_inv_area",
+      "entry": "0x00384398",
+      "callable": "0x00384399",
+      "file_offset": "0x1e3b0",
+      "prototype": "void invalidate(void *display, const int area[4])",
+      "witness": {
+        "size": 32,
+        "hex": "2de9f0418cb0884604af002849d004462046f1f76ffc00283fd094f83a5015f0",
+        "sha256": "a3efee140ff5d04b7753a61d6090c37ea72e2003b18dfb1c76dc9b6b3b4c8000",
+        "instructions": [
+          "PUSH.W          {R4-R8,LR}; Guard enabled608 and rendering bit1 byte58; clips to rotation-aware dimensions; invokes event47 then stores/coalesces dirty rectangles at+60, count+604, maximum32. Static disassembly recovered; Hex-Rays failed for this function. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "SUB             SP, SP, #0x30",
+          "MOV             R8, R1",
+          "ADD             R7, SP, #0x10",
+          "CMP             R0, #0",
+          "BEQ             loc_38443A",
+          "MOV             R4, R0",
+          "MOV             R0, R4",
+          "BL              p65_lv_display_is_invalidation_enabled",
+          "CMP             R0, #0",
+          "BEQ             loc_384432",
+          "LDRB.W          R5, [R4,#0x3A]",
+          "ANDS.W          R5, R5, #2"
+        ]
+      },
+      "meaning": "Guard enabled608 and rendering bit1 byte58; clips to rotation-aware dimensions; invokes event47 then stores/coalesces dirty rectangles at+60, count+604, maximum32. Static disassembly recovered; Hex-Rays failed for this function."
+    },
+    {
+      "name": "lv_obj_delete",
+      "entry": "0x0037ff28",
+      "callable": "0x0037ff29",
+      "file_offset": "0x19f40",
+      "prototype": "void delete(void *obj)",
+      "witness": {
+        "size": 32,
+        "hex": "90f83330d90600d570472de9f041044682b002aff9f7b2fb6668002e46d094f8",
+        "sha256": "756f9ba7abddf9131f49c50d3148d3df9ca11cdf84b1df74fcde968cf5c5a51d",
+        "instructions": [
+          "LDRB.W          R3, [R0,#0x33]; Checks and sets deletion bit0x10 at obj+51; clears display.active_screen+688 when deleting active root. Static recovered for exact P65 AP; device NOT_PROBED.",
+          "LSLS            R1, R3, #0x1B",
+          "BPL             loc_37FF32",
+          "BX              LR",
+          "PUSH.W          {R4-R8,LR}",
+          "MOV             R4, R0",
+          "SUB             SP, SP, #8",
+          "ADD             R7, SP, #0x20+var_18",
+          "BL              sub_3796A4",
+          "LDR             R6, [R4,#4]",
+          "CMP             R6, #0",
+          "BEQ             loc_37FFD4",
+          "LDRB.W          R0, [R4,#0x33]"
+        ]
+      },
+      "meaning": "Checks and sets deletion bit0x10 at obj+51; clears display.active_screen+688 when deleting active root."
+    }
+  ],
+  "globals": {
+    "posix_driver": "0x3c4501d0",
+    "posix_cache_size": "0x3c4501d4",
+    "posix_open_slot": "0x3c4501dc",
+    "posix_initial_cache_size": 0,
+    "image_cache_slot": "0x3c45012c",
+    "header_cache_slot": "0x3c450130",
+    "image_cache_class": "0x3c20c7f0",
+    "header_cache_class": "0x3c20c7c8",
+    "image_object_class": "0x3c2242a0",
+    "display_slot": "0x3c450044"
+  },
+  "layouts": {
+    "cache": {
+      "class": 0,
+      "payload_size": 4,
+      "max_size": 8,
+      "current_size": 12,
+      "compare_cb": 16,
+      "create_cb": 20,
+      "destroy_cb": 24,
+      "mutex": 28,
+      "rb_tree": 32,
+      "rb_node_size": 40,
+      "list_payload_size": 44,
+      "list_head": 48,
+      "list_payload_size_value": 4,
+      "list_node_next": 8,
+      "rb_node_data": 16
+    },
+    "cache_payload": {
+      "decoded_source": 4,
+      "decoded_source_type": 8,
+      "header_source": 0,
+      "header_source_type": 4,
+      "file_source_type": 1
+    },
+    "object": {
+      "class": 0,
+      "parent": 4,
+      "spec_attr": 8,
+      "delete_flags": 51,
+      "delete_mask": 16,
+      "spec_child_count": 44
+    },
+    "image": {
+      "source": 52,
+      "source_type": 92,
+      "source_type_mask": 3,
+      "file_source_type": 1,
+      "width": 64,
+      "height": 68
+    },
+    "display": {
+      "horizontal": 0,
+      "vertical": 4,
+      "rendering_flags": 58,
+      "rendering_mask": 2,
+      "dirty_areas": 60,
+      "dirty_count": 604,
+      "invalidation_enable": 608,
+      "screens": 684,
+      "active_screen": 688,
+      "screen_count": 712,
+      "rotation_flags": 748,
+      "rotation_swap_mask": 2
+    }
+  },
+  "integration_requirements": [
+    "Driver cache-size validation must accept exact P65 initialization value0, not inherit4096.",
+    "Use P65 cache LL fields+44/+48, image source_type+92, display active-screen+688.",
+    "Call cache_drop(cache,key,0) and cache_release(cache,entry,0): third argument is native user_data, never leave r2 unspecified.",
+    "Retire only matching FILE entries; list next+8 and RB.data+16 stay valid. Referenced drop unlinks but defers payload destruction until zero-ref release.",
+    "Core image redirect/reload recovered only; font, quickapp, calendar, background require separate exact evidence and are not supplied by this header."
+  ],
+  "rejected_candidates": [
+    {
+      "entry": "0x1c1501d4",
+      "framework_name": "lv_cache_drop",
+      "actual_body": "socket bookkeeping; accesses task/socket fields+1344/+148/+152/+200"
+    },
+    {
+      "entry": "0x00387db8",
+      "framework_name": "lv_cache_release",
+      "actual_body": "lv_obj_allocate_spec_attr: allocates48 bytes and initializes obj+8, bit flags at spec+46"
+    }
+  ],
+  "verification_limits": [
+    "No hardware probe, approval or GPU-lifecycle claim.",
+    "lv_inv_area and cache class init were verified in disassembly because Hex-Rays could not fully decompile them.",
+    "Runtime mapping is necessary: loader alone maps three flash aliases but does not recreate all P65 startup SRAM/PSRAM copies."
+  ],
+  "startup_copies": [
+    {
+      "name": "early SRAM code",
+      "file_offset": "0x2718",
+      "file_end_exclusive": "0xc398",
+      "source_flash_cached": "0x2c0c2718",
+      "destination": "0x20166200",
+      "destination_end_exclusive": "0x2016fe80",
+      "size": "0x9c80",
+      "startup_instructions": "0xc0c0224",
+      "source_sha256": "6e97000339e25d1d52884e9ad4afb28f5dcb3c9645dc4501636c07f8a3af63b5",
+      "instruction_witness_hex": "114b124a12498b4218460fd3",
+      "execute_alias": "0x00366200"
+    },
+    {
+      "name": "early SRAM initialized data",
+      "file_offset": "0xc398",
+      "file_end_exclusive": "0xde78",
+      "source_flash_cached": "0x2c0cc398",
+      "destination": "0x2016fe80",
+      "destination_end_exclusive": "0x20171960",
+      "size": "0x1ae0",
+      "startup_instructions": "0xc0c0230",
+      "source_sha256": "07bc367d44ea16debeb37a0a96dd107dcea4576f9e7e5a8b64fc474c22b3423d",
+      "instruction_witness_hex": "114b124a12498b4218460ed3"
+    },
+    {
+      "name": "main SRAM code",
+      "file_offset": "0xde78",
+      "file_end_exclusive": "0x2f8d8",
+      "source_flash_cached": "0x2c0cde78",
+      "destination": "0x20173e60",
+      "destination_end_exclusive": "0x201958c0",
+      "size": "0x21a60",
+      "startup_instructions": "0xc0c028c",
+      "source_sha256": "063f6ac340fb3442e663d608eb941176da7dbf49727707426b0602221da21f23",
+      "instruction_witness_hex": "164b174a17498b42184615d3",
+      "execute_alias": "0x00373e60"
+    },
+    {
+      "name": "main SRAM initialized data",
+      "file_offset": "0x2f8d8",
+      "file_end_exclusive": "0x2fdbc",
+      "source_flash_cached": "0x2c0ef8d8",
+      "destination": "0x201958c0",
+      "destination_end_exclusive": "0x20195da4",
+      "size": "0x4e4",
+      "startup_instructions": "0xc0c0298",
+      "source_sha256": "4af92f1721cda9c59f3f4893c57c97bdd792e9a8a01855fc0a2e6b251079bc78",
+      "instruction_witness_hex": "164b174a17498b42184614d3"
+    },
+    {
+      "name": "PSRAM initialized code and data",
+      "file_offset": "0x2fdc4",
+      "file_end_exclusive": "0x401e44",
+      "source_flash_cached": "0x2c0efdc4",
+      "destination": "0x3c000000",
+      "destination_end_exclusive": "0x3c3d2080",
+      "size": "0x3d2080",
+      "startup_instructions": "0xc0c0314",
+      "source_sha256": "4f31ac3a6024bfd98abf4ab39af8185eb54a46c48ab80a0e84ee48b3ecfcc540",
+      "instruction_witness_hex": "154b164a16498b42184614d3",
+      "execute_alias": "0x1c000000"
+    },
+    {
+      "name": "end SRAM DATA from header literal 0x70",
+      "file_offset": "0xb3f308",
+      "file_end_exclusive": "0xb3f30c",
+      "source_flash_cached": "0x2cbff308",
+      "destination": "0x2019e724",
+      "destination_end_exclusive": "0x2019e728",
+      "size": "0x4",
+      "startup_instructions": "0xc0c003a",
+      "source_sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+      "instruction_witness_hex": "0d490d4a0e4b9a42bebf51f8"
+    }
+  ],
+  "startup_zero_ranges": [
+    {
+      "name": "early SRAM BSS",
+      "destination": "0x20171960",
+      "end_exclusive": "0x20173e58",
+      "size": "0x24f8",
+      "startup_instructions": "0xc0c0246"
+    },
+    {
+      "name": "main SRAM BSS",
+      "destination": "0x20195da4",
+      "end_exclusive": "0x2019e720",
+      "size": "0x897c",
+      "startup_instructions": "0xc0c02ba"
+    },
+    {
+      "name": "PSRAM BSS",
+      "destination": "0x3c3d2080",
+      "end_exclusive": "0x3c4df960",
+      "size": "0x10d8e0",
+      "startup_instructions": "0xc0c032a"
+    },
+    {
+      "name": "PSRAM noncached BSS",
+      "destination": "0x384df960",
+      "end_exclusive": "0x3855f980",
+      "size": "0x80020",
+      "startup_instructions": "0xc0c0340"
+    }
+  ],
+  "startup_empty_ranges": [
+    {
+      "operation": "copy",
+      "source_start": "0x2c0efdbc",
+      "source_end_exclusive": "0x2c0efdbc",
+      "destination": "0x2019ffe0",
+      "startup_instructions": "0x0c0c02a4"
+    },
+    {
+      "operation": "copy",
+      "source_start": "0x2c4c1e44",
+      "source_end_exclusive": "0x2c4c1e44",
+      "destination": "0x384df960",
+      "startup_instructions": "0x0c0c0332"
+    },
+    {
+      "operation": "zero",
+      "destination": "0x2019e728",
+      "end_exclusive": "0x2019e728",
+      "startup_instructions": "0x0c0c004e"
+    }
+  ],
+  "runtime_mapping_notes": [
+    "startup_copies is the complete nonempty 32-bit scatter-copy set in startup helpers0x0c0c0224,0x0c0c028c,0x0c0c0314 and the entry loop0x0c0c003a. Ranges are half-open; file offsets are relative to vela_ap.bin, not the ZIP container.",
+    "The header literal at AP+0x70 covers only4 bytes at0x2019e724. It does not describe the earlier large SRAM/PSRAM startup copies.",
+    "To execute SRAM bodies in Unicorn, write main SRAM code bytes also at execute_alias0x00373e60. To resolve cached PSRAM globals and code callables, populate both destination0x3c000000 and execute_alias0x1c000000 from the same file bytes. Real hardware aliases share storage; a harness with independent Unicorn mappings must mirror mutable aliases when required.",
+    "Zero ranges are separate operations with no file-backed bytes. Do not attempt to read beyond the AP for BSS. Stack/vector installation and hardware initialization are not modeled by copying these ranges alone."
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "schema": 1,
+  "target_id": "redmi-watch-6-3.100.043",
+  "firmware_sha256": "a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858",
+  "status": "STATIC_RECOVERED",
+  "physical_device": "NOT_PROBED",
+  "approval_state": "PENDING",
+  "functions": [
+    {
+      "name": "draw_buffer_create",
+      "entry_address": "0xc719550",
+      "callable_address": "0xc719551",
+      "file_offset": "0x659550",
+      "size": 290,
+      "sha256": "bc1672620fda2af0b873b3b1826589e53af5acae887762ac1a891583d068c3f2",
+      "witness": "2de9f04f89b0814606af1820884615461e4628f0ddfa0446002836d0002e39d0"
+    },
+    {
+      "name": "draw_buffer_destroy",
+      "entry_address": "0xc719798",
+      "callable_address": "0xc719799",
+      "file_offset": "0x659798",
+      "size": 66,
+      "sha256": "aaf4f607feb1d366399c67b92dcbc60ed6d8ad9238c845462a7a676579333662",
+      "witness": "f0b190b583b043880446db0602af0bd50c4bd3f8dc300bb140699847204628f0"
+    },
+    {
+      "name": "snapshot_to_buffer",
+      "entry_address": "0xc7417c0",
+      "callable_address": "0xc7417c1",
+      "file_offset": "0x6817c0",
+      "size": 482,
+      "sha256": "0b44320576be1a389e0c066928d3cde2df21945a6d03ec1bff5b82c8b09d2d2b",
+      "witness": "2de9f04f2ded028b1729a7b002af21d8744b8846cb40db071cd5054691467cf1"
+    },
+    {
+      "name": "gpu_finish_thunk",
+      "entry_address": "0xc8bc080",
+      "callable_address": "0xc8bc081",
+      "file_offset": "0x7fc080",
+      "size": 8,
+      "sha256": "797144c2b05b9d11a47dffbf8c78d48bba7931b5c067c9f10d2d6ef61a385b6a",
+      "witness": "5ff800f0419e3800"
+    },
+    {
+      "name": "gpu_finish",
+      "entry_address": "0x389e40",
+      "callable_address": "0x389e41",
+      "file_offset": "0x23e58",
+      "size": 112,
+      "sha256": "24631170d35430cfb22e1e2cccf41c66e1beb63d1a60e1864fc64148d67d9992",
+      "witness": "10b51b4cd4f8fc3604eb8303d3f8f43663b9184b1b681bb90bf0bafa002010bd"
+    },
+    {
+      "name": "cache_invalidate",
+      "entry_address": "0xc72f020",
+      "callable_address": "0xc72f021",
+      "file_offset": "0x66f020",
+      "size": 12,
+      "sha256": "c718bedfb5e15cd2d0afab88bf1685128514e7032b1345f3cdb687af49a200b3",
+      "witness": "80b400afbd465df8047b7047"
+    },
+    {
+      "name": "cache_clean",
+      "entry_address": "0xc72f02c",
+      "callable_address": "0xc72f02d",
+      "file_offset": "0x66f02c",
+      "size": 12,
+      "sha256": "c718bedfb5e15cd2d0afab88bf1685128514e7032b1345f3cdb687af49a200b3",
+      "witness": "80b400afbd465df8047b7047"
+    },
+    {
+      "name": "install_cache_hooks",
+      "entry_address": "0xc72f038",
+      "callable_address": "0xc72f039",
+      "file_offset": "0x66f038",
+      "size": 18,
+      "sha256": "895e31c07d070d02453daa52fe3fe511ad28b31b44957ed8f462d9867aa088a1",
+      "witness": "80b500afeaf7acf8024a034bc0e9032380bd"
+    },
+    {
+      "name": "install_default_drawbuf_hooks",
+      "entry_address": "0xc719154",
+      "callable_address": "0xc719155",
+      "file_offset": "0x659154",
+      "size": 46,
+      "sha256": "cb5420c900fc3a418c43d07c13ce7f80676d847b868e630ca27821a6c405ba77",
+      "witness": "b0b50b4c18222046002100af28f094fc20460022074d084c084940f8d859084b"
+    },
+    {
+      "name": "install_vg_stride",
+      "entry_address": "0xc72876c",
+      "callable_address": "0xc72876d",
+      "file_offset": "0x66876c",
+      "size": 14,
+      "sha256": "ea405d1b4e46db406c3f2f011f5dbbe19b50778a610a6c0477ff0f208f0097e0",
+      "witness": "80b500aff0f712fd014b436180bd"
+    },
+    {
+      "name": "color_to_vg",
+      "entry_address": "0xc72e0a4",
+      "callable_address": "0xc72e0a5",
+      "file_offset": "0x66e0a4",
+      "size": 224,
+      "sha256": "74602432a3ba4b286e6f152e3d29eae39db27c90268e4ee82bb75e4e4316f5b0",
+      "witness": "831f2a2b47d8dfe803f06516191c1f4646226825282b2e314634373a46464646"
+    },
+    {
+      "name": "vg_stride",
+      "entry_address": "0xc728754",
+      "callable_address": "0xc728755",
+      "file_offset": "0x668754",
+      "size": 22,
+      "sha256": "6e3fee338454bce41b1db44bb8ef65c610fd9666d9e802d1585a47d8c242bc7d",
+      "witness": "98b5044600af084605f0a2fc0146204605f0b0fd98bd"
+    }
+  ],
+  "layout": {
+    "draw_buffer_size": 24,
+    "header_magic": 25,
+    "color_format_offset": 1,
+    "flags_offset": 2,
+    "allocated_flag": 16,
+    "width_offset": 4,
+    "height_offset": 6,
+    "stride_offset": 8,
+    "size_offset": 12,
+    "pixels_offset": 16,
+    "allocation_offset": 20,
+    "pixel_alignment": 64,
+    "display_layer_offset": 672,
+    "display_rendering_offset": 58,
+    "layer_tasks_offset": 100,
+    "layer_next_offset": 108,
+    "draw_unit_active_offset": 24,
+    "draw_unit_dispatch_offset": 12
+  },
+  "cache_hooks": {
+    "table": "0x3c450108",
+    "invalidate_offset": 12,
+    "clean_offset": 16,
+    "invalidate": "0x0c72f021",
+    "clean": "0x0c72f02d",
+    "body": "Both are exact no-op bodies; no other firmware HAL cache API is called."
+  },
+  "pipeline": {
+    "input_width": 432,
+    "input_height": 514,
+    "input_color_format": 15,
+    "output_width": 72,
+    "output_height": 86,
+    "output_color_format": 18,
+    "draw_scale": 1536,
+    "sampling": "6x6 BGR888 average with bottom-edge clamp",
+    "filter": "3 passes radius3 RGB565;70% darkening",
+    "static_scratch_bytes": 24768,
+    "max_owned_descriptors": 3
+  },
+  "ownership": [
+    "The input and two output slots are native draw-buffer allocations, independent of module ctx->mem.",
+    "A post-capture raw GPU error retains input and prevents another allocation until a later idle successful fence.",
+    "Source/config changes invalidate an epoch; stale snapshots are not published.",
+    "DELETE/default config only retires output logically; destruction happens at an idle UI owner boundary after a successful raw GPU finish.",
+    "Capture requests belong to UI poll; draw callbacks only read the immutable descriptor."
+  ],
+  "verification": [
+    "tests/test_p65_blur.py compiles the actual production include with native leaf mocks under ASan/UBSan.",
+    "Exact native function body hashes independently match the supplied AP.",
+    "tests/test_p65_blur.py under the P65 venv executes original Thumb format/stride/drawbuffer constructor/cache hook/destructor instructions; heap and hardware-query leaves are controlled."
+  ],
+  "limitations": [
+    "No physical device or GPU/coherency acceptance.",
+    "Draw buffer cache hooks are empty in this exact firmware; this is not evidence for another firmware.",
+    "The native watchface identity provider belongs to the exact background owner adapter."
+  ]
+}

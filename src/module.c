@@ -24,7 +24,9 @@
 #define RH_STATUS_PREFIX "resource-hook-status-v1\tng.lst.corona\t"
 #define RH_CONTROL_REQUEST_MAX 128u
 #define RH_RELOAD_POLL_MS 1000u
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+#define RH_TARGET_ID "redmi-watch-6-3.100.043"
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043
 #define RH_TARGET_ID "xiaomi-band-10-pro-3.101.043"
 #elif defined(RH_TARGET_179) && RH_TARGET_179
 #define RH_TARGET_ID "xiaomi-band-11-4.100.179"

@@ -66,6 +66,10 @@ static int32_t backend_apply(void *cookie,const struct canopus_ui_snapshot_v1 *s
            explicit-flag rule still have to hold. */
         assert(l->grow==0 && l->shrink==1);
         assert(s->styles[i].opacity<=1000u);
+        if(width==432) {
+            assert(!s->styles[i].opacity);
+            assert(!(s->visuals[i].flags&CANOPUS_UI_VISUAL_FLAG_OPACITY));
+        }
         assert(s->styles[i].border_width<=0);
         if(type==CANOPUS_UI_NODE_STATUS_ROW || type==CANOPUS_UI_NODE_ACTION_ROW || type==CANOPUS_UI_NODE_BUTTON || type==CANOPUS_UI_NODE_SWITCH_ROW)
             assert(!l->padding_left && !l->padding_right && !l->padding_top && !l->padding_bottom);
@@ -82,7 +86,7 @@ static int32_t backend_control(void *cookie,uint32_t gen,uint32_t key,uint32_t o
     if(op==CANOPUS_UI_CONTROL_CAPTURE) captured++;
     if(op==CANOPUS_UI_CONTROL_RELEASE_CAPTURE) released++;
     if(op==CANOPUS_UI_CONTROL_TRANSLATE && a==0) {uint32_t v=b<0?0:(uint32_t)b;if(v>largest_y)largest_y=v;}
-    if(op==CANOPUS_UI_CONTROL_SCROLL_QUERY) {struct canopus_ui_scroll_metrics_v1 *m=out;m->y=0;m->viewport_height=height==480?424:444;m->content_height=41632;}
+    if(op==CANOPUS_UI_CONTROL_SCROLL_QUERY) {struct canopus_ui_scroll_metrics_v1 *m=out;m->y=0;m->viewport_height=width>=300?height-56:444;m->content_height=41632;}
     return 0;
 }
 static const struct canopus_ui_backend_v1 backend={sizeof(backend),2,0,(1u<<18)-1,backend_apply,backend_control};
@@ -239,6 +243,7 @@ int main(int argc,char **argv) {
     uint32_t i,bytes=0;struct rh_transfer_ui_state s={0};
     struct rh_manager_data_hooks hooks={.quickapp_icon=quickapp_hook,.cookie=&context};(void)argv;
     if(argc>1){width=336;height=480;}
+    if(argc>1 && !strcmp(argv[1],"--p65")){width=432;height=514;}
     context.struct_size=sizeof(context);context.ui=&ui_api;context.fs=&fs_api;context.launcher=&launcher_api;context.display=&display_api;context.time=&time_api;
     assert(!canopus_ui_context_init(&ui,&backend,0,dispatch,0));
     assert(!rh_manager_ui_set_data_hooks(&hooks));
@@ -252,8 +257,8 @@ int main(int argc,char **argv) {
     (void)i;
     assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
     assert(ui.committed.styles[find_key(20)].corner_radius==32);
-    assert(ui.committed.visuals[find_key(24)].x==(height==480?186:133));
-    assert(ui.committed.visuals[find_key(24)].y==(height==480?-7:1));
+    assert(ui.committed.visuals[find_key(24)].x==(width>=300?186:133));
+    assert(ui.committed.visuals[find_key(24)].y==(width>=300?-7:1));
     /* Initial import errors must leave both return paths usable without a
        data model. A failed home render must still consume the host's back. */
     fail_create=1;
@@ -399,7 +404,7 @@ find_text("启动器背景");assert(refresh_count==reads);
     {uint32_t action=find_text("删除");
      assert(!(ui.committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED));
      assert(ui.committed.styles[action].foreground==CANOPUS_UI_COLOR_DISABLED);
-     assert(ui.committed.styles[action].opacity==500);
+     assert(ui.committed.styles[action].opacity==(width==432?0:500));
      assert(ui.committed.styles[action].variant!=CANOPUS_UI_VARIANT_DESTRUCTIVE);}
     back();assert_route(2);
     delete_protected=0;tap(31,21000);assert(deletes==0);assert_route(5);
@@ -447,7 +452,7 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
          assert(mark!=0);
          /* Vertical placement is the post-commit TRANSLATE path, which the
             scroll assertions above already cover. */
-         {int row=(int)(width>=300?336:204);
+         {int row=(int)(width>=300?width:204);
           assert(ui.committed.visuals[mark].x+32==(int)(width-row)/2+row-13);}}
     }
     /* The tall variant keeps one card: SECTION at 160 owns the preview image
@@ -552,5 +557,5 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     /* The root page declines back so the firmware plays its page-out. */
     host_back();assert(close_count==1);
     entry->on_close(&context,0);
-    puts(height==480?"native UI .043: passed":"native UI .155: passed");return 0;
+    puts(width==432?"native UI P65: passed":height==480?"native UI .043: passed":"native UI .155: passed");return 0;
 }

@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)](Canopus.toml)
 
 当前 Manager 已迁入 `corona` 模块，使用 Canopus ABI 2 原生页面与桌面入口；首批目标为
-Band 11 `4.100.155` 和 Band 10 Pro `3.101.043`。首页状态卡保留原视觉，其他控件使用系统组件。
+Band 11 `4.100.155`、Band 10 Pro `3.101.043` 和 REDMI Watch 6 `3.100.043`。首页状态卡保留原视觉，其他控件使用系统组件。
 模块状态和重载结果通过内存快照与内部通知更新，不再轮询控制文件。
 CanopusConnect 设备端已接入二进制接收、续传、磁盘校验、分步解压与安装登记；
 手机发送端及蓝牙实机验收仍待完成，详见 [设备端实现与边界](docs/canopusconnect_implementation.md)。设计、实现边界与验证记录见
@@ -81,17 +81,20 @@ GPU 故障恢复与帧时间仍未验证，详见
 ## 支持设备与固件
 
 以下为 Hook 各精确适配的历史设备反馈；不代表新增原生 Manager 已在这些设备上实测。
-当前原生 Manager 构建目标为 `.155` / `.043` / `.179`；`.179` 为精确静态适配，实机与 Mirage 验收尚未执行。其余适配源码保留，需另行集成 UI 与验证。
+当前原生 Manager 构建目标为 Band 11 `.155` / `.179`、Band 10 Pro `.043` 和 REDMI Watch 6 `.043`；`.179` 与 P65 为精确静态适配，实机与完整 Mirage 验收尚未执行。其余适配源码保留，需另行集成 UI 与验证。
 
 | 设备型号 | 固件版本 | 验证状态 | 图片重定向 | 快应用图标 | 日历动态图标 | 字体热重载 |
 |---|---|---|:---:|:---:|:---:|:---:|
+| **REDMI Watch 6 (P65)** | `3.100.043` | 静态与指令测试通过，NOT_PROBED | 静态 | 静态 | 静态 | 静态 |
 | **Xiaomi Band 11** | `4.100.179` | 静态适配，NOT_PROBED | 静态 | 静态 | 静态 | 静态 |
 | **Xiaomi Band 11** | `4.100.177` | 实机通过（用户反馈） | 静态 | 静态 | ✅ | 静态 |
 | **Xiaomi Band 11** | `4.100.155` | 实机通过（用户反馈） | ✅ | ✅ | ✅ | ✅ |
 | **Xiaomi Band 11** | `4.100.139` | 实机通过（用户反馈，默认目标） | ✅ | ✅ | ✅ | ✅ |
 | **Xiaomi Band 10 Pro** | `3.101.043` | 实机通过（用户反馈） | ✅ | ✅ | ✅ | ✅ |
 
-> **当前源码日历变更：** 五个精确 target 均支持 `calendar` 配置。Band11 使用独立 ARGB8888 文件 bank；P67 `.043` 自定义日历仅 RAM 双缓冲发布，不再落盘或重定向派生文件，默认配置恢复原生日历。`.177` 既有用户反馈与精确 API 审批不等同于逐像素一致性、故障恢复或其他版本的设备证明；本轮 P67 RAM-only 改动为 **NOT_PROBED**，尚未实机验证。详见 [日历配置与限制](docs/CALENDAR_RELOAD.md)。
+> **P65 默认完整功能：** 图片重定向、快应用图标、系统字体热切换、日历文字／图片合成、四区域背景与静态模糊均默认编入，无需额外环境变量。Manager 为 `432×514`，日历使用模块自有 `96×96` ARGB8888 文件双缓冲，默认配置恢复原厂文件。需要同步修改的 Canopus P65 revision **3** pack 与 Supervisor（含精确字号、删除事件及绘制生命周期绑定）。功能是否应用由主题配置决定；缺省仍为系统外观。此端口的完整 GPU 与实机行为仍为 **NOT_PROBED**，详见 [P65 适配记录](targets/redmi-watch-6-3.100.043/README.md)。
+>
+> **当前源码日历变更：** 六个精确 target 均支持 `calendar` 配置。Band11 与 P65 使用独立 ARGB8888 文件 bank；P67 `.043` 自定义日历仅 RAM 双缓冲发布，不再落盘或重定向派生文件，默认配置恢复原生日历。`.177` 既有用户反馈与精确 API 审批不等同于逐像素一致性、故障恢复或其他版本的设备证明；本轮 P67 RAM-only 改动为 **NOT_PROBED**，尚未实机验证。详见 [日历配置与限制](docs/CALENDAR_RELOAD.md)。
 >
 > **注意：** 各固件目标使用独立的 ELF、内存布局和地址白名单，**严禁混用**。  
 > 升级说明：本模块与旧版 `resource_hook` / `manager_resource_hook` 不兼容。安装前请先停用并完整重启手环。
@@ -105,7 +108,7 @@ GPU 故障恢复与帧时间仍未验证，详见
 - **动态图标支持**：
   - **快应用包名图标**：支持 `@quickapp-icon/<package>` 声明，UI 线程只读查询真实应用注册记录并精准映射。
   - **透明日历图标**：Band11 独立 ARGB8888 合成与文件读取重定向；P67 自定义图标仅 RAM 发布，默认配置沿用原生日历。`corona.json` 的 `calendar` 支持 month/day/weekday 文字或图片，底图仍使用原来的资源映射。配置示例见 `examples/calendar/corona.json`。
-- **字体热重载**：所有精确目标默认启用受检查的字体事务（`.177` / `.179` 尚未实机验收），保留现有字体 wrapper、fallback 与原厂路径基线，支持字体切换和规则移除后的原厂恢复。需使用不可变字体代次；GPU 故障恢复、框架重启及自定义字体 owner 不在支持范围内。
+- **字体热重载**：所有精确目标默认启用受检查的字体事务（P65 / `.177` / `.179` 尚未实机验收），保留现有字体 wrapper、fallback 与原厂路径基线，支持字体切换和规则移除后的原厂恢复。需使用不可变字体代次；GPU 故障恢复、框架重启及自定义字体 owner 不在支持范围内。
 - **内部状态与配置事务**：Manager 与 Hook 共用模块内状态。重载按不可变代次准备完整配置，发布 `active-config` 后等待内部刷新通知；失败保留旧资源引用。
 - **独立容错与启动诊断**：配置缺失或语法错误自动退回 pass-through 零规则模式，绝不阻断系统启动；启动各阶段独立记入 `/data/offlinelog/resource-hook-startup.log`。
 
@@ -141,10 +144,10 @@ GPU 故障恢复与帧时间仍未验证，详见
 - Clang / LLVM（支持 ARM target）、`ld.lld`、Python 3.11+
 
 框架模块 ID 为 `corona`，私有数据与主题迁至 `/data/canopus/m.corona/`。
-`Canopus.toml` 声明 `.155` / `.043` / `.179` 三个原生 UI target；`scripts/build.sh` 默认构建 `.155`。
+`Canopus.toml` 声明 `.155` / `.043` / `.179` 及 P65 四个原生 UI target；`scripts/build.sh` 默认构建 `.155`。
 编译包装器统一启用 `RH_NATIVE_MANAGER=1`，并注入精确固件宏；
 `scripts/canopus-ld.sh` 合并 ELF sections，满足 Band11 loader 的 section 数量限制。
-旧 `manager/` 快应用源码保留作行为参考，当前原生入口不依赖它。
+旧快应用 Manager 源码已删除，当前原生入口不依赖它；共享图片源独立保存在 `assets/manager/`。
 
 首次读取资源列表时，原生管理器自动检查旧快应用数据根：Band 11 为
 `/data/quickapp/files/ng.lst.corona/`，Band 10 Pro 为 `/data/files/ng.lst.corona/`。
@@ -164,6 +167,7 @@ GPU 故障恢复与帧时间仍未验证，详见
 sh scripts/build.sh xiaomi-band-11-4.100.155
 sh scripts/build.sh xiaomi-band-10-pro-3.101.043
 sh scripts/build.sh xiaomi-band-11-4.100.179
+sh scripts/build.sh redmi-watch-6-3.100.043
 
 # 2. 生成原生模块交付（.canopus + CMI2，无需签名密钥）
 python3 scripts/build-delivery.py dist/0.3.0-155 --target xiaomi-band-11-4.100.155
@@ -175,7 +179,7 @@ RESOURCE_HOOK_PAYLOAD=dist/0.3.0-155/payload/xiaomi-band-11-4.100.155 \
 ```
 
 原生交付目录根部的 `corona-0.3.0.canopus` 是可安装模块包，通过 AstroBox 的 Canopus
-入口安装。三个原生 UI target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
+入口安装。各原生 UI target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
 Canopus 处理。Corona Manager 的内置图片作为 `.canopus` 包内资源随安装解压到模块私有目录，不打包进模块 ELF；
 本轮增加 CanopusConnect 设备端主题接收实现，仍需配套手机发送端与实机验收。
 默认交付运行宿主与产物校验；原生页面模拟器脚本为 `scripts/test-manager-emulator.py`，
@@ -195,6 +199,8 @@ CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
 
 输出为 `dist/corona-0.3.0.canopus`，包含每个 target 的 ELF 与 CMI2 回执。
 旧 Supervisor 需要按新版框架流程重装；安装及升级语义见 [安装说明](docs/INSTALL.md)。
+
+Corona Manager 的 PNG 源图独立保存在 `assets/manager/`，不再依赖已删除的旧快应用源码。
 
 `.179` 的逐项地址来源与验证边界见 [精确适配记录](targets/xiaomi-band-11-4.100.179/README.md)。
 相邻 Canopus `.179` pack 需要 revision **2**（补齐可见区域函数的精确 Thumb 调用身份），

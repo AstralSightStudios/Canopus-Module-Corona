@@ -9,7 +9,7 @@ AP SHA256 `ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`.
 It has host/Unicorn coverage and **USER_REPORTED_PASS** for the visible calendar
 workflow: on 2026-10-07 the user reported successful device validation. This is
 not instrumented GPU/fault acceptance or a byte-exact pixel comparison.
-All four supported exact targets provide native date/render adapters; there is
+All six supported exact targets provide native date/render adapters; there is
 no runtime supported/unsupported probe. Instruction-receipt mismatches fail the
 date/render operation (`-2155`/`-2156`) and preserve the previous publication.
 Band 11 reload does not invoke the old native GENERATE or NOTIFY chains.
@@ -21,7 +21,18 @@ POSIX reads. Config and source assets still use ordinary file I/O/mappings.
 This RAM-only revision has source-compiled model/build verification, not device
 acceptance; historical user reports do not validate the changed publication path.
 
-Both renderers share item validation/context selection, but retain native font
+REDMI Watch 6 `3.100.043` uses an independent **96×96 FILE-bank** adapter.
+Its stock logical key is `/data/quickapp/app/perpetual_calendar/calendar_icon.bin`;
+module-owned ARGB8888 banks preserve that original file. Default item offsets
+match P65 (day28, weekday12). Custom rendering requires the stock producer file
+to exist, then fences and retires CPU glyph references before publishing.
+A failed render/write/fence preserves the old publication and bounded resources.
+Default restoration drains and retires the logical icon cache keys before
+clearing redirection and refreshing app69. A failed retirement retains the old bank.
+See the [P65 calendar audit](../targets/redmi-watch-6-3.100.043/calendar-audit.md);
+this adapter is enabled in ordinary builds, with device/GPU status **NOT_PROBED**.
+
+The renderers share item validation/context selection, but retain native font
 and object creation. Configured image cache keys are deduplicated by path
 contents, including repeated images across month/day/weekday. Retirement still
 runs before rendering and again at publication to evict reentrantly cached

@@ -4,7 +4,7 @@
 /* Exact AP-image addresses, not a version-range ABI. Callable addresses carry
  * the Thumb bit. Default remains 4.100.139; .155/.177/.179 require their
  * respective RH_TARGET_* flag; 10 Pro 3.101.043 requires RH_TARGET_1043 and
- * the matching Canopus target headers.
+ * REDMI Watch 6 3.100.043 requires RH_TARGET_P65, with matching Canopus headers.
  * Static evidence and hardware gates:
  * targets/xiaomi-band-11-4.100.139/ui-reload-audit.md,
  * targets/xiaomi-band-11-4.100.155/ui-reload-audit.md, and
@@ -12,10 +12,27 @@
 #if ((defined(RH_TARGET_179) && RH_TARGET_179) + \
      (defined(RH_TARGET_177) && RH_TARGET_177) + \
      (defined(RH_TARGET_155) && RH_TARGET_155) + \
+     (defined(RH_TARGET_P65) && RH_TARGET_P65) + \
      (defined(RH_TARGET_1043) && RH_TARGET_1043)) > 1
 #error "Select exactly one Resource Hook target"
 #endif
-#if defined(RH_TARGET_179) && RH_TARGET_179
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+#include "resource_hook_target_p65.h"
+#include "resource_hook_p65_features.h"
+#include "resource_hook_p65_font.h"
+#include "resource_hook_p65_calendar.h"
+#include "resource_hook_p65_background.h"
+#define RH_HAS_FONT_RELOAD 1
+#define RH_HAS_NATIVE_CALENDAR 1
+#define RH_HAS_QUICKAPP_ICONS 1
+#else
+#define RH_HAS_FONT_RELOAD 1
+#define RH_HAS_NATIVE_CALENDAR 1
+#define RH_HAS_QUICKAPP_ICONS 1
+#endif
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+/* P65 never inherits a Band 11 or P67 private ABI. */
+#elif defined(RH_TARGET_179) && RH_TARGET_179
 #include "resource_hook_target_179.h"
 #elif defined(RH_TARGET_177) && RH_TARGET_177
 #include "resource_hook_target_177.h"
@@ -209,7 +226,10 @@
 
 #endif /* .177/.179 versus legacy targets */
 /* Feature capability is exact-target based; never enable on .043. */
-#if defined(RH_TARGET_179) && RH_TARGET_179
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+#define RH_Q66_BACKGROUND 0
+#define RH_Q66_CALENDAR 0
+#elif defined(RH_TARGET_179) && RH_TARGET_179
 #define RH_Q66_BACKGROUND 1
 #define RH_Q66_CALENDAR 1
 #include "resource_hook_q66_179.h"

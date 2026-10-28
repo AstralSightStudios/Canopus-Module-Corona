@@ -15,6 +15,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = b'org.example.clock'
 TARGETS = {
+    'P65': dict(service=0x3c350b30, lookup=0x1c15165d,
+                service_slot=0x3c3cf934, registry_slot=0x3c3cf92c,
+                package_offset=8, icon_offset=12, root=b'/data/quickapp/app/',
+                flash_high=0x0cbff484),
     '1043': dict(service=0x2cdbb054, lookup=0x0ca69e81,
                  service_slot=0x200eb658, registry_slot=0x200eb650,
                  package_offset=8, icon_offset=12, root=b'/data/app/',
@@ -152,7 +156,7 @@ uint32_t rh_qa_lookup(uint32_t a,const char *p) { return finder(a,p); }
         return result
 
     def test_fixtures_cover_all_supported_exact_targets(self):
-        self.assertEqual(set(TARGETS), {'139', '155', '179', '1043'})
+        self.assertEqual(set(TARGETS), {'139', '155', '179', '1043', 'P65'})
 
     def test_supported_exact_targets_copy_and_no_pointer_retention(self):
         for version, target in TARGETS.items():

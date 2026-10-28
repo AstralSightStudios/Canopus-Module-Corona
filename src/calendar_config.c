@@ -25,7 +25,12 @@ void rh_calendar_defaults(struct rh_calendar_config *c) {
         struct rh_calendar_item *p = &c->items[i];
         p->type = i ? RH_CALENDAR_TEXT : RH_CALENDAR_NONE;
         p->align = 2;
-        p->x = 0; p->y = i == 1 ? 34 : 17;
+        p->x = 0;
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+        p->y = i == 1 ? 28 : 12;
+#else
+        p->y = i == 1 ? 34 : 17;
+#endif
         p->size = p->color = p->count = 0;
         p->color_native = 1;
         for (j = 0; j < 31; ++j) p->context[j] = 0;

@@ -3,7 +3,11 @@
 #include "resource_hook.h"
 
 #define RH_CALENDAR_CONFIG_PATH RH_APP_FILES_ROOT "calendar.cfg"
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+#define RH_CALENDAR_OUTPUT_PATH "/data/quickapp/app/perpetual_calendar/calendar_icon.bin"
+#else
 #define RH_CALENDAR_OUTPUT_PATH "/data/app/perpetual_calendar/calendar_icon.bin"
+#endif
 #define RH_CALENDAR_BANK0 RH_APP_FILES_ROOT "calendar-alpha-0.bin"
 #define RH_CALENDAR_BANK1 RH_APP_FILES_ROOT "calendar-alpha-1.bin"
 #define RH_CALENDAR_POOL_BYTES 12796u

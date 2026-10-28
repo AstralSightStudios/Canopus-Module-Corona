@@ -3,7 +3,7 @@
 Font hot reload is part of the default Resource Hook module for
 `xiaomi-band-11-4.100.139`, `xiaomi-band-11-4.100.155`,
 `xiaomi-band-11-4.100.177`, `xiaomi-band-11-4.100.179` and
-`xiaomi-band-10-pro-3.101.043`. There is no experimental compile option or
+`xiaomi-band-10-pro-3.101.043` and `redmi-watch-6-3.100.043`. There is no experimental compile option or
 registry-only fallback. No automatic page rebuild, GPU wait/reset or global
 cache drop is added.
 
@@ -18,6 +18,12 @@ The [.179 target record](../targets/xiaomi-band-11-4.100.179/README.md)
 pins its AP hash and individually mapped font/cache identities. Its adapter is
 static recovery only: **NOT_PROBED**, with no inherited device acceptance or
 framework API approval from earlier targets.
+
+The [P65 font audit](../targets/redmi-watch-6-3.100.043/font-reload-audit.md)
+records its 32-byte FreeType context, count-cache links, draw-unit queues and
+three-argument pixel-size ABI. It has no P67 vector-label extension. The actual
+transaction is enabled by default and tested for switch/removal, stock restoration,
+borrowed references and allocation-failure rollback. Device status is **NOT_PROBED**.
 
 ## Device acceptance
 

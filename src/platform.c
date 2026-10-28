@@ -5,12 +5,26 @@
 #include "resource_hook_calendar_runtime.h"
 #include "resource_hook_calendar_native.h"
 #include "resource_hook_calendar_internal.h"
+/* LVGL v9 ports can differ in private layout as well as code addresses. */
+#ifndef RH_FW_POSIX_EXPECT_CACHE_SIZE
+#define RH_FW_POSIX_EXPECT_CACHE_SIZE 4096u
+#endif
+#ifndef RH_FW_CACHE_LIST_SIZE_OFFSET
+#define RH_FW_CACHE_LIST_SIZE_OFFSET 48u
+#define RH_FW_CACHE_LIST_HEAD_OFFSET 52u
+#endif
+#ifndef RH_FW_IMAGE_SOURCE_TYPE_OFFSET
+#define RH_FW_IMAGE_SOURCE_TYPE_OFFSET 96u
+#endif
+#ifndef RH_FW_DISPLAY_ACTIVE_SCREEN_OFFSET
+#define RH_FW_DISPLAY_ACTIVE_SCREEN_OFFSET 696u
+#endif
 void *rh_platform_driver(void) { return (void *)(uintptr_t)RH_FW_POSIX_DRIVER; }
 rh_open_fn *rh_platform_slot(void) { return (rh_open_fn *)(uintptr_t)RH_FW_POSIX_OPEN_SLOT; }
 rh_open_fn rh_platform_original(void) { return (rh_open_fn)(uintptr_t)RH_FW_POSIX_OPEN; }
 int rh_platform_driver_valid(void) {
     return *(volatile unsigned char *)(uintptr_t)RH_FW_POSIX_DRIVER == '/' &&
-           *(volatile uint32_t *)(uintptr_t)RH_FW_POSIX_CACHE_SIZE == 4096u;
+           *(volatile uint32_t *)(uintptr_t)RH_FW_POSIX_CACHE_SIZE == RH_FW_POSIX_EXPECT_CACHE_SIZE;
 }
 /* Exact owner adapter. The supported APs use the validated LRU/RB entry-list
  * shape; target-specific cache/object classes and callable addresses live in
@@ -35,8 +49,8 @@ static int affected(const struct rh_mapping_view *previous,
  * to an RB node, whose +16 points to entry data. */
 static int cache_valid(uint32_t cache, uint32_t clz) {
     uint32_t node, n = 0;
-    if (!cache || load32(cache) != clz || load32(cache + 48u) != 4u) return 0;
-    for (node = load32(cache + 52u); node; node = load32(node + 8u)) {
+    if (!cache || load32(cache) != clz || load32(cache + RH_FW_CACHE_LIST_SIZE_OFFSET) != 4u) return 0;
+    for (node = load32(cache + RH_FW_CACHE_LIST_HEAD_OFFSET); node; node = load32(node + 8u)) {
         uint32_t rb;
         if (++n > 4096u || !(rb = load32(node)) || !load32(rb + 16u)) return 0;
     }
@@ -54,7 +68,7 @@ static int same_path(uint32_t source, const char *path) {
 }
 static int retire_cache(uint32_t cache, uint32_t source_offset,
                         const struct rh_mapping_view *mapping, const char *exact) {
-    uint32_t node = load32(cache + 52u), n = 0;
+    uint32_t node = load32(cache + RH_FW_CACHE_LIST_HEAD_OFFSET), n = 0;
     while (node) {
         uint32_t next, data, source;
         if (++n > 4096u) return -1;
@@ -67,11 +81,15 @@ static int retire_cache(uint32_t cache, uint32_t source_offset,
             ((mapping && affected(mapping, 0, source)) ||
              (exact && same_path(source, exact)))) {
             uint32_t cursor, guard = 0;
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+            ((void (*)(uint32_t, uint32_t, uint32_t))(uintptr_t)RH_FW_CACHE_DROP)(cache, data, 0);
+#else
             ((void (*)(uint32_t, uint32_t))(uintptr_t)RH_FW_CACHE_DROP)(cache, data);
+#endif
             /* No dereference of the retired node/data/source after drop. Check
              * that unlink really happened, even when dropping a non-head key.
              * Class lookup may move the target to the head before unlinking. */
-            for (cursor = load32(cache + 52u); cursor; cursor = load32(cursor + 8u)) {
+            for (cursor = load32(cache + RH_FW_CACHE_LIST_HEAD_OFFSET); cursor; cursor = load32(cursor + 8u)) {
                 if (cursor == node || ++guard > 4096u) return -1;
             }
         }
@@ -785,6 +803,20 @@ int rh_platform_backgrounds_commit(const struct rh_backgrounds *bg) {
 
 #elif defined(RH_TARGET_1043) && RH_TARGET_1043
 #include "p67_backgrounds.inc"
+#elif defined(RH_TARGET_P65) && RH_TARGET_P65
+#include "p65_backgrounds.inc"
+#else
+/* No native background owner ABI has been recovered for this exact target. */
+int rh_platform_backgrounds_stage(const struct rh_backgrounds *config) {
+    if (!config) return -2143;
+    return config->launcher[0] || config->control_center[0] ||
+           config->notifications[0] || config->widgets[0] ? -2143 : 0;
+}
+int rh_platform_backgrounds_commit(const struct rh_backgrounds *config) {
+    return config && !config->launcher[0] && !config->control_center[0] &&
+           !config->notifications[0] && !config->widgets[0] ? 0 : -2143;
+}
+void rh_platform_backgrounds_poll(void) {}
 #endif
 
 int rh_platform_retire_images(const struct rh_state *state) {
@@ -793,6 +825,7 @@ int rh_platform_retire_images(const struct rh_state *state) {
     view = rh_rules_view(state->rules, state->count);
     return rh_platform_retire_mapped_images(&view);
 }
+#if RH_HAS_NATIVE_CALENDAR
 /* Calendar source keys are not discovered by walking the launcher image: on
  * .043 that image holds a RAM snapshot; on .139/.155 it holds the generated
  * /data file. Retire only the exact compositing background, even for an explicit
@@ -845,13 +878,26 @@ int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
     return 0;
 }
 void rh_platform_calendar_publish(void) {
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+    rh_p65_calendar_publish();
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043
     rh_p67_calendar_publish();
 #elif !defined(RH_TARGET_1043) || !RH_TARGET_1043
     if (load32(RH_FW_CALENDAR_LAUNCHER_SLOT))
         ((void (*)(void))(uintptr_t)RH_FW_CALENDAR_PUBLISH)();
 #endif
 }
+#else
+int rh_platform_calendar_affected(const struct rh_mapping_view *previous,
+                                  const struct rh_mapping_view *current) {
+    (void)previous; (void)current; return 0;
+}
+int rh_platform_refresh_calendar(void) { return 0; }
+int rh_platform_calendar_retire(const struct rh_calendar_config *config) {
+    return config && config->custom ? -2157 : 0;
+}
+void rh_platform_calendar_publish(void) {}
+#endif /* RH_HAS_NATIVE_CALENDAR */
 struct object_list { uint32_t objects[RH_RELOAD_LIMIT], count, overflow; };
 /* Bound native walk recursion as well as the snapshot size. Parent +4 is
  * independently established by lv_obj_get_screen (0x0c3802a8). */
@@ -922,7 +968,7 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
          * share the image ownership contract, even if their base is image. */
         if (header_cache && load32(header_cache) == RH_FW_HEADER_CACHE_CLASS &&
             load32(header_cache + 8u) && load32(object) == RH_FW_IMAGE_OBJECT_CLASS &&
-            (*(const unsigned char *)(uintptr_t)(object + 96u) & 3u) == 1u) {
+            (*(const unsigned char *)(uintptr_t)(object + RH_FW_IMAGE_SOURCE_TYPE_OFFSET) & 3u) == 1u) {
             source = load32(object + 52u);
             /* Preflight: set_src's failure path clears the existing source.
              * Keep theme files immutable throughout this UI transaction.
@@ -937,7 +983,7 @@ int rh_platform_refresh_mapped_images(const struct rh_mapping_view *previous,
                 load32(header_cache + 8u) && live_object(object) &&
                 load32(object) == RH_FW_IMAGE_OBJECT_CLASS &&
                 load32(object + 52u) == source &&
-                (*(const unsigned char *)(uintptr_t)(object + 96u) & 3u) == 1u) {
+                (*(const unsigned char *)(uintptr_t)(object + RH_FW_IMAGE_SOURCE_TYPE_OFFSET) & 3u) == 1u) {
                 ((void (*)(uint32_t, uint32_t))(uintptr_t)RH_FW_IMAGE_SET_SRC)(object, source);
             }
         }
@@ -966,7 +1012,7 @@ int rh_platform_refresh_images(const struct rh_state *state) {
  * Deferred draw-unit decoders retain cache references until native release. */
 int rh_platform_redraw_ready(void) {
     uint32_t disp = *(volatile uint32_t *)(uintptr_t)RH_FW_DISPLAY_SLOT;
-    if (!disp || !*(volatile uint32_t *)(uintptr_t)(disp + 696u)) return 0;
+    if (!disp || !*(volatile uint32_t *)(uintptr_t)(disp + RH_FW_DISPLAY_ACTIVE_SCREEN_OFFSET)) return 0;
     if (*(volatile unsigned char *)(uintptr_t)(disp + 58u) & 2u) return 0;
     return *(volatile int32_t *)(uintptr_t)(disp + 608u) > 0;
 }
@@ -994,6 +1040,9 @@ int rh_platform_request_full_redraw(void) {
     }
     return -1;
 }
+#if RH_HAS_FONT_RELOAD && !(defined(RH_TARGET_P65) && RH_TARGET_P65)
+/* Legacy path-only registry helpers. The P65 font transaction owns its exact
+ * registry publication directly; it never uses the remove/re-add API below. */
 /* The font manager hangs off the uikit global at *0x200bd1e8 + 28. Its
  * registered-path list has the payload size at +24, the head at +28 and each
  * node laid out {name, path, prev, next} with next at node + payload + 4.
@@ -1062,3 +1111,11 @@ int rh_platform_font_retarget(uint32_t index, const char *path) {
     return same_string(resolved, path) ? 0 : -1;
 #endif
 }
+#else
+int rh_platform_font_path_get(uint32_t index, char *name, char *path) {
+    (void)index; (void)name; (void)path; return -1;
+}
+int rh_platform_font_retarget(uint32_t index, const char *path) {
+    (void)index; (void)path; return -1;
+}
+#endif /* RH_HAS_FONT_RELOAD */

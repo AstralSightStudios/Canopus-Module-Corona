@@ -11,6 +11,7 @@ TARGET_FLAGS = {
     'xiaomi-band-11-4.100.177': ['-DRH_TARGET_177=1'],
     'xiaomi-band-11-4.100.179': ['-DRH_TARGET_179=1'],
     'xiaomi-band-10-pro-3.101.043': ['-DRH_TARGET_1043=1'],
+    'redmi-watch-6-3.100.043': ['-DRH_TARGET_P65=1'],
 }
 
 

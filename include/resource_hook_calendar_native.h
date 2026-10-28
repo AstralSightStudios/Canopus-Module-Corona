@@ -23,5 +23,10 @@ int rh_calendar_native_render(const struct rh_calendar_config *,
 void rh_p67_calendar_publish(void);
 void rh_p67_calendar_cancel(void);
 int rh_p67_calendar_reset(void);
+#elif defined(RH_TARGET_P65) && RH_TARGET_P65
+/* P65 uses immutable FILE banks; reset drains retained render work before
+ * the coordinator clears derived-file redirection and publishes stock. */
+void rh_p65_calendar_publish(void);
+int rh_p65_calendar_reset(void);
 #endif
 #endif

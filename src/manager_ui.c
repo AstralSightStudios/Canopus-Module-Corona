@@ -855,8 +855,8 @@ static int request_reload(void) {
    button: a reference-protected package has to show a disabled state, and a
    bitmap cannot take the grey foreground. Disabled is drawn two ways at once
    because they cost nothing: the host's CANOPUS_UI_COLOR_DISABLED foreground,
-   plus style.opacity, which every shipped target now binds through
-   FW_UI_STYLE_OPA (the .043 generator emits it, EVID-UI-1043-OPACITY-001). The
+   plus style.opacity where the exact target has a recovered opacity property.
+   P65 retains the disabled foreground without an unbound style property. The
    title turns DANGER red while the action is live; the disabled copy keeps its
    event id because action_row rejects a zero one, and the runtime refuses the
    dispatch on its own through the cleared ENABLED flag. */
@@ -868,7 +868,7 @@ static int confirm_action(struct canopus_ui_tree_v1 *t,int32_t y,uint8_t enabled
     TRY(U.ctx->ui->action_row(t,KEY_ACTION,&p));
     TRY(box(t,KEY_ACTION,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,y,0,0,-1,0));
     if(enabled) s.variant=CANOPUS_UI_VARIANT_DESTRUCTIVE;
-    else {s.foreground=CANOPUS_UI_COLOR_DISABLED;s.opacity=500;}
+    else {s.foreground=CANOPUS_UI_COLOR_DISABLED;if(U.width!=432) s.opacity=500;}
     return U.ctx->ui->node_set_style(t,KEY_ACTION,&s);
 }
 static int build_confirm(struct canopus_ui_tree_v1 *t) {
@@ -1068,8 +1068,9 @@ static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     {uint32_t need=CANOPUS_UI_CAP_NAVIGATION_HEADER|CANOPUS_UI_CAP_LAYOUT|CANOPUS_UI_CAP_VISUAL|CANOPUS_UI_CAP_STYLE|CANOPUS_UI_CAP_FONT|CANOPUS_UI_CAP_IMAGE|CANOPUS_UI_CAP_IMAGE_FIT_CONTAIN|CANOPUS_UI_CAP_POINTER_EVENTS|CANOPUS_UI_CAP_CAPTURE|CANOPUS_UI_CAP_TRANSLATE|CANOPUS_UI_CAP_VIRTUAL_CONTENT|CANOPUS_UI_CAP_SCROLL|CANOPUS_UI_CAP_PROGRESS;
     if((caps&need)!=need) return CANOPUS_UI_ERR_UNSUPPORTED;}
     ctx->display->get_resolution(ctx,&U.width,&U.height);U.wide=U.width>=300;
-    U.content_height=U.wide?424:444;U.row_width=U.wide?336:204;
-    if((U.wide && (U.width!=336 || U.height!=480)) || (!U.wide && (U.width!=212 || U.height!=520))) return CANOPUS_UI_ERR_UNSUPPORTED;
+    U.content_height=U.wide?U.height-56:444;U.row_width=U.wide?U.width:204;
+    if((U.wide && !((U.width==336 && U.height==480) || (U.width==432 && U.height==514))) ||
+       (!U.wide && (U.width!=212 || U.height!=520))) return CANOPUS_UI_ERR_UNSUPPORTED;
     rc=rh_manager_assets_install(ctx);if(rc) return rc;
     U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=0;U.suppressed=0;U.banner_hidden=0;
     U.delete_blocked=0;U.confirm_error[0]=0;

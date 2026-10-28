@@ -22,6 +22,7 @@ BAND155 = 'xiaomi-band-11-4.100.155'
 BAND177 = 'xiaomi-band-11-4.100.177'
 BAND179 = 'xiaomi-band-11-4.100.179'
 P67 = 'xiaomi-band-10-pro-3.101.043'
+P65 = 'redmi-watch-6-3.100.043'
 
 
 class CanonicalDelivery(unittest.TestCase):
@@ -38,7 +39,7 @@ class CanonicalDelivery(unittest.TestCase):
         (self.root / 'Canopus.toml').write_text((ROOT / 'Canopus.toml').read_text())
         for name in ('README.md', '.gitignore', 'docs/INSTALL.md', 'docs/FONT_RELOAD.md'):
             (self.root / name).write_text('orchestration fixture\n')
-        self.png_input = self.root / 'manager/src/common/images/status-running.png'
+        self.png_input = self.root / 'assets/manager/images/status-running.png'
         self.png_input.parent.mkdir(parents=True)
         self.png_input.write_bytes(b'opaque PNG source fixture')
         manifest = tomllib.loads((self.root / 'Canopus.toml').read_text())
@@ -46,7 +47,7 @@ class CanonicalDelivery(unittest.TestCase):
             resource = self.root / relative
             resource.parent.mkdir(parents=True, exist_ok=True)
             resource.write_bytes(b'LVGL fixture: ' + resource.name.encode())
-        for target in (BAND139, BAND155, BAND177, BAND179, P67):
+        for target in (BAND139, BAND155, BAND177, BAND179, P67, P65):
             directory = self.root / 'targets' / target
             directory.mkdir()
             (directory / 'evidence.md').write_text('not device evidence\n')
@@ -109,7 +110,8 @@ class CanonicalDelivery(unittest.TestCase):
     def native_commands(self):
         return [(command, env) for command, env in self.commands
                 if any(Path(argument).name.startswith('firmware_') or
-                       Path(argument).name == 'test_calendar_native.py' for argument in command)]
+                       Path(argument).name in ('test_calendar_native.py', 'test_p65_calendar_native.py',
+                                               'test_p65_blur.py') for argument in command)]
 
     def test_default_is_155_canopus_without_lua_or_watchface(self):
         self.invoke()
@@ -137,7 +139,7 @@ class CanonicalDelivery(unittest.TestCase):
                             for command, _ in self.commands))
 
     def test_aggregate_contains_all_selected_fresh_targets_without_transport_gate(self):
-        selected = [BAND139, BAND155, BAND177, BAND179, P67]
+        selected = [BAND139, BAND155, BAND177, BAND179, P67, P65]
         arguments = [argument for target in selected for argument in ('--target', target)]
         self.invoke(*arguments)
         self.assertEqual(self.packaged_targets, selected)
@@ -183,6 +185,37 @@ class CanonicalDelivery(unittest.TestCase):
         self.assertEqual(metadata['font_reload_device_status'], 'NOT_PROBED')
         self.assertEqual(metadata['native_firmware_suites'][BAND179], ['test_calendar_native'])
         self.assertEqual(metadata['cross_target_suites'], [])
+
+    def test_p65_selects_exact_harness_and_enables_all_features_by_default(self):
+        self.invoke('--target', P65, '--firmware-tests', firmware_python='/mock/firmware-python')
+        self.assertEqual(self.packaged_targets, [P65])
+        native = self.native_commands()
+        self.assertEqual([Path(command[1]).name for command, _ in native], ['firmware_p65.py', 'firmware_p65_features.py', 'firmware_p65_font.py', 'test_p65_calendar_native.py', 'test_p65_blur.py'])
+        self.assertEqual(native[0][1]['RESOURCE_HOOK_TARGET'], P65)
+        metadata = json.loads((self.output / 'validation.json').read_text())
+        self.assertEqual(metadata['firmware_sha256'][P65],
+                         'a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858')
+        self.assertEqual(metadata['native_firmware_suites'][P65], ['firmware_p65', 'firmware_p65_features', 'firmware_p65_font', 'test_p65_calendar_native', 'test_p65_blur'])
+        self.assertEqual(metadata['cross_target_suites'], [])
+        self.assertTrue(metadata['font_reload'])
+        self.assertEqual(metadata['font_reload_device_status'], 'NOT_PROBED')
+        self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
+        self.assertEqual(metadata['background_blur_mode'], 'active_module_owned_snapshot_static_rgb565')
+        self.assertEqual(metadata['target_features'][P65], {
+            'font_reload': True, 'native_backgrounds': True,
+            'calendar': True, 'device_status': 'NOT_PROBED',
+        })
+
+    def test_mixed_p65_bundle_keeps_legacy_support_per_target(self):
+        self.invoke('--target', BAND155, '--target', P65)
+        metadata = json.loads((self.output / 'validation.json').read_text())
+        self.assertTrue(metadata['font_reload'])
+        self.assertEqual(metadata['font_reload_device_status'], 'NOT_PROBED')
+        self.assertEqual(metadata['target_features'][P65]['device_status'], 'NOT_PROBED')
+        self.assertNotIn('USER_REPORTED_PASS', json.dumps(metadata['target_features'][P65]))
+        self.assertTrue(metadata['target_features'][BAND155]['font_reload'])
+        self.assertTrue(metadata['target_features'][P65]['font_reload'])
+        self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
 
     def test_explicit_firmware_checks_run_exact_target_suites(self):
         self.invoke('--target', BAND155, '--firmware-tests', firmware_python='/mock/firmware-python')

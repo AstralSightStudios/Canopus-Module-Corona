@@ -116,6 +116,19 @@ class TargetReceipts(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(target, result.stdout)
 
+    def test_cli_requires_explicit_p65_target(self):
+        target = 'redmi-watch-6-3.100.043'
+        self.assertEqual(verifier.TARGETS[target],
+                         'a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858')
+        self.payload(target)
+        command = [sys.executable, str(ROOT / 'scripts/verify-payload.py'), str(self.directory)]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('target ID', result.stderr)
+        result = subprocess.run(command + ['--target', target], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(target, result.stdout)
+
     def test_legacy_cmi1_is_rejected(self):
         self.payload(verifier.TARGET)
         path = self.directory / 'receipt.bin'

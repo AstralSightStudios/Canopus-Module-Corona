@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Corona native manager acceptance on real Mirage firmware (.043 / .155).
+"""Corona native manager acceptance on real Mirage firmware (.043 / .155 / p65).
 
 One target per invocation; run two processes with separate --library and --work.
 Consumes prebuilt production installer resources and an immutable .canopus package.
@@ -54,7 +54,7 @@ def executable(env, candidates):
 
 def arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("target", choices=("043", "155"))
+    parser.add_argument("target", choices=("043", "155", "p65"))
     parser.add_argument("--canopus-root", type=Path, default=Path(os.environ.get("CANOPUS_ROOT", ROOT.parent / "Canopus-Private")))
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
@@ -82,7 +82,8 @@ def arguments():
     if args.work.exists() and any(args.work.iterdir()):
         parser.error("--work must be empty so stale evidence cannot pass assertions")
     if args.installer_dir is None:
-        family = "xiaomi-band-10-pro" if args.target == "043" else "xiaomi-band-11"
+        family = {"043": "xiaomi-band-10-pro", "155": "xiaomi-band-11",
+                  "p65": "redmi-watch"}[args.target]
         args.installer_dir = args.canopus_root / "watchfaces/canopus-installer-prod" / family
     return parser, args
 
@@ -98,7 +99,10 @@ def configure(args):
         "/Volumes/EXT0/Mirage/AstroBoxBridge/target/smoke", mirage / "AstroBoxBridge/target/smoke"]))
     os.environ["FACETORY_PACKAGER"] = str(executable("FACETORY_PACKAGER", [
         "/Volumes/EXT0/GitHub/facetory/rust/target/debug/examples/package_lua_watchface",
-        home / "develop/flutter/Facetory/rust/target/debug/examples/package_lua_watchface"]))
+        home / "develop/flutter/Facetory/rust/target/debug/examples/package_lua_watchface",
+        home / "develop/flutter/Facetory/rust/target/release/examples/package_lua_watchface",
+        home / "develop/Flutter/Facetory/rust/target/debug/examples/package_lua_watchface",
+        home / "develop/Flutter/Facetory/rust/target/release/examples/package_lua_watchface"]))
     os.environ["MIRAGE_QEMU"] = str(executable("MIRAGE_QEMU", [
         mirage / "External/qemu-miwear/build/qemu-system-arm",
         "/Volumes/EXT0/Mirage/External/qemu-miwear/build/qemu-system-arm"]))
@@ -106,7 +110,39 @@ def configure(args):
     sys.path.insert(0, str(args.canopus_root / "scripts/emu"))
     ui = importlib.import_module("ui_pages")
     native = importlib.import_module("native_ui_v2")
-    ui.P = ui.Band10Pro if args.target == "043" else ui.Band11
+    class RedmiWatch6(ui.Band10Pro):
+        """P65 panel and wide native content; touch positions await Mirage validation.
+
+        The installer uses a wrapping row: 196+196px title/status fit side by
+        side, followed by two 184px buttons. Its Run centre is (124, 380).
+        Native content begins at y=56 and uses 96px rows with 8px gaps.
+        """
+        name = "p65"
+        target = "redmi-watch-6-3.100.043"
+        firmware = "miwear.watch.p65_v3.100.043_full_662aa7db"
+        size = (432, 514)
+        wake_taps = [(216, 257), (216, 257)]
+        pair_wake = [(216, 257), (216, 257)]
+        pair_confirm = (330, 468)
+        run = (124, 380)
+        idle = (216, 490)
+        dot = None
+        tutorial_skip = None
+        launcher_open = (216, 490, 216, 70)
+        launcher_scroll = (16, (216, 470, 216, 70))
+        manager_icon = (360, 288)
+        icon_probe = (360, 248)
+        home_scroll = (4, (216, 450, 216, 120))
+        modules_row = (216, 190)
+        first_module = (216, 145)
+        scroll_top = (2, (216, 150, 216, 470))
+        third_row = (216, 340)
+        dialog_confirm = (216, 459)
+        level2_back = (30, 28)
+        close_page = ("tap", (30, 28))
+        reboot_before_pages = False
+
+    ui.P = {"043": ui.Band10Pro, "155": ui.Band11, "p65": RedmiWatch6}[args.target]
     ui.P.device = f"corona-manager-{args.target}-{time.time_ns()}"
     ui.M = {"id": "corona"}
     return ui, native
@@ -117,7 +153,11 @@ def check_inputs(args, ui):
     if not args.package.is_file():
         missing.append(str(args.package))
     supervisor = args.installer_dir / f"canopus_supervisor-{ui.P.target}.bin"
-    for path in (args.installer_dir / "main.lua", supervisor):
+    required_installer = [args.installer_dir / "main.lua", supervisor]
+    if args.target == "p65":
+        required_installer.extend(args.installer_dir / f"canopus_{part}-{ui.P.target}.bin"
+                                  for part in ("stage1", "stage2", "loader_profile"))
+    for path in required_installer:
         if not path.is_file():
             missing.append(str(path))
     if missing:
@@ -394,6 +434,8 @@ def main():
               "tools": {name: os.environ[name] for name in ("MIRAGECTL", "MAB_SMOKE", "FACETORY_PACKAGER", "MIRAGE_QEMU")},
               "status": "running",
               "visual_review": "not performed by harness", "scenario": scenario,
+              **({"touch_coordinates": "implementation-derived; pending emulator validation"}
+                 if args.target == "p65" else {}),
               "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     (args.work / "run.json").write_text(json.dumps(record, indent=2) + "\n")
     created = False

@@ -1,6 +1,7 @@
 #include "resource_hook_calendar_runtime.h"
 #include "resource_hook_calendar_native.h"
 #include "resource_hook_platform.h"
+#include "resource_hook_target.h"
 
 static struct rh_calendar_config *active;
 static struct rh_calendar_date generated;
@@ -36,6 +37,7 @@ int rh_calendar_stage_from(const char *path, struct rh_calendar_config **out) {
     }
     rh_platform_close(fd);
     if (!rc && rh_calendar_parse(text, used, c)) rc = -2153;
+    if (!rc && !RH_HAS_NATIVE_CALENDAR && c->custom) rc = -2157;
     rh_platform_free(text);
     if (rc) rh_calendar_discard(c); else *out = c;
     return rc;
@@ -46,13 +48,18 @@ int rh_calendar_stage(struct rh_calendar_config **out) {
 int rh_calendar_exchange(struct rh_calendar_config *c, struct rh_calendar_config **previous) {
     struct rh_calendar_config *old;
     uint32_t irq;
-    if (!previous) return -2153;
+    if (!previous || (!RH_HAS_NATIVE_CALENDAR && c && c->custom)) return -2153;
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
     old = active; active = c; initialized = c != 0;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     dirty = c && c->custom ? 1u : 0u;
     if (!c || !c->custom) ready = 0;
+#elif defined(RH_TARGET_P65) && RH_TARGET_P65
+    /* Keep the previous FILE bank selected until default restoration drains
+     * retained render work. A fresh default has nothing to clean or publish. */
+    dirty = c && (c->custom || old) ? 1u : 0u;
+    if (!c) ready = 0;
 #else
     dirty = 1;
 #endif
@@ -90,6 +97,7 @@ static int generate(unsigned force) {
 #endif
     int rc;
     uint32_t irq;
+    if (!RH_HAS_NATIVE_CALENDAR) return 0;
     if (!initialized || !active || !rh_platform_redraw_ready()) return -2154;
     irq = rh_platform_lock();
     if (busy) { rh_platform_unlock(irq); return -2154; }
@@ -103,6 +111,20 @@ static int generate(unsigned force) {
         irq = rh_platform_lock();
         ready = dirty = 0;
         rh_platform_unlock(irq);
+        rc = 0; goto done;
+    }
+#endif
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+    if (!active->custom) {
+        if (!dirty && !ready) { rc = 0; goto done; }
+        if (rh_p65_calendar_reset()) { rc = -2154; goto done; }
+        /* The logical filename stays unchanged when restoring stock. Retire
+         * its derived decoder/header keys before native same-source setters. */
+        if (ready && rh_platform_calendar_retire(active)) { rc = -2154; goto done; }
+        irq = rh_platform_lock();
+        ready = dirty = 0;
+        rh_platform_unlock(irq);
+        rh_platform_calendar_publish();
         rc = 0; goto done;
     }
 #endif
@@ -153,13 +175,17 @@ done:
 int rh_calendar_refresh(void) { return generate(1); }
 int rh_calendar_poll(void) { return generate(0); }
 int rh_calendar_pending(void) {
+    if (!RH_HAS_NATIVE_CALENDAR) return 0;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     return active && active->custom && (dirty || !ready);
+#elif defined(RH_TARGET_P65) && RH_TARGET_P65
+    return active && (dirty || (active->custom && !ready));
 #else
     return dirty || !ready;
 #endif
 }
 const char *rh_calendar_redirect(const char *path) {
+    if (!RH_HAS_NATIVE_CALENDAR) return 0;
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
     (void)path;
     return 0; /* P67 publishes a RAM source, never a derived file. */

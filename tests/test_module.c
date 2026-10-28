@@ -175,7 +175,7 @@ const char *rh_calendar_redirect(const char *path) {
     return calendar_hook_mode && path && !strcmp(path, &RH_CALENDAR_OUTPUT_PATH[1])
         ? &RH_CALENDAR_BANK0[1] : NULL;
 }
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
 #define BACKGROUNDS_CONFIG_PATH RH_APP_FILES_ROOT "backgrounds.cfg"
 static const char *background_config; /* Missing in all legacy scenarios. */
 static unsigned background_position, background_opens, background_reads, background_closes;
@@ -419,7 +419,7 @@ static int32_t fs_open(const struct canopus_context_v1 *ctx, const char *path, u
         result_position=0; return 14;
     }
     assert(mode == CANOPUS_FS_READ);
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
     if (!strcmp(path, BACKGROUNDS_CONFIG_PATH)) {
         background_opens++;
         background_position = 0;
@@ -483,7 +483,7 @@ static int32_t fs_read(const struct canopus_context_v1 *ctx, int32_t fd, void *o
     }
     if (fd == 11) { data = input; cursor = &position; }
     else if (fd == 12) { data = control_signal; cursor = &signal_position; }
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
     else if (fd == 16) {
         assert(background_config);
         background_reads++;
@@ -565,7 +565,7 @@ static int32_t fs_close(const struct canopus_context_v1 *ctx, int32_t fd) {
     defined(RH_P67_BLUR_DIAGNOSTICS) && RH_P67_BLUR_DIAGNOSTICS
     if (fd == 17) { assert(in_ui_timer); return 0; }
 #endif
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
     if (fd == 16) { background_closes++; return 0; }
 #endif
     assert(fd == 11 || fd == 12 || fd == 13); closes++;
@@ -909,7 +909,7 @@ static void assert_reload_status(int result, unsigned pending, unsigned changed,
              result, pending, changed, error ? "config_error" : "running", error, count);
     assert_result(control_signal, row);
 }
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
 static void assert_background_map_unchanged(const struct temp_allocation *original) {
     assert(original && original->live && persistent_allocs == 1u);
     assert(slot(&driver, "resource/icon.bin", 2) == 7);
@@ -1351,7 +1351,7 @@ static int test_calendar_coordinator_guards(void) {
     control_config = config;
     control_signal = "resource-hook-reload-v1\tcalendar-recover\n";
     fire_timers(1000u);
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
     background_commit_rc = -2145;
     control_config = "/resource/a.bin\tthemes/current/a.bin\n/resource/b.bin\tthemes/current/b.bin\n";
     control_signal = "resource-hook-reload-v1\tcalendar-failed-background-commit\n";
@@ -2552,7 +2552,7 @@ static int test_manager_reentrant_reload(void) {
     in_ui_timer = 0;
     rh_module_get_status_snapshot(&status);
     assert(status.reload_result == -2103 && status.error_code == -2103);
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
     control_config = config;
     background_config = "version=1\nmode=system\n";
     background_stage_rc = -2142;
@@ -2639,7 +2639,7 @@ int main(int argc, char **argv) {
         return test_blur_diagnostic_writer();
 #endif
     test_relative_config();
-#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043)
+#if RH_Q66_BACKGROUND || (defined(RH_TARGET_1043) && RH_TARGET_1043) || (defined(RH_TARGET_P65) && RH_TARGET_P65)
     if (argc == 2 && !strcmp(argv[1], "--launcher-background"))
         return test_launcher_background();
 #endif
@@ -2702,7 +2702,9 @@ int main(int argc, char **argv) {
     assert(!strcmp((const char *)d->module_id, "corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
     assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
-#if defined(RH_TARGET_1043) && RH_TARGET_1043
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+    assert(!strcmp((const char *)d->target_id, "redmi-watch-6-3.100.043"));
+#elif defined(RH_TARGET_1043) && RH_TARGET_1043
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-10-pro-3.101.043"));
 #elif defined(RH_TARGET_179) && RH_TARGET_179
     assert(!strcmp((const char *)d->target_id, "xiaomi-band-11-4.100.179"));

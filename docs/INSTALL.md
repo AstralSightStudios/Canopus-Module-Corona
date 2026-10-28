@@ -1,7 +1,8 @@
 # Resource Hook 安装与验收
 
 适用交付：Canopus-Module-Resource-Hook **0.3.0**，支持 Xiaomi Band 11
-**4.100.139 / 4.100.155 / 4.100.177 / 4.100.179** 与 Xiaomi Band 10 Pro **3.101.043**。各固件使用独立
+**4.100.139 / 4.100.155 / 4.100.177 / 4.100.179**、Xiaomi Band 10 Pro **3.101.043**
+与 REDMI Watch 6 **3.100.043**。各固件使用独立
 ELF 和收据，不能混用。新版模块交付为 `.canopus` 包，包含按精确 target 绑定的
 ELF 和无签名 CMI2 回执。AstroBox 的 Canopus 入口查询设备 target，选择对应产物，
 通过 WearPacket L2 `0x43` / CPC2 原生分块安装；各目标遵循相同协议，通信后端由框架适配。
@@ -17,6 +18,11 @@ revision 2 通过独立静态证据补齐可见区域函数的 Thumb 身份并�
 用户已反馈三个目标的正常字体重载实机验收通过（**USER_REPORTED_PASS**），字体事务
 现已默认启用；该反馈不自动覆盖 GPU 故障、框架重启或所有资源 owner，也不代表新生成
 的每份交付产物均重新做过实机测试。详见[字体重载说明](FONT_RELOAD.md)。
+
+P65 `3.100.043` 的图片、快应用图标、字体、日历、四区域背景与静态模糊均默认编入，
+需要匹配的 P65 revision **3** pack 和重新构建的 Supervisor。P65 完整功能的
+设备／GPU 行为为 **NOT_PROBED**；主题缺省仍保留系统外观。具体接口与测试边界见
+[P65 适配记录](../targets/redmi-watch-6-3.100.043/README.md)。
 
 ## .155 历史图标单项实机记录
 
@@ -46,6 +52,7 @@ revision 2 通过独立静态证据补齐可见区域函数的 Thumb 身份并�
   - `.177`：`ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b`
   - `.179`：`307adabe0ff61c77be73d045a8260e279cddd131c7a535a2678eb34199278a2b`
   - `10 Pro .043`：`519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec`
+  - `P65 .043`：`a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858`
 - 已重新部署兼容 Canopus ABI **1.2**、CMI2 和 CPC2 的新版 Supervisor。
   新框架拒绝旧 registry / inbox 格式；先备份主题配置并按框架流程重装 Supervisor。
 - 操作方必须具备文件传输、Manager 控制及故障后的设备重启/恢复手段。

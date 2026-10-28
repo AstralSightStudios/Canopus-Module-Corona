@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "target": "redmi-watch-6-3.100.043",
+  "firmware_sha256": "a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858",
+  "status": "STATIC_RECOVERED",
+  "device": "NOT_PROBED",
+  "approval": "PENDING",
+  "owners": {
+    "launcher": {
+      "root_slot": "0x3c456fa8",
+      "native_menu_slot": "0x3c456fa0"
+    },
+    "control_center": {
+      "root_slot": "0x3c453b98"
+    },
+    "notifications": {
+      "root_slot": "0x3c459a08",
+      "snapshot_slot": "0x3c4599dc",
+      "scroll_callback": "0x0c8078d5"
+    },
+    "widgets": {
+      "root_slot": "0x3c456b9c",
+      "snapshot_slot": "0x3c456ba0",
+      "scroll_callback": "0x0c7dd919"
+    }
+  },
+  "events": {
+    "DRAW_MAIN_BEGIN": 22,
+    "DRAW_MAIN": 23,
+    "DRAW_MAIN_END": 24,
+    "DRAW_POST_BEGIN": 25,
+    "DRAW_POST": 26,
+    "DRAW_POST_END": 27,
+    "DELETE": 35
+  },
+  "image_draw_descriptor": {
+    "size": 92,
+    "source": 28,
+    "scale_x": 48,
+    "scale_y": 52,
+    "pivot_x": 64,
+    "pivot_y": 68
+  },
+  "delete_call_witness": {
+    "address": "0x0037ff70",
+    "file_offset": "0x19f88",
+    "bytes": "93fb844248d000222321204607f0faff00283ad0",
+    "event": 35
+  },
+  "battery": {
+    "applicability": "Preserve native P65 64x40 translucent battery child and charging content; P67 custom122x92 white battery ABI is absent",
+    "constructor": "0x0c21b4b0",
+    "background_opacity": 76
+  },
+  "functions_file": "background-functions.json",
+  "tests": [
+    "tests/test_p65_backgrounds.py"
+  ],
+  "hardware": "NOT_PROBED",
+  "redraw_prechildren_witness": {
+    "address": "0x00383928",
+    "file_offset": "0x1d940",
+    "bytes": "f08f9be80f0084e80f0016214246304604f01cfb42461721304604f017fb18214246304604f012fb4ff48011",
+    "events": [
+      22,
+      23,
+      24
+    ]
+  },
+  "watchface_capture_root": {
+    "slot": "0x3c46c020",
+    "native_capture_function": "0x0c8fa0f8",
+    "native_snapshot_to_buffer": "0x0c8be3b8",
+    "format": 15,
+    "ownership": "module reads live watchface root; never acquires native pooled descriptor"
+  }
+}

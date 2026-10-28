@@ -24,6 +24,10 @@ def firmware_test_commands(target, python):
     """Select only suites that actually support the exact requested AP."""
     if target not in TARGETS:
         raise ValueError(f'unsupported target: {target}')
+    if target == 'redmi-watch-6-3.100.043':
+        return [(name, [python, str(ROOT / 'tests' / (name + '.py'))])
+                for name in ('firmware_p65', 'firmware_p65_features',
+                             'firmware_p65_font', 'test_p65_calendar_native', 'test_p65_blur')]
     if target == 'xiaomi-band-11-4.100.179':
         # Selected native calendar instructions and the compiled adapter only.
         return [('test_calendar_native', [python, str(ROOT / 'tests/test_calendar_native.py')])]
@@ -152,15 +156,16 @@ def main():
         for name in ('src', 'include', 'scripts', 'tests', 'tools', 'docs', 'examples', 'targets'):
             shutil.copytree(ROOT / name, source / name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         # The native Manager asset generator needs these original PNG inputs.
-        shutil.copytree(ROOT / 'manager/src/common', source / 'manager/src/common')
+        shutil.copytree(ROOT / 'assets/manager', source / 'assets/manager')
         for name in ('Canopus.toml', 'README.md', '.gitignore'):
             shutil.copyfile(ROOT / name, source / name)
         (stage / 'README.md').write_text(
             '# Resource Hook 0.3.0 integration delivery\n\n'
             f'Targets: {", ".join(targets)}. New artifact physical device: NOT_PROBED.\n\n'
             'Font reload: legacy targets have user reports; .177/.179 are NOT_PROBED. '
-            'Transactional font reload is included by default; GPU recovery and framework '
-            'restart safety remain unsupported.\n\n'
+            'P65 font reload, native backgrounds, blur and calendar are included by default; device NOT_PROBED. '
+            'Supported targets include transactional font reload by default; GPU recovery and framework '
+            'restart safety remain unsupported. See validation.json target_features for exact support.\n\n'
             '- Read INSTALL.md before installing or enabling.\n'
             f'- {package_name}: install through AstroBox Canopus using native L2/CPC2.\n'
             '- payload/: per-target ELF/CMI2, Canopus package, example mapping and verifier.\n'
@@ -182,15 +187,13 @@ def main():
                     shutil.copyfile(item, destination / item.name)
         (stage / 'validation.json').write_text(json.dumps({
             **OPTIONS['background_metadata'](targets, diagnostics),
+            **OPTIONS['feature_metadata'](targets),
             'module': 'corona', 'version': module_version,
             'project_id': project_id,
             **({'target': targets[0]} if len(targets) == 1 else {}),
             'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',
-            'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
-            'font_reload_device_status': ('NOT_PROBED'
-                if any(target.endswith(('4.100.177', '4.100.179')) for target in targets)
-                else 'USER_REPORTED_PASS'),
+            'module_build_id': 'resource-hook-0.3.0',
             'receipt_format_version': 2,
             'delivery_format': 'canopus', 'package': package_name,
             'transport': 'wearpacket-l2-cpc2',
@@ -228,7 +231,7 @@ def main():
     print(f'Release bundle (new artifacts NOT_PROBED): {output}')
     print(f'Installable module: {output / package_name}')
     print(f'Archive: {output / archive.name}')
-    print('Font reload: legacy user reports; .177/.179 and new artifacts NOT_PROBED.')
+    print('Font reload: enabled by default; P65/.177/.179 and new artifacts NOT_PROBED.')
     print('GPU recovery/restart safety unsupported; no device was modified.')
 
 

@@ -1,0 +1,280 @@
+{
+  "target": "redmi-watch-6-3.100.043",
+  "firmware_sha256": "a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858",
+  "status": "STATIC_RECOVERED_HOST_AND_SELECTED_NATIVE_INSTRUCTION_TESTED",
+  "device": "NOT_PROBED",
+  "production_approval": false,
+  "functions": [
+    {
+      "name": "RH_FW_FR_METRICS",
+      "address": "0xc734998",
+      "file_offset": "0x674998",
+      "bytes": "2de9f0471f2a8cb00c4604af3ed98669924698463268334b9a4251d10023c7e9",
+      "sha256": "a24703dfe22f3cf5de70945c4e6a8285bd153dc1ae7c6907c3866a742a94cb55"
+    },
+    {
+      "name": "RH_FW_FR_OUTLINE",
+      "address": "0xc734e48",
+      "file_offset": "0x674e48",
+      "bytes": "2de9f04186b00268224b946904af22689a422dd1d4f834800546d8f80c300e46",
+      "sha256": "d3ddc7cb9bb7596095472e2e3ed2f3cef99f52bc6a266ce97eeaa8569b3a5890"
+    },
+    {
+      "name": "RH_FW_FR_GLYPH_RELEASE",
+      "address": "0xc734e2c",
+      "file_offset": "0x674e2c",
+      "bytes": "98b50c46496900af39b1836900225b6b586906f0adfd0023636198bd2de9f041",
+      "sha256": "5497740bdbce0d7f3fd78f36eb0dd9abfe790f5e4e24e922cb4f127063abd18b"
+    },
+    {
+      "name": "RH_FW_FR_ALLOC",
+      "address": "0xc741b0c",
+      "file_offset": "0x681b0c",
+      "bytes": "08b90348704780b500affff789ff80bd9800453cb0b500af10b9074d2846b0bd",
+      "sha256": "a3dc1331d07a077e6ad19a933cba97c704cb7a4ddf7577f32afeb00b8eb5dbe2"
+    },
+    {
+      "name": "RH_FW_FR_FREE",
+      "address": "0xc741b48",
+      "file_offset": "0x681b48",
+      "bytes": "044a904205d020b180b500affff776ff80bd70479800453cb0b582b0134c02af",
+      "sha256": "fcead877b0821280f7a84332709f34b9398c7b9a4edd393e0f623c880f8ed7ca"
+    },
+    {
+      "name": "RH_FW_FR_OUTLINE_EVENT",
+      "address": "0xc729aa4",
+      "file_offset": "0x669aa4",
+      "bytes": "b0b582b002af054613f008ff0446284613f00eff222c05460fd0232c1fd01e2c",
+      "sha256": "585314c41faf2459f5278b4b3f976d7e190325ed5feb4f13d112eac6cd5bc17c"
+    },
+    {
+      "name": "RH_FW_FR_FACE_COMPARE",
+      "address": "0xc734314",
+      "file_offset": "0x674314",
+      "bytes": "c288cb889a4203d182888b889a4205d001d9012070474ff0ff30704780b50968",
+      "sha256": "5d5bcc27b3222354ae6c9b9f8719194d52da37ceda842f190093b274801d761f"
+    },
+    {
+      "name": "RH_FW_FR_FACE_CREATE",
+      "address": "0xc7341e8",
+      "file_offset": "0x6741e8",
+      "bytes": "b0b588b004461e4b02afd3f8d411002208683b1d216831f61fff0546c8b98022",
+      "sha256": "27ba2cc0ff76e4c81f151ca6b80d22e55b66d762489d76a504ab7364cd71534c"
+    },
+    {
+      "name": "RH_FW_FR_FACE_DESTROY",
+      "address": "0xc73415c",
+      "file_offset": "0x67415c",
+      "bytes": "b0b5044600afc0680d4631f647fd206920b1294607f0dcfb00232361606920b1",
+      "sha256": "db8ab842399d905e4efac94568e91fd6f6ce4578027f66e3af406e264767f926"
+    },
+    {
+      "name": "RH_FW_FR_METRICS_COMPARE",
+      "address": "0xc734a98",
+      "file_offset": "0x674a98",
+      "bytes": "80b40b68026800af9a4203d142684b689a420bd005d84ff0ff30bd465df8047b",
+      "sha256": "2aaee81cb9fd28bab657abe57bafa8b23eae2b0bf0ef490b939c5b986a7e7d4a"
+    },
+    {
+      "name": "RH_FW_FR_METRICS_CREATE",
+      "address": "0xc734898",
+      "file_offset": "0x674898",
+      "bytes": "2de9f04184b04b6b0d46d3f80c8002af0446d8f85c0031f6c3ff296b02462368",
+      "sha256": "c532256afc82ed6c5974ed7e63abe5c7b7fdfa3c13c9a19d4b4aa398ca9213ce"
+    },
+    {
+      "name": "RH_FW_FR_METRICS_DESTROY",
+      "address": "0xc73488c",
+      "file_offset": "0x67488c",
+      "bytes": "80b400afbd465df8047b70472de9f04184b04b6b0d46d3f80c8002af0446d8f8",
+      "sha256": "4221e01bce9daad6a8140b974ee22138c6377cbc02a41dc0ebda4053ca0e7c01"
+    },
+    {
+      "name": "RH_FW_FR_OUTLINE_COMPARE",
+      "address": "0xc734dfc",
+      "file_offset": "0x674dfc",
+      "bytes": "80b40b68026800af9a420bd005d84ff0ff30bd465df8047b70470120bd465df8",
+      "sha256": "c10f81394717cb0f1a6eb7cd9c3758a4fcb3eac53ff71fe457c3c16f0f2160ed"
+    },
+    {
+      "name": "RH_FW_FR_OUTLINE_CREATE",
+      "address": "0xc7351fc",
+      "file_offset": "0x6751fc",
+      "bytes": "2de9f047a0b00b460646d3e90c82d2e902250021284602afb3f82c90d6f800a0",
+      "sha256": "2d32723b7ef90480cdc78799218bea766b675f55032bca0bf1c227a17a919d89"
+    },
+    {
+      "name": "RH_FW_FR_OUTLINE_DESTROY",
+      "address": "0xc734efc",
+      "file_offset": "0x674efc",
+      "bytes": "b0b592b002af4568fff7a2fc202204460021b8180cf0bcfda3693d628bb1381d",
+      "sha256": "67ed3a90935324085eafddb61b9dd2df1d2dbc2dfc7f90bca3ec8cbcfce13ac0"
+    },
+    {
+      "name": "RH_FW_FR_VG_DISPATCH",
+      "address": "0xc7287f8",
+      "file_offset": "0x6687f8",
+      "bytes": "2de9f04190b00d46816900af21b100204037bd46bde8f081044602222846f0f7",
+      "sha256": "b90bc09a388a9073c8d447611aa07656562afcd94b8dc20c7b895cdc11a7e222"
+    },
+    {
+      "name": "RH_FW_FR_SW_DISPATCH",
+      "address": "0xc7222bc",
+      "file_offset": "0x6622bc",
+      "bytes": "f8b50d46816900af09b10020f8bd044601222846f6f78efb0646a0b12846f6f7",
+      "sha256": "e3b9075962303fcc6a5d4c866a708ef34727319d42e474d25fa03e3aa958a40a"
+    },
+    {
+      "name": "RH_FW_FR_GLYPH_PENDING_FREE",
+      "address": "0xc72de38",
+      "file_offset": "0x66de38",
+      "bytes": "80b500afeff71afa80bd00bf2de9f04f9fb006af07f120043a1d394620468ff1",
+      "sha256": "a00fa2b00f2133195fe3f42bf59be6fba496ec0cfcdb104a9d6e73155ac31bf6"
+    },
+    {
+      "name": "RH_FW_FR_IMAGE_PENDING_FREE",
+      "address": "0xc72b7bc",
+      "file_offset": "0x66b7bc",
+      "bytes": "0b4680b50022016800af184610f0e8f880bd00bff0b585b00c3004af93f11ef8",
+      "sha256": "65bfbdb27d1a2934d606b8cec6feb56a4e59630b2b28a3a59bf5ef23f147e4af"
+    },
+    {
+      "name": "RH_FW_FR_GRADIENT_PENDING_FREE",
+      "address": "0xc72b7bc",
+      "file_offset": "0x66b7bc",
+      "bytes": "0b4680b50022016800af184610f0e8f880bd00bff0b585b00c3004af93f11ef8",
+      "sha256": "65bfbdb27d1a2934d606b8cec6feb56a4e59630b2b28a3a59bf5ef23f147e4af"
+    },
+    {
+      "name": "RH_FW_FR_CACHE_INIT",
+      "address": "0xc73b5e8",
+      "file_offset": "0x67b5e8",
+      "bytes": "f0b583b0456802af15b3836804467bb106696eb183695bb1284600f033fb0246",
+      "sha256": "77c2f9d73cfe81fd174d090e9196118a8cc81fe90c0caceeabb830b531ca36a1"
+    },
+    {
+      "name": "RH_FW_FR_DROP_FACE_ID",
+      "address": "0xc734278",
+      "file_offset": "0x674278",
+      "bytes": "2de9f04100f10c0684b0804604af30460d4609f09bff18b3044605e021463046",
+      "sha256": "a4176ae3b6c429bbb0a265c1f806502c28ab28126739d96bfc8df53f4e4f03c3"
+    },
+    {
+      "name": "RH_FW_FR_CACHE_ACQUIRE",
+      "address": "0xc73b964",
+      "file_offset": "0x67b964",
+      "bytes": "b0b5044682b000f11c05284600afc7e9001205f0a5fed7e9001223682046db68",
+      "sha256": "dcf3420109cd282b98492bd7f098068734ecc1fc275fb9cf3a8a7487662900b7"
+    },
+    {
+      "name": "RH_FW_FR_CACHE_ACQUIRE_CREATE",
+      "address": "0xc73ba2c",
+      "file_offset": "0x67ba2c",
+      "bytes": "2de9f04704468846154600f11c0900af484605f041fe23682a4641462046db68",
+      "sha256": "6cc9c0b56c0b8020939022ef9ea791794d69660996a8d9ea4bc451edd877cd7d"
+    },
+    {
+      "name": "RH_FW_FR_FT_MUL_FIX",
+      "address": "0xc564818",
+      "file_offset": "0x4a4818",
+      "bytes": "80b400af81fb00324feae27000f500401b1842f100024fea134040ea0240bd46",
+      "sha256": "f5c89c1b3391654586cb4c7a2e753163bde5140a135cdf2a7f4a281f42467ce9"
+    },
+    {
+      "name": "RH_FW_FR_LIST_REMOVE",
+      "address": "0xc73e08c",
+      "file_offset": "0x67e08c",
+      "bytes": "98b14368994211d08368994216d090b4036800afcc580433ca5804b1e2500ab1",
+      "sha256": "e544a220f2784a5e4cf7d8f1a84feaec28f6c71de2d66abffa9d1d93e8c5a767"
+    },
+    {
+      "name": "RH_FW_FONT_SET_PIXEL_SIZE",
+      "address": "0xc5666fc",
+      "file_offset": "0x4a66fc",
+      "bytes": "f0b587b0044600af41b3002a08bf0a4601294ff6ff7038bf0121012a38bf0122",
+      "sha256": "1c12e43b424159d89197279b216df611152c063576f4eda07028fabc440a6c56"
+    }
+  ],
+  "layouts": {
+    "context": {
+      "size": 32,
+      "library": 0,
+      "FTC_manager": 4,
+      "cmap": 8,
+      "ids": 12,
+      "event": 24,
+      "face_cache": 28
+    },
+    "descriptor": {
+      "size": 64,
+      "font": 4,
+      "self": 28,
+      "pixels": 40,
+      "style": 44,
+      "mode": 46,
+      "context": 48,
+      "face": 52,
+      "entry": 56,
+      "path": 60
+    },
+    "manager": {
+      "backings": 0,
+      "backing_payload": 48,
+      "wrappers": 12,
+      "wrapper_payload": 40,
+      "registry": 24,
+      "registry_payload": 8,
+      "idle": 556,
+      "idle_payload": 44
+    },
+    "cache": {
+      "payload": 4,
+      "max": 8,
+      "current": 12,
+      "compare": 16,
+      "create": 20,
+      "destroy": 24,
+      "list_payload": 44,
+      "head": 48,
+      "tail": 52
+    },
+    "display": {
+      "payload": 784,
+      "next": 788,
+      "screens": 684,
+      "count": 712,
+      "layer": 672
+    },
+    "draw_unit": {
+      "dispatch": 12,
+      "active": 24,
+      "glyph_pending": 28,
+      "image_pending": 36,
+      "gradient_pending": 44,
+      "submissions": 52
+    },
+    "queues": {
+      "glyph_element": 72,
+      "image_element": 4,
+      "gradient_element": 4
+    },
+    "font_face": {
+      "payload": 24,
+      "metrics_payload": 32,
+      "outline_payload": 8,
+      "metrics_count": 512,
+      "outline_count": 256
+    }
+  },
+  "verification": [
+    "Production transaction compiled unchanged under P65; native leaves and memory injected by adapted shared fixture.",
+    "Switch A/B, remove mapping restores stock, immutable history prevents reused non-stock generation.",
+    "All modeled OOM positions, borrowed stock-face ownership, revalidation, pending draw queues and owner deletion tested.",
+    "Selected original native factory and count-cache initialization plus exact32-byte AP fingerprints."
+  ],
+  "scope": [
+    "Managed outline FreeType descriptors and fallback wrappers in registered screen trees.",
+    "P65 does not contain the P67 vector_label extension; no foreign vector class/drop/cache identity is used.",
+    "No GPU failure recovery, restart epoch safety or physical-device claim."
+  ]
+}

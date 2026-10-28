@@ -966,6 +966,7 @@ static int relative_destination(struct rh_manager_data *d,const char *key,const 
         if(feature<4) return 0;
         rc=load_pack(d,id,&p); if(rc) return rc;
         if(feature==4) {
+#if RH_HAS_NATIVE_CALENDAR
             const struct mapping *best=0; uint32_t best_length=0;
             /* Calendar background remains an ordinary mapping and obeys the
              * same longest-prefix rule as the open hook. */
@@ -977,6 +978,7 @@ static int relative_destination(struct rh_manager_data *d,const char *key,const 
                 if(directory_source(best->source)) rc=path_join(out,best->destination,&RH_CALENDAR_BACKGROUND[best_length]);
                 else rc=put(out,256,best->destination);
             }
+#endif
         }
         free_pack(d,&p); return rc;
     }
@@ -996,8 +998,10 @@ static int preview_valid(struct rh_manager_data *d,char path[256]) {
 static int system_preview(struct rh_manager_data *d,const char *key,char out[256]) {
     int feature=feature_index(key),rc=0; char original[256]; out[0]=0;
     if(feature>=0) {
-        if(feature!=4) return 0; /* other system backgrounds have no static image */
+        if(feature!=4 || !RH_HAS_NATIVE_CALENDAR) return 0; /* no static system image */
+#if RH_HAS_NATIVE_CALENDAR
         if(put(original,sizeof(original),RH_CALENDAR_BACKGROUND)) return -22;
+#endif
     } else if(prefix(key,"@quickapp-icon/")) {
         if(!d->hooks.quickapp_icon) return 0; rc=d->hooks.quickapp_icon(d->hooks.cookie,key+15,original); if(rc<=0) return rc<0 ? rc:0;
     } else { if(put(original,sizeof(original),key)) return -22; }

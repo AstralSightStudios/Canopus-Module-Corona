@@ -5,8 +5,8 @@ SDK=${CANOPUS_ROOT:-"$ROOT/../Canopus-Private"}
 [ "$#" -le 1 ] || { printf 'usage: build.sh [target-id]\n' >&2; exit 1; }
 TARGET_ID=${1:-xiaomi-band-11-4.100.155}
 case "$TARGET_ID" in
-    xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043|xiaomi-band-11-4.100.179) ;;
-    *) printf 'Unsupported native Manager target: %s (supported: .155, .043, .179)\n' "$TARGET_ID" >&2; exit 1 ;;
+    xiaomi-band-11-4.100.155|xiaomi-band-10-pro-3.101.043|xiaomi-band-11-4.100.179|redmi-watch-6-3.100.043) ;;
+    *) printf 'Unsupported native Manager target: %s (supported: Band11 .155/.179, Band10 Pro .043, REDMI Watch 6 .043)\n' "$TARGET_ID" >&2; exit 1 ;;
 esac
 # One complete product per exact target. Refuse stale product selectors,
 # including explicit zero, rather than silently changing their old semantics.
@@ -50,6 +50,8 @@ if (metadata.get('target_id') != target or metadata.get('firmware_sha256') != fi
     raise SystemExit('Framework target/firmware identity mismatch')
 if target == 'xiaomi-band-11-4.100.179' and metadata.get('revision', 0) < 2:
     raise SystemExit('Resource Hook .179 requires Canopus target pack revision 2 (exact visibility callable)')
+if target == 'redmi-watch-6-3.100.043' and metadata.get('revision', 0) < 3:
+    raise SystemExit('Resource Hook P65 requires Canopus target pack revision 3 (full feature ABI)')
 PY
 CANOPUS_ROOT="$SDK" CANOPUS_CLI="$CANOPUS_CLI" CC="$CC" sh "$ROOT/scripts/test-host.sh"
 CANOPUS_ROOT="$SDK" CC="$ROOT/scripts/canopus-cc.py" CLANG="$CLANG" \

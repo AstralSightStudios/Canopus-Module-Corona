@@ -4,9 +4,35 @@
 #include "resource_hook_target.h"
 #include <stddef.h>
 
-/* Exact Band 11 4.100.139/.155 and Band 10 Pro 3.101.043 APs only.
+#if !RH_HAS_FONT_RELOAD
+#include "resource_hook_internal.h"
+/* An image-only target must not enter another firmware's font manager. Reject
+ * font mappings explicitly, while allowing ordinary image reloads to finish. */
+void rh_font_reload_disable(void) {}
+int rh_font_reload(const struct rh_mapping_view *mapping, uint32_t *changed) {
+    uint32_t i;
+    char path[RH_PATH];
+    if (changed) *changed = 0;
+    if (!changed || rh_validate_view(mapping)) return -1;
+    if (rh_resolve_view(mapping, "/resource/font/MiSans-Regular-All.ttf", path) == 1)
+        return -2200;
+    for (i = 0; i < mapping->count; ++i) {
+        const char *source = mapping->snapshot ?
+            rh_snapshot_pool(mapping->snapshot) + mapping->snapshot->rules[i].source_offset :
+            mapping->rules[i].source;
+        uint32_t n = 0;
+        while (source[n]) ++n;
+        if (n >= 4 && source[n - 4] == '.' &&
+            ((source[n - 3] == 't' && source[n - 2] == 't' && source[n - 1] == 'f') ||
+             (source[n - 3] == 'o' && source[n - 2] == 't' && source[n - 1] == 'f')))
+            return -2200;
+    }
+    return 0;
+}
+#else
+/* Exact reviewed Band 11, Band 10 Pro and P65 AP identities only.
  * Shared transaction with audited target identities, face payload sizes and
- * vector-drop ABI. See the font audits under targets/.
+ * vector-drop ABI (where that native extension exists). See target font audits.
  * No native wrapper creation,
  * cache constructor, registry remove/add, GPU wait, drain or reset is called.
  *
@@ -45,11 +71,33 @@
 #define METRICS RH_FW_FR_METRICS
 #define OUTLINE RH_FW_FR_OUTLINE
 #define RELEASE RH_FW_FR_GLYPH_RELEASE
+#ifndef RH_FR_HAS_VECTOR_LABEL
+#define RH_FR_HAS_VECTOR_LABEL 1
+#endif
+#if RH_FR_HAS_VECTOR_LABEL
 #define VECTOR_CLASS RH_FW_VECTOR_CLASS
+#endif
 #define UIKIT_SLOT RH_FW_UIKIT_SLOT
 #define CONTEXT_SLOT RH_FW_FR_CONTEXT_SLOT
 #define DRAW_SLOT RH_FW_FR_DRAW_SLOT
+#if RH_FR_HAS_VECTOR_LABEL
 #define VECTOR_SLOT RH_FW_FR_VECTOR_SLOT
+#endif
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+#define FR_CTX_FACE_CACHE 28u
+#define FR_CTX_IDS 12u
+#define FR_CTX_EVENT 24u
+#define FR_CACHE_LIST 44u
+#define FR_METRICS_COUNT(ctx) 512u
+#define FR_OUTLINE_COUNT(ctx) 256u
+#else
+#define FR_CTX_FACE_CACHE 24u
+#define FR_CTX_IDS 4u
+#define FR_CTX_EVENT 16u
+#define FR_CACHE_LIST 48u
+#define FR_METRICS_COUNT(ctx) (2u*rd((ctx)+20u))
+#define FR_OUTLINE_COUNT(ctx) rd((ctx)+20u)
+#endif
 
 /* Test builds execute the actual transaction against a 32-bit memory model;
  * only memory/native leaves are injected. No test models a physical GPU. */
@@ -139,10 +187,13 @@ static int roots(uint32_t *manager, uint32_t *context) {
     if(state.initialized && (ui!=state.uikit || ctx!=state.context)) return disable();
     mgr=rd(ui+28);
     if(!mgr) return state.initialized ? disable() : 1;
-    if(state.initialized && (mgr!=state.manager || rd(ctx+24)!=state.face_cache)) return disable();
-    if(rd(mgr)!=48 || rd(mgr+12)!=40 || rd(mgr+24)!=8 || rd(ctx+4)!=8 ||
-       !rd(ctx) || !rd(ctx+24) || rd(ctx+20)==0 || rd(ctx+20)>1024 ||
-       rd(ctx+16)!=RH_FW_FR_OUTLINE_EVENT) return disable();
+    if(state.initialized && (mgr!=state.manager || rd(ctx+FR_CTX_FACE_CACHE)!=state.face_cache)) return disable();
+    if(rd(mgr)!=48 || rd(mgr+12)!=40 || rd(mgr+24)!=8 || rd(ctx+FR_CTX_IDS)!=8 ||
+       !rd(ctx) || !rd(ctx+FR_CTX_FACE_CACHE) ||
+#if !(defined(RH_TARGET_P65) && RH_TARGET_P65)
+       rd(ctx+20)==0 || rd(ctx+20)>1024 ||
+#endif
+       rd(ctx+FR_CTX_EVENT)!=RH_FW_FR_OUTLINE_EVENT) return disable();
     *manager=mgr; *context=ctx; return 0;
 }
 /* Generic audited intrusive list. Check both links and tail, bounded cycle
@@ -177,7 +228,7 @@ static int registry(uint32_t mgr, uint32_t ctx) {
     }
     if(!state.initialized) {
         state.count=n; state.uikit=rd(UIKIT_SLOT); state.manager=mgr;
-        state.context=ctx; state.face_cache=rd(ctx+24); state.initialized=1;
+        state.context=ctx; state.face_cache=rd(ctx+FR_CTX_FACE_CACHE); state.initialized=1;
     }
     return 0;
 }
@@ -192,7 +243,7 @@ static int cache_check(uint32_t cache, uint32_t clz, uint32_t size, int holds, i
     if(!cache) return -base-1;
     if(rd(cache)!=clz) return -base-2;
     if(rd(cache+4)!=size) return -base-3;
-    if(rd(cache+48)!=4) return -base-4;
+    if(rd(cache+FR_CACHE_LIST)!=4) return -base-4;
     if(clz==CNT_CLASS) {
         uint32_t compare,create,destroy;
         if(size==FACE_SIZE) { compare=RH_FW_FR_FACE_COMPARE; create=RH_FW_FR_FACE_CREATE; destroy=RH_FW_FR_FACE_DESTROY; }
@@ -204,11 +255,15 @@ static int cache_check(uint32_t cache, uint32_t clz, uint32_t size, int holds, i
         if(rd(cache+24)!=destroy) return -base-7;
     } else {
         if(!vector) return -base-20;
+#if RH_FR_HAS_VECTOR_LABEL
         if(rd(cache+16)!=RH_FW_VECTOR_COMPARE) return -base-5;
         if(rd(cache+20)) return -base-6;
         if(rd(cache+24)!=RH_FW_VECTOR_DESTROY) return -base-7;
+#else
+        return -base-20;
+#endif
     }
-    for(p=rd(cache+52);p;p=rd(p+8)) {
+    for(p=rd(cache+FR_CACHE_LIST+4);p;p=rd(p+8)) {
         uint32_t tree,data,entry,k;
         if(++n>CACHE_NODES) return -base-8;
         if(rd(p+4)!=prev) return -base-9;
@@ -227,7 +282,7 @@ static int cache_check(uint32_t cache, uint32_t clz, uint32_t size, int holds, i
         }
         prev=p;
     }
-    if(rd(cache+56)!=prev) return -base-18;
+    if(rd(cache+FR_CACHE_LIST+8)!=prev) return -base-18;
     if(clz==CNT_CLASS && rd(cache+12)!=n) return -base-19;
     return 0;
 }
@@ -241,6 +296,36 @@ static int queue(uint32_t p, uint32_t element, uint32_t cb) {
     }
     return 0;
 }
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+static int boundary(void) {
+    uint32_t displays[4],nd,i,p,n=0,vg=0,sw=0; int r;
+    if(!rb(RH_FW_FR_INITIALIZED_SLOT) || !rb(RH_FW_FR_STYLE_ENABLED_SLOT)) return -1;
+    if(list(RH_FW_FR_DISPLAY_LIST,784,displays,4,&nd) || !nd) return -1;
+    for(i=0;i<nd;i++) {
+        uint32_t d=displays[i],layer,j=0;
+        if(rd(d+712)>OBJECTS || (rd(d+712) && !rd(d+684))) return -1;
+        if(rb(d+58)&2) return 1;
+        for(layer=rd(d+672);layer;layer=rd(layer+108)) {
+            if(++j>64) return -1;
+            if(rd(layer+100)) return 1;
+        }
+    }
+    for(p=rd(DRAW_SLOT);p;p=rd(p)) {
+        uint32_t dispatch=rd(p+12);
+        if(++n>2) return -1;
+        if(rd(p+24)) return 1;
+        if(dispatch==RH_FW_FR_VG_DISPATCH) {
+            if(vg++) return -1;
+            if((r=queue(rd(p+28),72,RH_FW_FR_GLYPH_PENDING_FREE))!=0) return r;
+            if((r=queue(rd(p+36),4,RH_FW_FR_IMAGE_PENDING_FREE))!=0) return r;
+            if(rd(p+44) && (r=queue(rd(p+44),4,RH_FW_FR_GRADIENT_PENDING_FREE))!=0) return r;
+            if(rd(p+52)) return 1;
+        } else if(dispatch==RH_FW_FR_SW_DISPATCH) { if(sw++) return -1; }
+        else return -1;
+    }
+    return vg==1 && sw==1 ? 0 : -1;
+}
+#else
 static int boundary(void) {
     uint32_t p,n=0,vg=0,sw=0,displays[4],nd,i; int r;
     if(!rb(RH_FW_FR_INITIALIZED_SLOT) || !rb(RH_FW_FR_STYLE_ENABLED_SLOT)) return -1;
@@ -273,6 +358,7 @@ static int boundary(void) {
     p=rd(VECTOR_SLOT);
     return p ? cache_check(p,SIZE_CLASS,16,1,1) : 0;
 }
+#endif
 /* idle: 0 active backing, 1 idle eviction, 2 temporary validation-only face. */
 struct replacement { uint32_t family,node,font,dsc,fresh,refs,idle,size,style; };
 struct wrap { uint32_t ptr,record,fallback,user; };
@@ -308,7 +394,7 @@ static int descriptor(uint32_t font, uint32_t ctx, const char *path) {
     face=rd(d+52); e=rd(d+56);
     if(!face) return -2612;
     if(!e || e!=face+FACE_SIZE) return -2613;
-    if(rd(e)!=rd(ctx+24)) return -2614;
+    if(rd(e)!=rd(ctx+FR_CTX_FACE_CACHE)) return -2614;
     if(rd(e+8)!=FACE_SIZE) return -2615;
     if(!rd(e+4)) return -2616;
     if(rb(e+12)) return -2617;
@@ -321,8 +407,8 @@ static int descriptor(uint32_t font, uint32_t ctx, const char *path) {
 }
 static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
     uint32_t nodes[BACKING_SCAN],n,i,j,p,idle=rd(mgr+556); char name[RH_PATH]; int f,r;
-    r=cache_check(rd(ctx+24),CNT_CLASS,FACE_SIZE,0,0); if(r) return r;
-    if(rd(rd(ctx+24)+8)!=0x7fffffffu) return -2701;
+    r=cache_check(rd(ctx+FR_CTX_FACE_CACHE),CNT_CLASS,FACE_SIZE,0,0); if(r) return r;
+    if(rd(rd(ctx+FR_CTX_FACE_CACHE)+8)!=0x7fffffffu) return -2701;
     /* Scan all records, including unrelated families, with the existing
      * scratch capacity. RESOURCES bounds replacements, not registry occupancy. */
     r=list(mgr,48,nodes,BACKING_SCAN,&n); if(r) return -2740+r;
@@ -404,7 +490,7 @@ static int resources(struct transaction *t, uint32_t mgr, uint32_t ctx) {
 static uint32_t intern(uint32_t ctx, const char *path, int *error) {
     uint32_t nodes[INTERN_IDS],n,i,p,s,tail; int r;
     *error=0;
-    r=list(ctx+4,8,nodes,INTERN_IDS,&n);
+    r=list(ctx+FR_CTX_IDS,8,nodes,INTERN_IDS,&n);
     if(r) { *error=-2920+r; return 0; }
     for(i=0;i<n;i++) if(native_eq(rd(nodes[i]),path)) {
         p=nodes[i];
@@ -414,9 +500,9 @@ static uint32_t intern(uint32_t ctx, const char *path, int *error) {
     if(n==INTERN_IDS) { *error=-2932; return 0; }
     s=duplicate(path); if(!s) { *error=-2933; return 0; }
     p=alloc(16); if(!p) { release_mem(s); *error=-2934; return 0; }
-    wr(p,s); wr(p+4,1); tail=rd(ctx+12); wr(p+8,tail);
-    if(tail) wr(tail+12,p); else wr(ctx+8,p);
-    wr(ctx+12,p); return s;
+    wr(p,s); wr(p+4,1); tail=rd(ctx+FR_CTX_IDS+8); wr(p+8,tail);
+    if(tail) wr(tail+12,p); else wr(ctx+FR_CTX_IDS+4,p);
+    wr(ctx+FR_CTX_IDS+8,p); return s;
 }
 static uint32_t new_cache(uint32_t size,uint32_t count,uint32_t compare,uint32_t create,uint32_t destroy) {
     uint32_t p=alloc(64);
@@ -429,7 +515,7 @@ static uint32_t new_cache(uint32_t size,uint32_t count,uint32_t compare,uint32_t
 /* Entry invalid=0 and a held descriptor reference are checked before this
  * function. A valid zero-ref entry survives release until explicit drop. */
 static void destroy_descriptor(uint32_t d) {
-    uint32_t ctx=rd(d+48),cache=rd(ctx+24),e=rd(d+56),face=rd(d+52),path=rd(d+60);
+    uint32_t ctx=rd(d+48),cache=rd(ctx+FR_CTX_FACE_CACHE),e=rd(d+56),face=rd(d+52),path=rd(d+60);
     (void)call(RH_FW_CACHE_RELEASE,cache,e,0);
     if(rd(e+4)==0) (void)call(RH_FW_CACHE_DROP,cache,face,0);
     (void)call(RH_FW_FR_DROP_FACE_ID,ctx,path,0);
@@ -441,7 +527,7 @@ static void destroy_descriptor(uint32_t d) {
  * Never replace existing caches or retire another consumer's reference. */
 static int stock_face(uint32_t ctx, uint32_t path, uint32_t key, uint32_t e) {
     uint32_t face,ft; int r;
-    if(rd(e)!=rd(ctx+24) || rd(e+8)!=FACE_SIZE || rb(e+12) ||
+    if(rd(e)!=rd(ctx+FR_CTX_FACE_CACHE) || rd(e+8)!=FACE_SIZE || rb(e+12) ||
        rd(e+4)<2 || rd(e+4)>=0x7ffffffeu) return -2941;
     face=e-FACE_SIZE;
     if(rd(face)!=path || rd(face+4)!=key) return -2942;
@@ -462,7 +548,7 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     d=alloc(64); if(!d) return -2904;
     path=intern(ctx,t->target[r->family],&error); if(!path) goto fail;
     key[0]=path; key[1]=65536u | r->style;
-    e=call(RH_FW_FR_CACHE_ACQUIRE,rd(ctx+24),key,0);
+    e=call(RH_FW_FR_CACHE_ACQUIRE,rd(ctx+FR_CTX_FACE_CACHE),key,0);
     if(e) {
         for(i=0;i<t->nres;i++) if(t->res[i].fresh && rd(t->res[i].fresh+56)==e) found=1;
         if(rd(e+4)>=0x7ffffffeu) { error=-2909; goto acquired_fail; }
@@ -476,7 +562,7 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
             found=1; /* Reuse child caches; do not allocate or overwrite them. */
         }
     } else {
-        e=call(RH_FW_FR_CACHE_ACQUIRE_CREATE,rd(ctx+24),key,0);
+        e=call(RH_FW_FR_CACHE_ACQUIRE_CREATE,rd(ctx+FR_CTX_FACE_CACHE),key,0);
         /* The native leaf returns NULL for open/parse/allocation failure;
          * do not claim to distinguish those without a native error report. */
         if(!e) { error=-2910; goto fail; }
@@ -486,10 +572,10 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     wr(d,MAGIC); wr(d+40,r->size); wr(d+44,key[1]); wr(d+48,ctx);
     wr(d+52,face); wr(d+56,e); wr(d+60,path);
     if(!found) {
-        v=new_cache(32,2*rd(ctx+20),RH_FW_FR_METRICS_COMPARE,RH_FW_FR_METRICS_CREATE,RH_FW_FR_METRICS_DESTROY);
+        v=new_cache(32,FR_METRICS_COUNT(ctx),RH_FW_FR_METRICS_COMPARE,RH_FW_FR_METRICS_CREATE,RH_FW_FR_METRICS_DESTROY);
         if(!v) { error=-2911; goto owned_fail; }
         wr(face+16,v);
-        v=new_cache(8,rd(ctx+20),RH_FW_FR_OUTLINE_COMPARE,RH_FW_FR_OUTLINE_CREATE,RH_FW_FR_OUTLINE_DESTROY);
+        v=new_cache(8,FR_OUTLINE_COUNT(ctx),RH_FW_FR_OUTLINE_COMPARE,RH_FW_FR_OUTLINE_CREATE,RH_FW_FR_OUTLINE_DESTROY);
         if(!v) { error=-2912; goto owned_fail; }
         wr(face+20,v);
     }
@@ -497,7 +583,13 @@ static int prepare(struct transaction *t, struct replacement *r, uint32_t ctx) {
     /* The installed callbacks require scalable outlines, not a bitmap-only
      * face which happens to pass FT parsing and pixel-size setup. */
     if(!ft || !(rd(ft+8)&1u)) { error=-2913; goto owned_fail; }
-    if(call(RH_FW_FONT_SET_PIXEL_SIZE,ft,size,0)) { error=-2914; goto owned_fail; }
+    if(call(RH_FW_FONT_SET_PIXEL_SIZE,ft,
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+            0,size
+#else
+            size,0
+#endif
+            )) { error=-2914; goto owned_fail; }
     metrics=rd(ft+88); if(!metrics) { error=-2915; goto owned_fail; }
     wr(d+4,METRICS); wr(d+8,OUTLINE); wr(d+12,RELEASE);
     wr(d+16,(uint32_t)((int32_t)rd(metrics+32)>>6));
@@ -512,7 +604,7 @@ owned_fail:
     destroy_descriptor(d); return error;
 acquired_fail:
     /* Balance just the lookup reference, leaving the preexisting face intact. */
-    (void)call(RH_FW_CACHE_RELEASE,rd(ctx+24),e,0);
+    (void)call(RH_FW_CACHE_RELEASE,rd(ctx+FR_CTX_FACE_CACHE),e,0);
 fail:
     if(path) (void)call(RH_FW_FR_DROP_FACE_ID,ctx,path,0);
     release_mem(d); return error;
@@ -541,6 +633,7 @@ static int refresh(struct transaction *t) {
         if(!r) continue;
         /* Drop copied non-uploaded vector paths, then property refresh lets the
          * next draw rebuild lazily. Avoid unchecked eager vector allocations. */
+#if RH_FR_HAS_VECTOR_LABEL
         if(rd(p)==VECTOR_CLASS) {
 #if RH_FW_FR_VECTOR_DROP_SECOND_ARG
             /* .043 class destructor is a key-drop only; object is in r1. */
@@ -549,6 +642,7 @@ static int refresh(struct transaction *t) {
             (void)call(RH_FW_VECTOR_DROP,p,0,0);
 #endif
         }
+#endif
         r=live(p); if(r<0) return -1; if(!r) continue;
         (void)call(RH_FW_OBJECT_STYLE_REFRESH,p,0x000f0000u,90); /* LV_PART_ANY */
         if(state.disabled || rd(UIKIT_SLOT)!=state.uikit || rd(CONTEXT_SLOT)!=state.context) return disable();
@@ -724,3 +818,4 @@ done:
     if(t->wrapper) rh_platform_free(t->wrapper);
     state.running=0; rh_platform_free(t); return r;
 }
+#endif /* RH_HAS_FONT_RELOAD */

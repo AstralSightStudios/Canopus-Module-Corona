@@ -1,0 +1,17 @@
+{
+  "description": "P65 432x514 production smoke. Coordinates follow the 56px title and existing wide Corona layout; runtime touch validation is pending. Captures do not establish feature or visual acceptance.",
+  "steps": [
+    {"shot": "production-home"},
+    {"tap": [216, 226]},
+    {"shot": "production-resources"},
+    {"tap": [30, 28]},
+    {"tap": [216, 330]},
+    {"shot": "production-mix"},
+    {"tap": [30, 28]},
+    {"tap": [216, 464]},
+    {"wait": 4},
+    {"shot": "production-reload-result"},
+    {"wait": 4},
+    {"shot": "production-home-return"}
+  ]
+}

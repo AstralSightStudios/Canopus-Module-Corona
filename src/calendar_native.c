@@ -3,7 +3,9 @@
 #include "resource_hook_platform.h"
 #include "resource_hook_target.h"
 
-#if RH_Q66_CALENDAR && (defined(__arm__) || defined(__thumb__))
+#if defined(RH_TARGET_P65) && RH_TARGET_P65 && (defined(__arm__) || defined(__thumb__))
+#include "p65_calendar_native.inc"
+#elif RH_Q66_CALENDAR && (defined(__arm__) || defined(__thumb__))
 /* Exact backport identities are in target evidence and selected headers.
  * Original .177 read-only recovery: q66-ap.i64, AP SHA256
  * ff74c6f467529963b6afd40669437d8ec39a02e48c10d0893739847b3ba3dc2b.
@@ -241,6 +243,10 @@ int rh_calendar_native_render(const struct rh_calendar_config *c,
                               const struct rh_calendar_date *d, const char *output) {
     (void)c; (void)d; (void)output; return -1;
 }
+#if defined(RH_TARGET_P65) && RH_TARGET_P65
+void rh_p65_calendar_publish(void) {}
+int rh_p65_calendar_reset(void) { return 0; }
+#endif
 #if defined(RH_TARGET_1043) && RH_TARGET_1043
 void rh_p67_calendar_publish(void) {}
 void rh_p67_calendar_cancel(void) {}
