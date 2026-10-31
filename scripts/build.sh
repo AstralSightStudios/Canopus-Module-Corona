@@ -57,6 +57,6 @@ CANOPUS_ROOT="$SDK" CANOPUS_CLI="$CANOPUS_CLI" CC="$CC" sh "$ROOT/scripts/test-h
 CANOPUS_ROOT="$SDK" CC="$ROOT/scripts/canopus-cc.py" CLANG="$CLANG" \
     LD="$ROOT/scripts/canopus-ld.sh" LD_LLD="$LD_LLD" \
     "$CANOPUS_CLI" build --manifest "$ROOT/Canopus.toml" --target "$TARGET_ID"
-cp "$ROOT/build/$TARGET_ID/corona.elf" "$ROOT/build/resource-hook.elf"
+cp "$ROOT/build/$TARGET_ID/canopus_corona.elf" "$ROOT/build/resource-hook.elf"
 printf 'Built resource-hook.elf for %s. Build verification completed; emulator acceptance is recorded separately.\n' "$TARGET_ID"
 printf 'GPU recovery and framework restart safety remain unsupported.\n'

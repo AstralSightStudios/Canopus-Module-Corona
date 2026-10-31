@@ -575,7 +575,7 @@ static int32_t module_register(const struct canopus_context_v1 *ctx,
                                const struct canopus_module_descriptor_v1 *descriptor) {
     const char *fault = getenv("RH_TEST_REGISTRATION");
     assert(ctx == &test_context && descriptor == &canopus_module_descriptor && !locked);
-    assert(!strcmp((const char *)descriptor->module_id, "corona"));
+    assert(!strcmp((const char *)descriptor->module_id, "canopus_corona"));
     if (fault) {
         assert(!strcmp(fault, "service-fail"));
         return CANOPUS_SVC_ERR_IO;
@@ -2699,7 +2699,7 @@ int main(int argc, char **argv) {
     assert(registrations == 1 && !closes);
     assert(d->struct_size == sizeof(*d) && d->abi_major == CANOPUS_ABI_MAJOR &&
            d->abi_minor == CANOPUS_ABI_MINOR);
-    assert(!strcmp((const char *)d->module_id, "corona"));
+    assert(!strcmp((const char *)d->module_id, "canopus_corona"));
     assert(!strcmp((const char *)d->module_version, "0.3.0"));
     assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.0"));
 #if defined(RH_TARGET_P65) && RH_TARGET_P65

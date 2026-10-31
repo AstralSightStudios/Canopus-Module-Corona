@@ -9,7 +9,7 @@ python3 tests/fixtures/manager-emulator/generate.py 155 /tmp/corona-seed-155
 python3 scripts/test-manager-emulator.py 155 \
   --library /tmp/corona-manager-155-library \
   --work /tmp/corona-manager-155-evidence \
-  --package /absolute/path/to/corona-0.3.0.canopus \
+  --package /absolute/path/to/canopus_corona-0.3.0.canopus \
   --firmware-source /absolute/path/to/miwear.watch.q66tc_v4.100.155_full_f1c824fe \
   --seed-dir /tmp/corona-seed-155 \
   --scenario tests/fixtures/manager-emulator/155.json

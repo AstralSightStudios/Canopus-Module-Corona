@@ -41,7 +41,7 @@ class Rebind(unittest.TestCase):
         elf, receipt = elf_path.read_bytes(), receipt_path.read_bytes()
         self.assertEqual(len(receipt), 176)
         self.assertEqual(receipt[:4], b'CMI2')
-        self.assertEqual(receipt[32:64].split(b'\0')[0], b'corona')
+        self.assertEqual(receipt[32:64].split(b'\0')[0], b'canopus_corona')
         self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'),
                          'fixture receipt must match RESOURCE_HOOK_TARGET')
         self.assertEqual(receipt[112:144], bytes.fromhex(FIRMWARE_SHA256[TARGET]),

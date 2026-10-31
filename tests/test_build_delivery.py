@@ -69,20 +69,20 @@ class CanonicalDelivery(unittest.TestCase):
             destination.mkdir(parents=True)
             (destination / 'resource-hook.elf').write_bytes(self.artifact(target))
             (destination / 'receipt.bin').write_bytes(b'opaque CMI2 marker')
-            staged = self.root / 'build' / target / 'corona.elf'
+            staged = self.root / 'build' / target / 'canopus_corona.elf'
             staged.parent.mkdir(parents=True, exist_ok=True)
             staged.write_bytes(self.artifact(target))
         elif 'package' in command and '--manifest' in command:
             manifest_path = Path(command[command.index('--manifest') + 1])
             manifest = tomllib.loads(manifest_path.read_text())
-            self.assertEqual(manifest['module']['id'], 'corona')
+            self.assertEqual(manifest['module']['id'], 'canopus_corona')
             self.assertEqual(manifest['module']['version_code'], 3)
             self.packaged_targets = manifest['targets']['include']
             for relative in manifest['resources']['files']:
                 self.assertEqual((manifest_path.parent / relative).read_bytes(),
                                  (self.root / relative).read_bytes())
             for target in self.packaged_targets:
-                artifact = manifest_path.parent / 'build' / target / 'corona.elf'
+                artifact = manifest_path.parent / 'build' / target / 'canopus_corona.elf'
                 self.packaged_artifacts[target] = artifact.read_bytes()
                 self.assertEqual(artifact.read_bytes(), self.artifact(target))
             package = Path(command[command.index('--output') + 1])
@@ -116,7 +116,7 @@ class CanonicalDelivery(unittest.TestCase):
     def test_default_is_155_canopus_without_lua_or_watchface(self):
         self.invoke()
         self.assertEqual(self.packaged_targets, [BAND155])
-        self.assertTrue((self.output / 'corona-0.3.0.canopus').is_file())
+        self.assertTrue((self.output / 'canopus_corona-0.3.0.canopus').is_file())
         self.assertEqual((self.output / 'source' / self.png_input.relative_to(self.root)).read_bytes(),
                          self.png_input.read_bytes())
         self.assertFalse((self.output / 'watchface').exists())
@@ -130,12 +130,12 @@ class CanonicalDelivery(unittest.TestCase):
         self.assertEqual(metadata['native_firmware_suites'], {})
         self.assertIn('--firmware-tests', metadata['native_firmware_suites_not_run'][BAND155])
         self.assertEqual(metadata['delivery_format'], 'canopus')
-        self.assertEqual(metadata['package'], 'corona-0.3.0.canopus')
+        self.assertEqual(metadata['package'], 'canopus_corona-0.3.0.canopus')
         self.assertEqual(metadata['transport'], 'wearpacket-l2-cpc2')
         self.assertNotIn('native_install_targets', metadata)
-        self.assertIn('  corona-0.3.0.canopus\n', (self.output / 'SHA256SUMS').read_text())
+        self.assertIn('  canopus_corona-0.3.0.canopus\n', (self.output / 'SHA256SUMS').read_text())
         self.assertTrue(any(command[1:3] == ['package', 'verify'] and
-                            Path(command[-1]).name == 'corona-0.3.0.canopus'
+                            Path(command[-1]).name == 'canopus_corona-0.3.0.canopus'
                             for command, _ in self.commands))
 
     def test_aggregate_contains_all_selected_fresh_targets_without_transport_gate(self):
@@ -145,13 +145,13 @@ class CanonicalDelivery(unittest.TestCase):
         self.assertEqual(self.packaged_targets, selected)
         self.assertEqual(self.packaged_artifacts,
                          {target: self.artifact(target) for target in selected})
-        self.assertTrue((self.output / 'corona-0.3.0.canopus').is_file())
+        self.assertTrue((self.output / 'canopus_corona-0.3.0.canopus').is_file())
         metadata = json.loads((self.output / 'validation.json').read_text())
         self.assertEqual(metadata['targets'], selected)
         self.assertFalse(self.native_commands())
 
     def test_unselected_stale_artifact_is_excluded(self):
-        stale = self.root / 'build' / BAND139 / 'corona.elf'
+        stale = self.root / 'build' / BAND139 / 'canopus_corona.elf'
         stale.parent.mkdir(parents=True)
         stale.write_bytes(b'stale unrelated artifact')
         self.invoke('--target', BAND155, '--target', BAND177)

@@ -141,7 +141,7 @@ def main():
         generated = stage / 'watchface'
         target_args = [arg for target in targets for arg in ('--target', target)]
         run([sys.executable, WATCHFACE_BUILDER, '--product', 'resource-hook',
-             '--module-id', 'corona',
+             '--module-id', 'canopus_corona',
              *target_args, '--payload-dir', stage / 'payload',
              '--assets-dir', ROOT / 'examples', '--output-dir', generated])
         for device_name, device_targets in groups.items():
@@ -229,7 +229,7 @@ def main():
             }
         build_meta = {
             'name': output.name, 'version': '0.3.0',
-            'runtime_id': 'corona', 'project_id': 'corona',
+            'runtime_id': 'corona', 'project_id': 'canopus_corona',
             'targets': targets,
             'module_build_id': 'resource-hook-0.3.0',
             'target_details': target_details,

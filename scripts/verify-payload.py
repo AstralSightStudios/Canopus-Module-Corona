@@ -15,7 +15,7 @@ TARGETS = {
     "xiaomi-band-10-pro-3.101.043": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
 }
 FIRMWARE = TARGETS[TARGET]  # Backward-compatible .139 default.
-MODULE_ID = "corona"
+MODULE_ID = "canopus_corona"
 MODULE_VERSION = 3
 MAX_ARTIFACT = 4194304
 

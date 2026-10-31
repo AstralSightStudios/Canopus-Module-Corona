@@ -1,6 +1,6 @@
 schema = 1
 [module]
-id = "corona"
+id = "canopus_corona"
 version = "0.3.0"
 version_code = 3
 kind = "target"

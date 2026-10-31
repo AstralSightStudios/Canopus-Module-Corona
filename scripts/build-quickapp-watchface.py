@@ -63,7 +63,7 @@ def build_bundle(device_family, targets, out_dir):
         target_args = [arg for target in targets for arg in ('--target', target)]
         subprocess.run([sys.executable, str(WATCHFACE_BUILDER),
                         '--product', 'resource-hook',
-                        '--module-id', 'corona',
+                        '--module-id', 'canopus_corona',
                         *target_args,
                         '--payload-dir', str(payload_dir),
                         '--assets-dir', str(ROOT / 'examples'),
@@ -131,7 +131,7 @@ def build_bundle(device_family, targets, out_dir):
             flat_files.append(f'resource-hook-{target}.cmi.bin')
 
         validation = {
-            'module': 'corona',
+            'module': 'canopus_corona',
             'version': module_version,
             'features': ['transactional-font-reload', 'quickapp-launcher-icons', 'calendar-reload'],
             'module_build_id': 'resource-hook-0.3.0',
@@ -153,7 +153,7 @@ def build_bundle(device_family, targets, out_dir):
 
         readme_text = (
             f"# Resource Hook installer: {device_family.upper()}\n\n"
-            f"Targets: {', '.join(targets)}. Runtime module: corona {module_version}.\n\n"
+            f"Targets: {', '.join(targets)}. Runtime module: canopus_corona {module_version}.\n\n"
             "The flat ZIP is input to a watchface packer, not a vendor watchface file.\n"
             "Opening the installed watchface installs the module DISABLED. Enable it separately.\n"
             "Requires the current resident Canopus Supervisor with unsigned CMI2 support.\n"

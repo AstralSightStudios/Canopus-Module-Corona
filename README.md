@@ -178,7 +178,7 @@ RESOURCE_HOOK_PAYLOAD=dist/0.3.0-155/payload/xiaomi-band-11-4.100.155 \
   RESOURCE_HOOK_TARGET=xiaomi-band-11-4.100.155 python3 tests/test_delivery.py
 ```
 
-原生交付目录根部的 `corona-0.3.0.canopus` 是可安装模块包，通过 AstroBox 的 Canopus
+原生交付目录根部的 `canopus_corona-0.3.0.canopus` 是可安装模块包，通过 AstroBox 的 Canopus
 入口安装。各原生 UI target 使用相同包格式，可重复 `--target` 组合；固件精确选择与原生通信由
 Canopus 处理。Corona Manager 的内置图片作为 `.canopus` 包内资源随安装解压到模块私有目录，不打包进模块 ELF；
 本轮增加 CanopusConnect 设备端主题接收实现，仍需配套手机发送端与实机验收。
@@ -197,7 +197,7 @@ done
 CANOPUS_ROOT=../Canopus-Private ../Canopus-Private/target/debug/canopus package
 ```
 
-输出为 `dist/corona-0.3.0.canopus`，包含每个 target 的 ELF 与 CMI2 回执。
+输出为 `dist/canopus_corona-0.3.0.canopus`，包含每个 target 的 ELF 与 CMI2 回执。
 旧 Supervisor 需要按新版框架流程重装；安装及升级语义见 [安装说明](docs/INSTALL.md)。
 
 Corona Manager 的 PNG 源图独立保存在 `assets/manager/`，不再依赖已删除的旧快应用源码。

@@ -86,7 +86,7 @@ CMI2 校验模块 ID、版本、生命周期、精确 target、固件 SHA-256 �
 3. 检查 `mappings.tsv.example`，按实际资源源路径修改，然后保存为
    `/data/quickapp/files/ng.lst.corona/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
    不意味着固件的所有字体和图片都经过这个目录。
-4. 在 AstroBox 的 Canopus 入口选择交付目录根部的 `corona-0.3.0.canopus`。
+4. 在 AstroBox 的 Canopus 入口选择交付目录根部的 `canopus_corona-0.3.0.canopus`。
    客户端查询设备精确 target、选择并校验回执与 ELF，再通过原生通道暂存并提交 INSTALL。
    新装模块保持禁用；升级返回 `REBOOT_REQUIRED(8)` 也表示成功，重启并重新引导框架后生效。
    主题资源与 Corona Manager 单独安装，原生模块包不包含主题资源。

@@ -15,7 +15,7 @@
 #include "corona_runtime.h"
 #endif
 
-#define RH_MODULE_ID "corona"
+#define RH_MODULE_ID "canopus_corona"
 #define RH_VERSION "0.3.0"
 /* Resolve app-scoped control paths using the selected firmware target. */
 #define RH_CONTROL_CONFIG RH_CONFIG_PATH

@@ -8,7 +8,7 @@ firmware. Screenshots alone produce `captured`, never `passed` or device evidenc
 
 Example (set MIRAGECTL, MAB_SMOKE and FACETORY_PACKAGER for your machine):
   python3 scripts/test-manager-emulator.py 155 --library /tmp/corona-155-library \
-    --work /tmp/corona-155-evidence --package dist/corona-0.3.0.canopus \
+    --work /tmp/corona-155-evidence --package dist/canopus_corona-0.3.0.canopus \
     --firmware-source /path/to/miwear.watch.q66tc_v4.100.155_full_f1c824fe \
     --scenario tests/fixtures/manager-emulator/155.json
 
@@ -144,7 +144,7 @@ def configure(args):
 
     ui.P = {"043": ui.Band10Pro, "155": ui.Band11, "p65": RedmiWatch6}[args.target]
     ui.P.device = f"corona-manager-{args.target}-{time.time_ns()}"
-    ui.M = {"id": "corona"}
+    ui.M = {"id": "canopus_corona"}
     return ui, native
 
 
@@ -171,7 +171,7 @@ def check_inputs(args, ui):
             raise ValueError("module package lacks manifest.json")
         with source:
             manifest = json.load(source)
-        if manifest.get("module_id") != "corona" or manifest.get("canopus_abi") != "2":
+        if manifest.get("module_id") != "canopus_corona" or manifest.get("canopus_abi") != "2":
             raise ValueError("expected Corona native ABI 2 package")
         artifact = next((a for a in manifest.get("artifacts", []) if a.get("target_id") == ui.P.target), None)
         if artifact is None:
@@ -427,7 +427,7 @@ def main():
     package_copy = args.work / "corona-input.canopus"
     shutil.copyfile(args.package, package_copy)
     record = {"level": "host/emulator", "target": ui.P.target, "device": ui.P.device,
-              "library": str(args.library), "firmware": firmware, "module": "corona",
+              "library": str(args.library), "firmware": firmware, "module": "canopus_corona",
               "source_package": str(args.package), "installed_package": str(package_copy),
               "module_package_sha256": digest(package_copy), "bridge_sha256": digest(ui.BRIDGE),
               "qemu_sha256": digest(Path(os.environ["MIRAGE_QEMU"])),

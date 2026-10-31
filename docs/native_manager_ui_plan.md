@@ -449,7 +449,7 @@ Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
 1. **Host ASan/UBSan 测试 (`tests/test_manager_native.c`)**：
    - 验证 manifest 解析、排序归一化、混搭覆盖、`@default`/`@system` 预览路径计算、`.rh_sys/` 直通打开、活动包删除保护与 `rh_manager_data_delete_check` 预检、禁用 `ACTION_ROW` 的 opacity/前景色组合、6 路由 UI 树节点数/字符串容量边界（`<= 32` 节点、`<= 1536B`）及拖拽/删除确认事件状态机。
 2. **Mirage 模拟器端到端验证 (`.043` Band 10 Pro & `.155` Band 11)**：
-   - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `corona-0.3.0.canopus`，预置测试主题包。
+   - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `canopus_corona-0.3.0.canopus`，预置测试主题包。
    - 通过自动化触摸脚本依次打开并截图验收：
      - **首页**：验证状态卡颜色、圆角裁剪、字号、右下角装饰图，以及底部 `reload*.bin` 按钮触发内部重载后的结果层：进行中 / 成功（含变化条数）/ 保护记录未存 / 五种失败文案与琥珀底色，并在驻留到期后回到真实模块状态。
      - **资源管理 & 资源详情**：验证原生双行列表、长按拖拽排序、详情页 6 项 `STATUS_ROW` 及 `del*.bin` 进入删除确认页的受保护态。
