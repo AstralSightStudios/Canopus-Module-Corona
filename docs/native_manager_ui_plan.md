@@ -435,6 +435,8 @@ Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
 ### Step 2：C 语言移植 Manager 数据与配置生成层
 - **`src/manager_data.c`**：共享数据模型已移植排序、资源包元数据、混搭来源解析、配置生成、删除保护与旧数据导入。生产模型将小对象合并到可回收的 16 KiB 块中；读取文件和构造目录时显式传播存储或预算错误。
 - **原生存储与发布**：`get_data_path` 必须对应 `/data/canopus/m.corona/`；每次重载先写完整 `active/<generation>/{mappings.tsv,backgrounds.cfg,calendar.cfg}`，再由内部事务验证并发布 `active-config` 指针。指针内容为 `active/<非零规范 uint32>\n`。旧、新资源引用在刷新完成前共同受保护；只有匹配成功通知才能缩小保护范围。
+- **页面读取边界**：空安装仍显示 1 行系统样式和 5 个混搭功能项。刷新只在内存中规范化排序，显式排序/安装才持久化优先级；混搭配置按需读取，损坏时保留原文件并阻止混搭/应用/删除，资源包列表仍可查看。首次旧快应用迁移仍会按原有事务写入导入数据。
+- **UI 栈边界**：目录扫描、列表包名和功能可用性查询不在 UI 调用栈叠放完整清单/元数据，临时对象进入同一个受限内存池。`tests/test_manager_stack.py` 用 Cortex-M33 实际编译栈报告检查四目标的空混搭/选择页模块帧预算（含事件与单页导航回退）均不超过 3 KiB，为 SDK、宿主和固件保留余量。
 - **清理能力**：FS v2 提供 `rmdir`。默认清理逐文件调用 `fs.remove`，目录句柄关闭后按后序删除空目录，主题卸载覆盖该主题全部安装代次；只有先通过服务版本检查才访问新增接口。FS v1 或接口缺失时保留空目录兼容。文件、目录删除、索引写入或清理失败均返回错误，不把失败显示为成功；旧活动配置中的未知文件保留。
 - **旧存储导入**：保留旧快应用数据，首次全量复制到原生根后最后发布原生索引；原生索引已存在时合并尚未登记的旧包，同名 ID 和已有原生配置保留。配置文件先复制到临时文件再 rename，失败可重试；完成标记 `resource-legacy-imported` 避免删除后复活，后续旧目录变化不持续同步。导入不代表已应用，仍需内部重载事务。框架目录枚举须按固件 `d_name +1` 解码，旧版 `+2` 会截掉首字节并阻断导入。新传输安装适配已接入 `manager_data.c`，实现边界见 CanopusConnect 实现文档。
 
@@ -444,12 +446,13 @@ Band 11 (.155, 212x520)                 Band 10 Pro (.043, 336x480)
   - 实现 `ROUTE_INDEX`、`ROUTE_RESOURCES`、`ROUTE_RESOURCE_DETAIL`、`ROUTE_MIX_MATCH`、`ROUTE_MIX_MATCH_SELECT`、`ROUTE_DELETE` 的树构建与增量提交；传输进度以横幅卡片形式内嵌 `ROUTE_RESOURCES`（见 §4.7），不占用独立路由。
   - 错误页保留标题返回，内部返回由模块消费；替换页面提交失败时恢复原路由、条目数和错误信息，连续返回不会因不可见的首页状态退出应用。仅首页的 `on_back` 允许框架关闭页面。配套 Supervisor 在 `.155` / `.179` / `.043` 的模块页面绑定系统右滑完成回调，复用相同层级；接管后阻止固件再次关闭页面，普通手势中间阶段不退栈。精确 ABI 静态证据见 Canopus `docs/investigations/native-system-back.md`。
   - 实现长按拖拽排序（`CAPTURE` + `TRANSLATE` + 边缘 `SCROLL_TO`）、删除确认页跳转与事务、虚拟滚动窗口切换与 `scroll_y` 记忆恢复。
+  - 多页切换依赖配套 Supervisor 的 `on_resume` / `on_pause` entry 回调：导航成功仅表示受理，绘制由目的页的新 UI 上下文驱动；暂停清空旧 UI 引用，返回首页保留模型和重载反馈，子页销毁不关闭应用。配套宿主在独立前台心跳执行导航/关闭，避免在事件或绘制 CANCEL 回调里释放外层仍在使用的对象。旧版 Supervisor 无法接受此扩展入口，必须一起更新。依赖 Canopus `ds-newdevice-supports` 分支的 `af4f9b30`（`fix(ui): hand off module page contexts across firmware transitions`）或包含该提交的后续版本。
 
 ### Step 4：Host 测试与 Mirage 模拟器双端验收（`.043` & `.155`）
 1. **Host ASan/UBSan 测试 (`tests/test_manager_native.c`)**：
    - 验证 manifest 解析、排序归一化、混搭覆盖、`@default`/`@system` 预览路径计算、`.rh_sys/` 直通打开、活动包删除保护与 `rh_manager_data_delete_check` 预检、禁用 `ACTION_ROW` 的 opacity/前景色组合、6 路由 UI 树节点数/字符串容量边界（`<= 32` 节点、`<= 1536B`）及拖拽/删除确认事件状态机。
 2. **Mirage 模拟器端到端验证 (`.043` Band 10 Pro & `.155` Band 11)**：
-   - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `canopus_corona-0.3.0.canopus`，预置测试主题包。
+   - 使用隔离的 `MIRAGE_LIBRARY` 与生产安装器加载 Supervisor 并安装 `corona-0.3.1.canopus`，预置测试主题包。
    - 通过自动化触摸脚本依次打开并截图验收：
      - **首页**：验证状态卡颜色、圆角裁剪、字号、右下角装饰图，以及底部 `reload*.bin` 按钮触发内部重载后的结果层：进行中 / 成功（含变化条数）/ 保护记录未存 / 五种失败文案与琥珀底色，并在驻留到期后回到真实模块状态。
      - **资源管理 & 资源详情**：验证原生双行列表、长按拖拽排序、详情页 6 项 `STATUS_ROW` 及 `del*.bin` 进入删除确认页的受保护态。

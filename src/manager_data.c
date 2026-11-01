@@ -1,4 +1,5 @@
 #include "manager_data.h"
+#include "resource_hook.h"
 #include "canopus_memory.h"
 #include "resource_hook_target.h"
 
@@ -52,7 +53,7 @@ struct rh_manager_data {
     char *pending_protection;
     char pending_overlay[33];
     char pending_config[32];
-    uint8_t catalog_ready, busy;
+    uint8_t catalog_ready, overrides_ready, busy;
     const char *error;
 };
 static const char *const feature_ids[] = {"launcher", "controlCenter", "notifications", "widgets", "calendar"};
@@ -722,10 +723,21 @@ static void clear_catalog(struct rh_manager_data *d) {
     uint32_t i,k; for(i=0;i<d->path_count;i++) { release(d,d->paths[i].source); for(k=0;k<d->paths[i].count;k++) release(d,d->paths[i].options[k].destination); release(d,d->paths[i].options); }
     release(d,d->paths); d->paths=0; d->path_count=0; d->catalog_ready=0;
 }
-static void clear_data(struct rh_manager_data *d) {
-    uint32_t i; clear_catalog(d); free_strings(d,d->ids,d->count); free_strings(d,d->order,d->order_count);
+static void clear_overrides(struct rh_manager_data *d) {
+    uint32_t i;
     for(i=0;i<d->override_count;i++) { release(d,d->overrides[i].key); release(d,d->overrides[i].choice); }
-    release(d,d->overrides); for(i=0;i<5;i++) release(d,d->features[i]); release(d,d->pending_protection);
+    release(d,d->overrides); for(i=0;i<5;i++) release(d,d->features[i]);
+    d->overrides=0; d->override_count=0; d->overrides_ready=0; zero(d->features,sizeof(d->features));
+}
+static int ensure_overrides(struct rh_manager_data *d) {
+    int rc; if(d->overrides_ready) return 0;
+    rc=read_overrides(d);
+    if(rc) { clear_overrides(d); return fail(d,rc,"混搭配置不可读取，原配置已保留"); }
+    d->overrides_ready=1; return 0;
+}
+static void clear_data(struct rh_manager_data *d) {
+    clear_catalog(d); free_strings(d,d->ids,d->count); free_strings(d,d->order,d->order_count);
+    clear_overrides(d); release(d,d->pending_protection);
     release(d,d->installations); d->installations=0;
     d->ids=d->order=0; d->count=d->order_count=d->override_count=0; d->overrides=0; d->pending_protection=0; zero(d->features,sizeof(d->features));
 }
@@ -756,23 +768,24 @@ int rh_manager_data_refresh(struct rh_manager_data *d) {
         for(i=0;!rc && i<stored_n;i++) if(equal(stored[i],RH_MANAGER_SYSTEM)||find_id(next.ids,next.count,stored[i])>=0) rc=add_order(&next,stored[i]);
     }
     release(d,doc); doc=0; free_strings(&next,stored,stored_n); stored=0; stored_n=0; if(rc) goto bad;
-    rc=read_overrides(&next); if(rc) goto bad;
-    /* Persist normalization before publishing a new model. A failed write leaves
-     * the previous visible ordering and overrides intact. */
-    rc=save_order(&next); if(rc) goto bad;
+    /* Page reads normalize in memory. Explicit reorders and installs persist
+     * priority; opening a page must not depend on a writable filesystem. Mixed
+     * choices load separately so a broken choice file cannot hide packages. */
     clear_data(d); *d=next; return 0;
 bad:
-    release(d,doc); free_strings(&next,stored,stored_n); clear_data(&next); return fail(d,rc,"资源包索引、排序或混搭配置不可读取");
+    release(d,doc); free_strings(&next,stored,stored_n); clear_data(&next); return fail(d,rc,"资源包索引或排序不可读取");
 }
 int rh_manager_data_create(const struct canopus_context_v1 *ctx,const struct rh_manager_data_hooks *hooks,struct rh_manager_data **out) {
     struct rh_manager_data *d; char root[256]; uint32_t n; int rc;
     if(!ctx||!out||!ctx->fs||!ctx->mem||!ctx->mem->alloc||!ctx->mem->free||!ctx->fs->get_data_path||!ctx->fs->size||!ctx->fs->open||!ctx->fs->read||!ctx->fs->write||!ctx->fs->close||!ctx->fs->rename||!ctx->fs->remove||!ctx->fs->stat||!ctx->fs->mkdir||!ctx->fs->exists||!ctx->fs->opendir||!ctx->fs->readdir||!ctx->fs->closedir) return -38;
     *out=0; zero(root,sizeof(root)); rc=ctx->fs->get_data_path(ctx,root,sizeof(root)); if(rc<0) return rc;
-    n=slen(root); if(n && root[n-1u]=='/') root[--n]=0;
-    if(!equal(root,"/data/canopus/m.corona")) return -22;
+    n=(uint32_t)canopus_strnlen(root,sizeof(root));
+    if(!n || n>=sizeof(root)-1u) return -22;
+    if(root[n-1u]!='/') { root[n++]='/'; root[n]=0; }
+    if(!equal(root,RH_NATIVE_APP_FILES_ROOT)) return -22;
     d=ctx->mem->alloc(ctx,sizeof(*d)); if(!d) return -12; zero(d,sizeof(*d)); d->ctx=ctx; if(hooks) d->hooks=*hooks;
     d->pool=ctx->mem->alloc(ctx,sizeof(*d->pool)); if(!d->pool) { ctx->mem->free(ctx,d); return -12; } zero(d->pool,sizeof(*d->pool));
-    copy(d->root,root,n); d->root[n++]='/'; d->root[n]=0;
+    copy(d->root,root,n+1u);
     rc=rh_manager_data_refresh(d); if(rc) { rh_manager_data_destroy(d); return rc; } *out=d; return 0;
 }
 void rh_manager_data_destroy(struct rh_manager_data *d) {
@@ -804,6 +817,15 @@ int rh_manager_data_metadata(struct rh_manager_data *d,const char *id,struct rh_
     /* Display reads metadata only; rule validation belongs to catalog/apply.
      * Unreadable metadata remains represented in resource rows and detail UI. */
     return rc;
+}
+/* List labels need only the package name. Avoid stacking a full metadata
+ * output and a full pack on top of the native page/event frames. */
+static int pack_name(struct rh_manager_data *d,const char *id,char *out,uint32_t capacity) {
+    struct pack *pack=alloc(d,sizeof(*pack));int rc;
+    if(!pack) return -12;
+    rc=load_pack_metadata(d,id,pack,0);
+    if(!rc) {rc=put(out,capacity,pack->meta.name);free_pack(d,pack);}
+    release(d,pack);return rc;
 }
 int rh_manager_data_order_get(struct rh_manager_data *d,uint32_t index,char id[65],struct rh_manager_metadata *out) {
     if(!d||!id||index>=d->order_count) return -22; put(id,65,d->order[index]);
@@ -896,13 +918,20 @@ static int walk_theme(struct rh_manager_data *d,const char *id,const struct pack
     return rc;
 }
 static int ensure_catalog(struct rh_manager_data *d) {
-    uint32_t i; int rc; struct pack p;
+    uint32_t i; int rc; struct pack *pack;
+    rc=ensure_overrides(d); if(rc) return rc;
     if(d->catalog_ready) return 0;
+    if(!d->count) { d->catalog_ready=1; return 0; }
+    /* Manifest metadata is larger than the device UI stack. Keep the one
+     * scanning pack in the shared bounded pool, and allocate nothing when empty. */
+    pack=alloc(d,sizeof(*pack)); if(!pack) return -12;
     for(i=0;i<d->count;i++) {
-        rc=load_pack(d,d->ids[i],&p); if(rc) { clear_catalog(d); return rc; }
-        rc=walk_theme(d,d->ids[i],&p,i,0); free_pack(d,&p);
-        if(rc) { clear_catalog(d); return fail(d,rc,"无法枚举资源包文件"); }
+        rc=load_pack(d,d->ids[i],pack); if(rc) break;
+        rc=walk_theme(d,d->ids[i],pack,i,0); free_pack(d,pack);
+        if(rc) { fail(d,rc,"无法枚举资源包文件"); break; }
     }
+    release(d,pack);
+    if(rc) { clear_catalog(d); return rc; }
     d->catalog_ready=1; return 0;
 }
 static int path_index(struct rh_manager_data *d,const char *key) {
@@ -911,9 +940,14 @@ static int path_index(struct rh_manager_data *d,const char *key) {
     return lo<d->path_count && equal(d->paths[lo].source,key) ? (int)lo:-1;
 }
 static int theme_available(struct rh_manager_data *d,const char *key,const char *id) {
-    int feature=feature_index(key),theme=find_id(d->ids,d->count,id),path; uint32_t i; struct pack p; int rc;
+    int feature=feature_index(key),theme=find_id(d->ids,d->count,id),path; uint32_t i; int rc;
     if(theme<0) return 0;
-    if(feature>=0) { rc=load_pack(d,id,&p); if(rc) return rc; rc=feature==4 ? p.calendar.p!=0:p.backgrounds[feature]!=0; free_pack(d,&p); return rc; }
+    if(feature>=0) {
+        struct pack *pack=alloc(d,sizeof(*pack)); if(!pack) return -12;
+        rc=load_pack(d,id,pack);
+        if(!rc) { rc=feature==4 ? pack->calendar.p!=0:pack->backgrounds[feature]!=0; free_pack(d,pack); }
+        release(d,pack);return rc;
+    }
     path=path_index(d,key); if(path<0) return 0;
     for(i=0;i<d->paths[path].count;i++) if(d->paths[path].options[i].theme==(uint32_t)theme) return 1;
     return 0;
@@ -947,7 +981,7 @@ int rh_manager_data_mix_get(struct rh_manager_data *d,uint32_t index,struct rh_m
         if(equal(choice,RH_MANAGER_DEFAULT)) put(out->choice_name,sizeof(out->choice_name),"默认");
         else if(equal(choice,RH_MANAGER_SYSTEM)) put(out->choice_name,sizeof(out->choice_name),"系统");
         else if(equal(choice,RH_MANAGER_BLUR)) put(out->choice_name,sizeof(out->choice_name),"模糊");
-        else { struct rh_manager_metadata meta; rc=rh_manager_data_metadata(d,choice,&meta); if(rc) return rc; put(out->choice_name,sizeof(out->choice_name),meta.name); }
+        else { rc=pack_name(d,choice,out->choice_name,sizeof(out->choice_name)); if(rc) return rc; }
         return 0;
     }
     return -22;
@@ -1036,8 +1070,8 @@ int rh_manager_data_option_get(struct rh_manager_data *d,const char *key,uint32_
         at=base; rc=-22;
         for(i=0;i<d->order_count;i++) {
             int available=theme_available(d,key,d->order[i]); if(available<0) return available; if(!available) continue;
-            if(at++==index) { struct rh_manager_metadata meta; rc=rh_manager_data_metadata(d,d->order[i],&meta); if(rc) break;
-                put(out->id,sizeof(out->id),d->order[i]); put(out->name,sizeof(out->name),meta.name); rc=theme_preview(d,key,d->order[i],out->preview); break; }
+            if(at++==index) { rc=pack_name(d,d->order[i],out->name,sizeof(out->name)); if(rc) break;
+                put(out->id,sizeof(out->id),d->order[i]); rc=theme_preview(d,key,d->order[i],out->preview); break; }
         }
     }
     if(rc) return rc; rc=resolve_choice(d,key,selected); if(rc) return rc; out->selected=(uint8_t)equal(selected,out->id); return 0;
@@ -1725,6 +1759,9 @@ int rh_manager_data_install_begin(struct rh_manager_data *d,const char *stage,ui
         }
     }
     if(d->revision==UINT32_MAX) { rc=RH_MANAGER_ERR_LIMIT; goto done; }
+    /* Freeze the current normalized priority before publishing another pack.
+     * This is part of an explicit install, never a page-read prerequisite. */
+    rc=save_order(d); if(rc) goto done;
     if(path_join(file,stage,"/corona.json")) { rc=-22; goto done; }
     rc=read_text(d,file,65536u,&document,&j);
     if(rc==CANOPUS_SVC_ERR_NOTFOUND) { if(path_join(file,stage,"/canora.json")) { rc=-22; goto done; } rc=read_text(d,file,65536u,&document,&j); }
@@ -1863,6 +1900,7 @@ int rh_manager_data_delete(struct rh_manager_data *d,const char *id) {
     rc=rh_manager_data_refresh(d); if(rc) return rc;
     if(find_id(d->ids,d->count,id)<0) return -22;
     if(d->revision==UINT32_MAX) return RH_MANAGER_ERR_LIMIT;
+    rc=ensure_overrides(d); if(rc) return rc;
     rc=protection_index(d,&protected_ids,&n,0,0); if(!rc) rc=live_references(d,&protected_ids,&n);
     if(!rc && find_id(protected_ids,n,id)>=0) rc=RH_MANAGER_ERR_ACTIVE;
     free_strings(d,protected_ids,n); if(rc) return fail(d,rc,rc==RH_MANAGER_ERR_ACTIVE ? "正在使用的资源包不能删除":"活动资源引用记录不可读取");

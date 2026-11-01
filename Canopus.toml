@@ -1,8 +1,8 @@
 schema = 1
 [module]
-id = "canopus_corona"
-version = "0.3.0"
-version_code = 3
+id = "corona"
+version = "0.3.1"
+version_code = 4
 kind = "target"
 language = "c"
 lifecycle = "resident-after-activation"

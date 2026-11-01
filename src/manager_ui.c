@@ -29,7 +29,7 @@ static struct {
     struct rh_module_status_snapshot status;
     struct rh_transfer_ui_state transfer;
     struct rh_manager_metadata metadata;
-    uint32_t route, width, height, content_height, row_width;
+    uint32_t route, bound_route, width, height, content_height, row_width;
     int32_t scroll[ROUTES];
     uint32_t generation, reload_generation, subscribed, opened, wide, busy, render_failed;
     uint32_t mix_index, count, shown;
@@ -257,13 +257,20 @@ static int load_route(uint32_t route,int refresh) {
  * A backend without multi-page entries keeps the single-page replacement. */
 static int navigate(uint32_t route,int refresh) {
     uint32_t previous_route=U.route,previous_count=U.count;char previous_error[256];int rc;
+    struct canopus_ui_context_v1 *source=U.ui;
     copy(previous_error,sizeof(previous_error),U.error);
     cancel_gesture();U.route=route;
     (void)load_route(route,refresh);
-    if(U.ctx->ui->route && !U.ctx->ui->route(U.ctx,route)) {
-        /* The host replaced its view; the destination page still owes a tree. */
-        U.generation=U.ui->committed.generation;
-        return render();
+    if(U.ctx->ui->route) {
+        /* Acceptance may synchronously revoke the source, or schedule the move
+         * for the next heartbeat. Only on_resume may bind/render its successor. */
+        U.ui=0;rc=U.ctx->ui->route(U.ctx,route);
+        if(!rc) return 0;
+        U.ui=source;
+        if(rc!=CANOPUS_SVC_ERR_UNSUPPORTED) {
+            U.route=previous_route;U.count=previous_count;
+            copy(U.error,sizeof(U.error),previous_error);return rc;
+        }
     }
     rc=render();
     /* A rejected replacement leaves the old native page visible. Its route
@@ -916,8 +923,8 @@ static int choose_option(uint32_t index) {
 }
 static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,
                     const struct canopus_ui_event_v1 *e,void *cookie) {
-    uint32_t event=e->event_id;(void)ctx;(void)ui;(void)cookie;
-    if(!U.opened || e->generation!=U.generation) return CANOPUS_UI_ERR_STALE;
+    uint32_t event=e->event_id;(void)ctx;(void)cookie;
+    if(!U.opened || !U.ui || ui!=U.ui || e->generation!=U.generation) return CANOPUS_UI_ERR_STALE;
     if(e->key==KEY_ACTION+1 && !event) {
         if(U.route==INDEX) event=EV_RELOAD;
         /* The same bottom asset carries one event on both pages: open the
@@ -1072,14 +1079,27 @@ static int on_open(const struct canopus_context_v1 *ctx,struct canopus_ui_contex
     if((U.wide && !((U.width==336 && U.height==480) || (U.width==432 && U.height==514))) ||
        (!U.wide && (U.width!=212 || U.height!=520))) return CANOPUS_UI_ERR_UNSUPPORTED;
     rc=rh_manager_assets_install(ctx);if(rc) return rc;
-    U.opened=1;U.render_failed=0;U.route=INDEX;U.error[0]=0;U.suppressed=0;U.banner_hidden=0;
+    U.opened=1;U.render_failed=0;U.route=INDEX;U.bound_route=INDEX;U.error[0]=0;U.suppressed=0;U.banner_hidden=0;
     U.delete_blocked=0;U.confirm_error[0]=0;
     reload_timer_stop();notice_clear();
     rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
     rc=render();if(rc) {U.opened=0;U.ui=0;}return rc;
 }
+static int on_resume(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,uint32_t route,void *cookie) {
+    (void)cookie;if(!U.opened || U.ctx!=ctx || route>=ROUTES) return CANOPUS_UI_ERR_STATE;
+    U.ui=ui;U.bound_route=route;
+    if(U.route!=route) {U.route=route;(void)load_route(route,1);}
+    U.render_failed=0;
+    rh_module_get_status_snapshot(&U.status);rh_manager_get_transfer_state(&U.transfer);
+    return render();
+}
+static void on_pause(const struct canopus_context_v1 *ctx,uint32_t route,void *cookie) {
+    (void)ctx;(void)cookie;if(route!=U.bound_route) return;
+    cancel_gesture();U.ui=0;
+}
 static int on_back(const struct canopus_context_v1 *ctx,struct canopus_ui_context_v1 *ui,void *cookie) {
     (void)ctx;(void)ui;(void)cookie;
+    if(!U.ui) return 0;
     if(U.route==INDEX) return 1;
     /* The host interprets every nonzero result as permission to close the app.
      * An internal pop owns this event even if its replacement tree fails. */
@@ -1092,7 +1112,7 @@ static void on_close(const struct canopus_context_v1 *ctx,void *cookie) {
 /* One firmware page per route, so a route change is a stock push/pop. A
  * backend without ctx->ui->route ignores page_count and replaces the tree in
  * the single page as before, so this stays correct on older targets. */
-static const struct canopus_ui_entry_v1 entry={sizeof(entry),"Corona",on_open,on_event,on_back,on_close,0,ROUTES};
+static const struct canopus_ui_entry_v1 entry={sizeof(entry),"Corona",on_open,on_event,on_back,on_close,0,ROUTES,on_resume,on_pause};
 int rh_manager_ui_set_data_hooks(const struct rh_manager_data_hooks *hooks) {
     struct rh_manager_data_hooks empty={0};const struct rh_manager_data_hooks *next=hooks?hooks:&empty;
     if(U.data && (U.hooks.remove_tree!=next->remove_tree || U.hooks.quickapp_icon!=next->quickapp_icon || U.hooks.cookie!=next->cookie))

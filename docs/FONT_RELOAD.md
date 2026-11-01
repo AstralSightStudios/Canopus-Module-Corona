@@ -52,7 +52,7 @@ python3 scripts/build-watchface.py --target xiaomi-band-10-pro-3.101.043
 ```
 
 Every build emits `build/resource-hook.elf` with build ID
-`resource-hook-0.3.0` and includes the checked font transaction.
+`resource-hook-0.3.1` and includes the checked font transaction.
 The ordinary signed payload/delivery builders include it too. Old experimental
 environment variables are no longer used. Installation still leaves the
 module disabled until explicitly enabled; promoting fonts does not restart
@@ -204,7 +204,7 @@ staged ELF before signing. The `.139` / `.155` signed module rebind suite passes
 probes pass 24 / 24 / 19 checks respectively. Manager's full host suite passes.
 These results remain separate from physical-device acceptance reported above.
 The normal multi-device signed package is
-`dist/module-installer-resource-hook-0.3.0-all/`.
+`dist/module-installer-resource-hook-0.3.1-all/`.
 
 `cd manager && npm test` checks reusable file functions (text/binary/range/metadata operations, missing-file semantics, native callback failures and synchronous exceptions) and Interconnect handshake, path validation, transfer, resume, and completion behavior. Manager uses a native scrolling list, 18–24 px high-contrast text and 48 px full-width buttons; physical-device readability still requires acceptance.
 

@@ -62,7 +62,7 @@ static int fs_mkdir(const struct canopus_context_v1 *c,const char *p) {char x[10
 static void *fs_opendir(const struct canopus_context_v1 *c,const char *p) {char x[1024];(void)c;path(x,p);return opendir(x);}
 static int fs_readdir(const struct canopus_context_v1 *c,void *dir,struct canopus_fs_dirent *out) {struct dirent *e;(void)c;errno=0;e=readdir(dir);if(!e)return errno?-errno:1;assert(strlen(e->d_name)<sizeof(out->name));strcpy(out->name,e->d_name);out->is_dir=e->d_type==DT_DIR;return 0;}
 static int fs_closedir(const struct canopus_context_v1 *c,void *dir) {(void)c;return closedir(dir)<0?-errno:0;}
-static int fs_root(const struct canopus_context_v1 *c,char *p,uint32_t size) {(void)c;assert(size>23);strcpy(p,"/data/canopus/m.corona");return 0;}
+static int fs_root(const struct canopus_context_v1 *c,char *p,uint32_t size) {(void)c;assert(size>=sizeof("/data/canopus/m.corona"));strcpy(p,"/data/canopus/m.corona");return 0;}
 struct allocation { uint64_t size,alignment; };
 static void *mem_alloc(const struct canopus_context_v1 *c,uint32_t n) {(void)c;struct allocation *p=malloc(sizeof(*p)+n);assert(p);p->size=n;live+=n;if(live>peak)peak=live;return p+1;}
 static void mem_free(const struct canopus_context_v1 *c,void *p) {(void)c;if(p){struct allocation *a=(struct allocation *)p-1;assert(live>=a->size);live-=(uint32_t)a->size;free(a);}}

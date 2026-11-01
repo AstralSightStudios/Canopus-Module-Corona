@@ -21,7 +21,7 @@ from band11_module_load import registry
 from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
 
 PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
-    ROOT / 'build/payload-0.3.0' / TARGET))
+    ROOT / 'build/payload-0.3.1' / TARGET))
 APP_ROOT = '/data/quickapp/files/ng.lst.corona/'
 CONFIG_PATH = APP_ROOT + 'mappings.tsv'
 THEME_ROOT = APP_ROOT + 'themes/'
@@ -41,7 +41,7 @@ class Rebind(unittest.TestCase):
         elf, receipt = elf_path.read_bytes(), receipt_path.read_bytes()
         self.assertEqual(len(receipt), 176)
         self.assertEqual(receipt[:4], b'CMI2')
-        self.assertEqual(receipt[32:64].split(b'\0')[0], b'canopus_corona')
+        self.assertEqual(receipt[32:64].split(b'\0')[0], b'corona')
         self.assertEqual(receipt[64:112], TARGET.encode().ljust(48, b'\0'),
                          'fixture receipt must match RESOURCE_HOOK_TARGET')
         self.assertEqual(receipt[112:144], bytes.fromhex(FIRMWARE_SHA256[TARGET]),

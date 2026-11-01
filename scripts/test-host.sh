@@ -143,6 +143,7 @@ sh "$ROOT/scripts/test-manager-module.sh"
 sh "$ROOT/scripts/test-manager-config-store.sh"
 sh "$ROOT/scripts/test-manager-assets.sh"
 sh "$ROOT/scripts/test-manager-data.sh"
+python3 "$ROOT/tests/test_manager_stack.py"
 sh "$ROOT/scripts/test-manager-ui.sh"
 
 # Production CanopusConnect state machine, archive parser and complete install path.

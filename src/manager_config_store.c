@@ -1,8 +1,9 @@
 #include "manager_config_store.h"
 #include "canopus_services.h"
 #include "canopus_memory.h"
+#include "resource_hook.h"
 
-#define CONFIG_ROOT "/data/canopus/m.corona/"
+#define CONFIG_ROOT RH_NATIVE_APP_FILES_ROOT
 #define CONFIG_POINTER CONFIG_ROOT "active-config"
 #define CONFIG_TEMP CONFIG_ROOT "active-config.part"
 #define POINTER_BYTES 32u

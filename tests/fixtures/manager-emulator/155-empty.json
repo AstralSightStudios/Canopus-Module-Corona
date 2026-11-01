@@ -1,0 +1,215 @@
+{
+  "description": "Fresh install without seed themes: system row, built-in mixed choices, repeated push/pop, and stable return to home. Uses the production module without a test hook.",
+  "steps": [
+    {
+      "shot": "empty-home"
+    },
+    {
+      "tap": [
+        106,
+        244
+      ]
+    },
+    {
+      "shot": "empty-resources",
+      "pixels": [
+        {
+          "point": [
+            8,
+            108
+          ],
+          "rgb": [
+            34,
+            34,
+            34
+          ],
+          "tolerance": 3
+        },
+        {
+          "point": [
+            8,
+            212
+          ],
+          "rgb": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 3
+        }
+      ]
+    },
+    {
+      "tap": [
+        106,
+        116
+      ]
+    },
+    {
+      "shot": "empty-system-row-stays",
+      "same_as": "empty-resources",
+      "crop": [
+        0,
+        68,
+        212,
+        520
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        348
+      ]
+    },
+    {
+      "shot": "empty-mix",
+      "pixels": [
+        {
+          "point": [
+            8,
+            108
+          ],
+          "rgb": [
+            34,
+            34,
+            34
+          ],
+          "tolerance": 3
+        }
+      ]
+    },
+    {
+      "tap": [
+        106,
+        116
+      ]
+    },
+    {
+      "shot": "empty-background-choices"
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        244
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        348
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        244
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        348
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        244
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        348
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        244
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "tap": [
+        106,
+        348
+      ]
+    },
+    {
+      "tap": [
+        106,
+        50
+      ]
+    },
+    {
+      "shot": "empty-home-return",
+      "same_as": "empty-home",
+      "crop": [
+        0,
+        68,
+        212,
+        520
+      ]
+    }
+  ]
+}

@@ -63,7 +63,7 @@ def build_bundle(device_family, targets, out_dir):
         target_args = [arg for target in targets for arg in ('--target', target)]
         subprocess.run([sys.executable, str(WATCHFACE_BUILDER),
                         '--product', 'resource-hook',
-                        '--module-id', 'canopus_corona',
+                        '--module-id', 'corona',
                         *target_args,
                         '--payload-dir', str(payload_dir),
                         '--assets-dir', str(ROOT / 'examples'),
@@ -82,7 +82,7 @@ def build_bundle(device_family, targets, out_dir):
         font_status = ('NOT_PROBED' if 'xiaomi-band-11-4.100.177' in targets
                        else 'USER_REPORTED_PASS')
         installer_manifest.update({
-            'module_build_id': 'resource-hook-0.3.0', 'font_reload': True,
+            'module_build_id': 'resource-hook-0.3.1', 'font_reload': True,
             'font_reload_device_status': font_status,
             'receipt_format_version': 2,
             'hardware_status': 'NOT_PROBED', 'gpu_recovery': 'UNSUPPORTED',
@@ -93,10 +93,10 @@ def build_bundle(device_family, targets, out_dir):
         # Destination paths
         if device_family == 'band11':
             versions = '-'.join(target.rsplit('.', 1)[1] for target in targets)
-            folder_name = 'resource-hook-0.3.0-quickapp-band11-' + versions
+            folder_name = 'resource-hook-0.3.1-quickapp-band11-' + versions
             zip_name = folder_name + '.zip'
         else:
-            folder_name = 'resource-hook-0.3.0-quickapp-band10-pro-1043'
+            folder_name = 'resource-hook-0.3.1-quickapp-band10-pro-1043'
             zip_name = folder_name + '.zip'
 
         dest_folder = out_dir / folder_name
@@ -131,10 +131,10 @@ def build_bundle(device_family, targets, out_dir):
             flat_files.append(f'resource-hook-{target}.cmi.bin')
 
         validation = {
-            'module': 'canopus_corona',
+            'module': 'corona',
             'version': module_version,
             'features': ['transactional-font-reload', 'quickapp-launcher-icons', 'calendar-reload'],
-            'module_build_id': 'resource-hook-0.3.0',
+            'module_build_id': 'resource-hook-0.3.1',
             'font_reload': True, 'font_reload_device_status': font_status,
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
             'targets': target_metadata,
@@ -153,7 +153,7 @@ def build_bundle(device_family, targets, out_dir):
 
         readme_text = (
             f"# Resource Hook installer: {device_family.upper()}\n\n"
-            f"Targets: {', '.join(targets)}. Runtime module: canopus_corona {module_version}.\n\n"
+            f"Targets: {', '.join(targets)}. Runtime module: corona {module_version}.\n\n"
             "The flat ZIP is input to a watchface packer, not a vendor watchface file.\n"
             "Opening the installed watchface installs the module DISABLED. Enable it separately.\n"
             "Requires the current resident Canopus Supervisor with unsigned CMI2 support.\n"

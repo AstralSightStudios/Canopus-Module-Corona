@@ -11,6 +11,7 @@
 
 static struct canopus_context_v1 context;
 static struct canopus_ui_context_v1 ui;
+static struct canopus_ui_context_v1 *active_ui=&ui;
 static const struct canopus_ui_entry_v1 *entry;
 static canopus_ui_task_fn pending;
 static struct rh_module_status_snapshot status={.state=RH_MGR_STATE_RUNNING,.active_rules=3};
@@ -96,7 +97,25 @@ static int32_t close_page(const struct canopus_context_v1 *c) {(void)c;close_cou
 /* Multi-page entries: the modelled host moves to the destination page and
  * drops the old view, exactly like the target backend after page_goto. */
 static uint32_t routed_routes;
-static int32_t route_page(const struct canopus_context_v1 *c,uint32_t r) {(void)c;assert(multi_page);assert(r<5);routed_routes++;return 0;}
+static int32_t dispatch(void *,const struct canopus_ui_event_v1 *);
+static int defer_route, route_failure;
+static uint32_t pending_route;
+static void resume_route(uint32_t r) {
+    struct canopus_ui_context_v1 *previous=active_ui;
+    struct canopus_ui_context_v1 *next=malloc(sizeof(*next));assert(next);
+    entry->on_pause(&context,previous->committed.nodes[0].key/10000u,0);
+    assert(!canopus_ui_context_init(next,&backend,0,dispatch,0));
+    active_ui=next;
+    if(previous!=&ui) free(previous);
+    assert(!entry->on_resume(&context,next,r,0));
+}
+static int32_t route_page(const struct canopus_context_v1 *c,uint32_t r) {
+    (void)c;assert(multi_page);assert(r<6);
+    if(route_failure) return route_failure;
+    routed_routes++;
+    if(defer_route) pending_route=r+1u;else resume_route(r);
+    return 0;
+}
 static int32_t publish_launcher(const struct canopus_context_v1 *c,const struct canopus_app_entry_v1 *e) {(void)c;assert(!strcmp(e->label,"Corona"));assert(e->icon);assert(!e->pages&&!e->page_count);return 0xCC;}
 static void resolution(const struct canopus_context_v1 *c,uint32_t *w,uint32_t *h) {(void)c;*w=width;*h=height;}
 static uint32_t clock_ms(const struct canopus_context_v1 *c) {(void)c;return 1000;}
@@ -196,69 +215,69 @@ int rh_manager_data_delete_check(struct rh_manager_data *d,const char *id) {(voi
 const char *rh_manager_data_error(const struct rh_manager_data *d) {(void)d;return "";}
 int rh_manager_data_last_installed(const struct rh_manager_data *d,char id[65]) {(void)d;strcpy(id,"theme3");return 0;}
 
-static int32_t dispatch(void *cookie,const struct canopus_ui_event_v1 *e) {(void)cookie;return entry->on_event(&context,&ui,e,entry->user_data);}
+static int32_t dispatch(void *cookie,const struct canopus_ui_event_v1 *e) {(void)cookie;return entry->on_event(&context,active_ui,e,entry->user_data);}
 static void pump(void) {canopus_ui_task_fn cb=pending;pending=0;if(cb) cb(&context,0);}
-static uint32_t find_type(uint16_t type,uint32_t start) {uint32_t i;for(i=start;i<ui.committed.node_count;i++)if(ui.committed.nodes[i].type==type)return i;assert(0);return 0;}
+static uint32_t find_type(uint16_t type,uint32_t start) {uint32_t i;for(i=start;i<active_ui->committed.node_count;i++)if(active_ui->committed.nodes[i].type==type)return i;assert(0);return 0;}
 static uint32_t find_text(const char *s) {
     uint32_t i;
-    for(i=0;i<ui.committed.node_count;i++) if(!strcmp(ui.committed.strings+ui.committed.nodes[i].primary_off,s)) return i;
-    fprintf(stderr,"Missing UI text '%s' (page key %u, phase %u, nodes %u)\n",s,ui.committed.nodes[0].key,transfer.phase,ui.committed.node_count);
-    for(i=0;i<ui.committed.node_count;i++) fprintf(stderr,"  key %u type %u: %s\n",ui.committed.nodes[i].key,ui.committed.nodes[i].type,ui.committed.strings+ui.committed.nodes[i].primary_off);
+    for(i=0;i<active_ui->committed.node_count;i++) if(!strcmp(active_ui->committed.strings+active_ui->committed.nodes[i].primary_off,s)) return i;
+    fprintf(stderr,"Missing UI text '%s' (page key %u, phase %u, nodes %u)\n",s,active_ui->committed.nodes[0].key,transfer.phase,active_ui->committed.node_count);
+    for(i=0;i<active_ui->committed.node_count;i++) fprintf(stderr,"  key %u type %u: %s\n",active_ui->committed.nodes[i].key,active_ui->committed.nodes[i].type,active_ui->committed.strings+active_ui->committed.nodes[i].primary_off);
     assert(0);return 0;
 }
-static uint32_t find_key(uint32_t key) {uint32_t i;for(i=0;i<ui.committed.node_count;i++)if(ui.committed.nodes[i].key==key)return i;assert(0);return 0;}
+static uint32_t find_key(uint32_t key) {uint32_t i;for(i=0;i<active_ui->committed.node_count;i++)if(active_ui->committed.nodes[i].key==key)return i;assert(0);return 0;}
 static void assert_no_text(const char *s) {
     uint32_t i;
-    for(i=0;i<ui.committed.node_count;i++)
-        if(!strcmp(ui.committed.strings+ui.committed.nodes[i].primary_off,s)) {
-            fprintf(stderr,"Unexpected UI text '%s' (page key %u, phase %u)\n",s,ui.committed.nodes[0].key,transfer.phase);
+    for(i=0;i<active_ui->committed.node_count;i++)
+        if(!strcmp(active_ui->committed.strings+active_ui->committed.nodes[i].primary_off,s)) {
+            fprintf(stderr,"Unexpected UI text '%s' (page key %u, phase %u)\n",s,active_ui->committed.nodes[0].key,transfer.phase);
             assert(0);
         }
 }
 static void visible_copy(const char *s) {
     char joined[1536];uint32_t i,n=0;joined[0]=0;
-    for(i=0;i<ui.committed.node_count;i++) {
-        const struct canopus_ui_node_v1 *node=&ui.committed.nodes[i];
-        if(node->type==CANOPUS_UI_NODE_TEXT) {assert(n+node->primary_len<sizeof(joined));memcpy(joined+n,ui.committed.strings+node->primary_off,node->primary_len);n+=node->primary_len;joined[n]=0;}
+    for(i=0;i<active_ui->committed.node_count;i++) {
+        const struct canopus_ui_node_v1 *node=&active_ui->committed.nodes[i];
+        if(node->type==CANOPUS_UI_NODE_TEXT) {assert(n+node->primary_len<sizeof(joined));memcpy(joined+n,active_ui->committed.strings+node->primary_off,node->primary_len);n+=node->primary_len;joined[n]=0;}
     }
     if(!strstr(joined,s)) fprintf(stderr,"Missing visible text '%s' in '%s'\n",s,joined);
     assert(strstr(joined,s));
 }
 static int quickapp_hook(void *cookie,const char *package,char out[256]) {(void)cookie;(void)package;strcpy(out,"/data/icon.bin");return 0;}
 static int event_result(uint32_t key,uint32_t type,uint32_t ms,int32_t x,int32_t y,int32_t scroll) {
-    const struct canopus_ui_node_v1 *n=&ui.committed.nodes[find_key(key)];
-    struct canopus_ui_event_v1 e={sizeof(e),ui.committed.generation,key,n->event_id,type,ms,x,y,0,0,scroll,444,41632};
-    return canopus_ui_dispatch_event(&ui,&e);
+    const struct canopus_ui_node_v1 *n=&active_ui->committed.nodes[find_key(key)];
+    struct canopus_ui_event_v1 e={sizeof(e),active_ui->committed.generation,key,n->event_id,type,ms,x,y,0,0,scroll,444,41632};
+    return canopus_ui_dispatch_event(active_ui,&e);
 }
 static void event(uint32_t key,uint32_t type,uint32_t ms,int32_t x,int32_t y,int32_t scroll) {
     assert(!event_result(key,type,ms,x,y,scroll));
 }
-static void activate_text(const char *s) {uint32_t i=find_text(s);event(ui.committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);}
+static void activate_text(const char *s) {uint32_t i=find_text(s);event(active_ui->committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);}
 static void back(void) {event(2,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);}
 /* Match the real host: any unconsumed callback finishes the module page. */
-static void host_back(void) {if(entry->on_back(&context,&ui,0)) assert(!close_page(&context));}
+static void host_back(void) {if(entry->on_back(&context,active_ui,0)) assert(!close_page(&context));}
 static void tap(uint32_t key,uint32_t time) {event(key,CANOPUS_UI_EVENT_PRESS,time,10,10,0);event(key,CANOPUS_UI_EVENT_RELEASE,time+5,10,10,0);}
-static void assert_route(uint32_t route) {assert(ui.committed.nodes[0].key==1+route*10000);}
+static void assert_route(uint32_t route) {assert(active_ui->committed.nodes[0].key==1+route*10000);}
 int main(int argc,char **argv) {
     uint32_t i,bytes=0;struct rh_transfer_ui_state s={0};
     struct rh_manager_data_hooks hooks={.quickapp_icon=quickapp_hook,.cookie=&context};(void)argv;
     if(argc>1){width=336;height=480;}
     if(argc>1 && !strcmp(argv[1],"--p65")){width=432;height=514;}
     context.struct_size=sizeof(context);context.ui=&ui_api;context.fs=&fs_api;context.launcher=&launcher_api;context.display=&display_api;context.time=&time_api;
-    assert(!canopus_ui_context_init(&ui,&backend,0,dispatch,0));
+    assert(!canopus_ui_context_init(active_ui,&backend,0,dispatch,0));
     assert(!rh_manager_ui_set_data_hooks(&hooks));
     assert(!rh_manager_ui_register(&context));assert(!rh_manager_launcher_register(&context));
-    assert(!entry->on_open(&context,&ui,0));assert_route(0);
+    assert(!entry->on_open(&context,active_ui,0));assert_route(0);
     /* The root page carries no back affordance: the stock apps exit through
        the system back gesture so the firmware draws the page-out transition,
        and only sub-routes draw a header back. */
-    assert(!(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
-    i=find_text("正在工作");assert(ui.committed.visuals[0].flags==0);
+    assert(!(active_ui->committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
+    i=find_text("正在工作");assert(active_ui->committed.visuals[0].flags==0);
     (void)i;
-    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
-    assert(ui.committed.styles[find_key(20)].corner_radius==32);
-    assert(ui.committed.visuals[find_key(24)].x==(width>=300?186:133));
-    assert(ui.committed.visuals[find_key(24)].y==(width>=300?-7:1));
+    assert(active_ui->committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(active_ui->committed.styles[find_key(20)].corner_radius==32);
+    assert(active_ui->committed.visuals[find_key(24)].x==(width>=300?186:133));
+    assert(active_ui->committed.visuals[find_key(24)].y==(width>=300?-7:1));
     /* Initial import errors must leave both return paths usable without a
        data model. A failed home render must still consume the host's back. */
     fail_create=1;
@@ -277,7 +296,7 @@ int main(int argc,char **argv) {
     /* The busy card: the status card is the reload action's only surface, so it
        reports the transaction while the bottom button is disabled. */
     find_text("正在重载");find_text("重新读取映射");
-    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(active_ui->committed.visuals[find_key(20)].background_rgb==0x1da362);
     assert(timer_live_ms(5000));
     tap(31,120);assert(reloads==1);pump();
     {uint32_t reads=refresh_count;
@@ -290,7 +309,7 @@ find_text("启动器背景");assert(refresh_count==reads);
     /* The outcome takes the card for one dwell and then yields to the module
        state again; the reload watchdog is gone the moment it reports. */
     find_text("重载完成");find_text("更新3项资源");
-    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(active_ui->committed.visuals[find_key(20)].background_rgb==0x1da362);
     assert(!timer_live_ms(5000) && timer_live_ms(2000));
     timer_fire(2000);find_text("正在工作");find_text("已加载3条规则");
     assert(!timer_live());
@@ -298,7 +317,7 @@ find_text("启动器背景");assert(refresh_count==reads);
     /* A refresh whose protection record failed did work: it must not read as a
        reload failure, and it keeps its own dwell. */
     find_text("重载完成");find_text("保护记录未存");
-    assert(ui.committed.visuals[find_key(20)].background_rgb==0x1da362);
+    assert(active_ui->committed.visuals[find_key(20)].background_rgb==0x1da362);
     assert(timer_live_ms(2000));timer_fire(2000);
     find_text("资源管理");fail_complete=0;
     /* Every failure the action can hit is a card, never a page error: a blocking
@@ -306,7 +325,7 @@ find_text("启动器背景");assert(refresh_count==reads);
        the only thing that keeps a lost generation from greying the action out
        for the rest of the session. */
     fail_refresh=1;tap(31,300);find_text("重载失败");find_text("读取资源失败");
-    assert(ui.committed.visuals[find_key(20)].background_rgb==0xdf9725);
+    assert(active_ui->committed.visuals[find_key(20)].background_rgb==0xdf9725);
     assert(!timer_live_ms(5000) && timer_live_ms(3500));timer_fire(3500);fail_refresh=0;
     fail_prepare=1;tap(31,320);find_text("重载失败");find_text("映射生成失败");
     timer_fire(3500);fail_prepare=0;
@@ -332,7 +351,7 @@ find_text("启动器背景");assert(refresh_count==reads);
     tap(31,440);find_text("正在重载");status.reload_result=0;listener(listener_cookie,1);pump();
     find_text("重载完成");timer_fire(2000);assert(!timer_live());
     activate_text("资源管理");assert_route(1);
-    assert(ui.committed.nodes[find_text("系统样式")].event_id==0);
+    assert(active_ui->committed.nodes[find_text("系统样式")].event_id==0);
     event(1000,CANOPUS_UI_EVENT_PRESS,100,50,50,0);event(1000,CANOPUS_UI_EVENT_LONG_PRESS,600,50,50,0);
     assert(captured==1 && timer_live_ms(40));
     event(1000,CANOPUS_UI_EVENT_MOVE,650,50,260,0);event(1000,CANOPUS_UI_EVENT_RELEASE,700,50,260,0);
@@ -370,7 +389,7 @@ find_text("启动器背景");assert(refresh_count==reads);
         event(10,CANOPUS_UI_EVENT_SCROLL,900,0,0,0);
         event(1001,CANOPUS_UI_EVENT_PRESS,1000,20,120,0);event(1001,CANOPUS_UI_EVENT_LONG_PRESS,1500,20,120,0);
         assert(captured==captures+1 && timer_live_ms(40));
-        event(10,CANOPUS_UI_EVENT_SCROLL,1510,0,0,38000);find_key(1001);assert(ui.committed.string_used<=1536);
+        event(10,CANOPUS_UI_EVENT_SCROLL,1510,0,0,38000);find_key(1001);assert(active_ui->committed.string_used<=1536);
         reject_apply=1;assert(event_result(10,CANOPUS_UI_EVENT_SCROLL,1520,0,0,20000)==CANOPUS_UI_ERR_BACKEND);
         if(i==0) event(1001,CANOPUS_UI_EVENT_RELEASE,1600,20,120,0);
         else if(i==1) event(1001,CANOPUS_UI_EVENT_CANCEL,1600,20,120,0);
@@ -386,9 +405,9 @@ find_text("启动器背景");assert(refresh_count==reads);
        to fit the arena. The scroll walk also exercises variable-height fields. */
     for(i=0;i<12000;i+=50) {
         uint32_t j;event(10,CANOPUS_UI_EVENT_SCROLL,1000+i,0,0,(int32_t)i);
-        for(j=0;j<ui.committed.node_count;j++) {
-            const struct canopus_ui_node_v1 *n=&ui.committed.nodes[j];
-            if(n->type==CANOPUS_UI_NODE_TEXT && n->primary_len && ui.committed.strings[n->primary_off]=='t') bytes+=n->primary_len;
+        for(j=0;j<active_ui->committed.node_count;j++) {
+            const struct canopus_ui_node_v1 *n=&active_ui->committed.nodes[j];
+            if(n->type==CANOPUS_UI_NODE_TEXT && n->primary_len && active_ui->committed.strings[n->primary_off]=='t') bytes+=n->primary_len;
         }
     }
     assert(bytes>=2064);
@@ -402,17 +421,17 @@ find_text("启动器背景");assert(refresh_count==reads);
        colour (opacity is unavailable on .043) and the runtime refuses the
        dispatch through the cleared ENABLED flag. */
     {uint32_t action=find_text("删除");
-     assert(!(ui.committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED));
-     assert(ui.committed.styles[action].foreground==CANOPUS_UI_COLOR_DISABLED);
-     assert(ui.committed.styles[action].opacity==(width==432?0:500));
-     assert(ui.committed.styles[action].variant!=CANOPUS_UI_VARIANT_DESTRUCTIVE);}
+     assert(!(active_ui->committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED));
+     assert(active_ui->committed.styles[action].foreground==CANOPUS_UI_COLOR_DISABLED);
+     assert(active_ui->committed.styles[action].opacity==(width==432?0:500));
+     assert(active_ui->committed.styles[action].variant!=CANOPUS_UI_VARIANT_DESTRUCTIVE);}
     back();assert_route(2);
     delete_protected=0;tap(31,21000);assert(deletes==0);assert_route(5);
     visible_copy("删除后，资源包文件与索引将一并移除");
     {uint32_t action=find_text("删除");
-     assert(ui.committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED);
-     assert(ui.committed.styles[action].opacity==0);
-     assert(ui.committed.styles[action].variant==CANOPUS_UI_VARIANT_DESTRUCTIVE);}
+     assert(active_ui->committed.nodes[action].flags&CANOPUS_UI_NODE_FLAG_ENABLED);
+     assert(active_ui->committed.styles[action].opacity==0);
+     assert(active_ui->committed.styles[action].variant==CANOPUS_UI_VARIANT_DESTRUCTIVE);}
     /* A refused transaction keeps the page and replaces the promise with the
        reason, so the action can be retried without leaving and coming back. */
     fail_delete=1;activate_text("删除");assert(deletes==1);assert_route(5);
@@ -422,74 +441,74 @@ find_text("启动器背景");assert(refresh_count==reads);
        even though the previous byte threshold classified them as short. */
     event(1002,CANOPUS_UI_EVENT_ACTIVATE,22500,0,0,0);assert_route(2);
     {char cjk[61];uint32_t j,node;for(j=0;j<20;j++)memcpy(cjk+j*3,"汉",3);cjk[60]=0;
-        node=find_text(cjk);assert(ui.committed.nodes[node].type==CANOPUS_UI_NODE_TEXT);assert(ui.committed.layouts[node].height>32);
+        node=find_text(cjk);assert(active_ui->committed.nodes[node].type==CANOPUS_UI_NODE_TEXT);assert(active_ui->committed.layouts[node].height>32);
     }
     back();
     back();activate_text("混搭微调");assert_route(3);
 event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     event(1002,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert_route(4);
-    i=find_text("系统");event(ui.committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert(selected==1);
-    i=find_text("系统");assert(ui.committed.nodes[i].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
+    i=find_text("系统");event(active_ui->committed.nodes[i].key,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0);assert(selected==1);
+    i=find_text("系统");assert(active_ui->committed.nodes[i].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
     /* Every option is a real card again. The compact rows carry the same
        #262626/24px surface as the preview rows, and the page suppresses the
        host's own (●) because it reserves that column for its own icon. */
     {uint32_t compact=0;
         /* The stub names every theme the same; take the third option's row. */
-        for(i=0;i<ui.committed.node_count;i++)
-            if(ui.committed.nodes[i].type==CANOPUS_UI_NODE_RADIO_ROW &&
-               ui.committed.layouts[i].height==76) {compact=i;break;}
-        assert(ui.committed.visuals[compact].background_rgb==0x262626);
-        assert(ui.committed.styles[compact].corner_radius==24);
-        assert(ui.committed.styles[compact].variant==CANOPUS_UI_VARIANT_PLAIN);
-        assert(ui.committed.layouts[compact].padding_left==14);
-        assert(ui.committed.layouts[compact].padding_right==13);
-        assert(ui.committed.layouts[compact].height==76);
+        for(i=0;i<active_ui->committed.node_count;i++)
+            if(active_ui->committed.nodes[i].type==CANOPUS_UI_NODE_RADIO_ROW &&
+               active_ui->committed.layouts[i].height==76) {compact=i;break;}
+        assert(active_ui->committed.visuals[compact].background_rgb==0x262626);
+        assert(active_ui->committed.styles[compact].corner_radius==24);
+        assert(active_ui->committed.styles[compact].variant==CANOPUS_UI_VARIANT_PLAIN);
+        assert(active_ui->committed.layouts[compact].padding_left==14);
+        assert(active_ui->committed.layouts[compact].padding_right==13);
+        assert(active_ui->committed.layouts[compact].height==76);
         /* The selected state is a 32px icon at the card's right edge, not the
            host's synthesized glyph. */
-        {uint32_t mark=0,j;for(j=0;j<ui.committed.node_count;j++)
-            if(ui.committed.nodes[j].type==CANOPUS_UI_NODE_IMAGE &&
-               ui.committed.layouts[j].width==32) {mark=j;break;}
+        {uint32_t mark=0,j;for(j=0;j<active_ui->committed.node_count;j++)
+            if(active_ui->committed.nodes[j].type==CANOPUS_UI_NODE_IMAGE &&
+               active_ui->committed.layouts[j].width==32) {mark=j;break;}
          assert(mark!=0);
          /* Vertical placement is the post-commit TRANSLATE path, which the
             scroll assertions above already cover. */
          {int row=(int)(width>=300?width:204);
-          assert(ui.committed.visuals[mark].x+32==(int)(width-row)/2+row-13);}}
+          assert(active_ui->committed.visuals[mark].x+32==(int)(width-row)/2+row-13);}}
     }
     /* The tall variant keeps one card: SECTION at 160 owns the preview image
        and the label row, and the label row only carries the shared inset. */
     {uint32_t preview=0;
-        for(i=0;i<ui.committed.node_count;i++)
-            if(ui.committed.nodes[i].type==CANOPUS_UI_NODE_RADIO_ROW &&
-               ui.committed.layouts[i].height==48) {preview=i;break;}
+        for(i=0;i<active_ui->committed.node_count;i++)
+            if(active_ui->committed.nodes[i].type==CANOPUS_UI_NODE_RADIO_ROW &&
+               active_ui->committed.layouts[i].height==48) {preview=i;break;}
         assert(preview!=0);
-        uint32_t card=ui.committed.nodes[preview].parent;
+        uint32_t card=active_ui->committed.nodes[preview].parent;
         assert(card!=CANOPUS_UI_NO_NODE);
-        assert(ui.committed.nodes[card].type==CANOPUS_UI_NODE_SECTION);
-        assert(ui.committed.layouts[card].height==160);
-        assert(ui.committed.visuals[card].background_rgb==0x262626);
-        assert(ui.committed.styles[card].corner_radius==24);
-        assert(ui.committed.layouts[preview].padding_left==14);
-        assert(ui.committed.layouts[preview].padding_right==13);
-        assert(ui.committed.visuals[preview].background_rgb==0);
+        assert(active_ui->committed.nodes[card].type==CANOPUS_UI_NODE_SECTION);
+        assert(active_ui->committed.layouts[card].height==160);
+        assert(active_ui->committed.visuals[card].background_rgb==0x262626);
+        assert(active_ui->committed.styles[card].corner_radius==24);
+        assert(active_ui->committed.layouts[preview].padding_left==14);
+        assert(active_ui->committed.layouts[preview].padding_right==13);
+        assert(active_ui->committed.visuals[preview].background_rgb==0);
     }
     /* The preview is wrapped in a clickable LIST (a bare image is not one),
        and the whole card picks: the wrapper carries the event while its bare
        image child and the check mark report only their keys, exactly as the
        firmware hit test does. Each tap is one pick, never two. */
     {uint32_t wrap=find_type(CANOPUS_UI_NODE_LIST,0),base=chooses;
-     uint32_t wkey=ui.committed.nodes[wrap].key;
-     assert(ui.committed.nodes[wrap].event_id!=0);
-     assert(ui.committed.nodes[wrap].parent==find_key(wkey-1));
+     uint32_t wkey=active_ui->committed.nodes[wrap].key;
+     assert(active_ui->committed.nodes[wrap].event_id!=0);
+     assert(active_ui->committed.nodes[wrap].parent==find_key(wkey-1));
      tap(wkey,23000);assert(chooses==base+1 && selected==0);
      tap(wkey+6,23100);assert(chooses==base+2 && selected==1);
      tap(wkey+3,23200);assert(chooses==base+3 && selected==0);
-     assert(ui.committed.nodes[find_key(wkey+2)].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
+     assert(active_ui->committed.nodes[find_key(wkey+2)].flags&CANOPUS_UI_NODE_FLAG_SELECTED);
     }
-    host_back();assert_route(3);assert(!close_count);assert(ui.committed.visuals[find_key(10)].scroll_y==208);back();
+    host_back();assert_route(3);assert(!close_count);assert(active_ui->committed.visuals[find_key(10)].scroll_y==208);back();
     activate_text("资源管理");assert_route(1);
     s.remote_connected=1;s.phase=RH_XFER_PHASE_RECEIVING;s.percent=68;assert(!rh_manager_set_transfer_state(&s));pump();
     find_text("正在接收 · 68%");
-    i=find_type(CANOPUS_UI_NODE_PROGRESS,0);assert(ui.committed.values[i].value==68);
+    i=find_type(CANOPUS_UI_NODE_PROGRESS,0);assert(active_ui->committed.values[i].value==68);
     s.phase=RH_XFER_PHASE_VERIFYING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在校验完整性");
     s.phase=RH_XFER_PHASE_INSTALLING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在解压并登记");
     {uint32_t reads=refresh_count;
@@ -511,15 +530,15 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
      assert(!rh_manager_set_transfer_state(&done));pump();assert_no_text("已安装");}
     assert(!rh_manager_ui_set_data_hooks(&hooks));assert(!rh_manager_ui_register(&context));assert(subscription_count==1);
     {struct rh_manager_data_hooks changed_hooks=hooks;changed_hooks.cookie=0;assert(rh_manager_ui_set_data_hooks(&changed_hooks)==CANOPUS_SVC_ERR_STATE);}
-    assert(!entry->on_open(&context,&ui,0));activate_text("资源管理");assert_route(1);
+    assert(!entry->on_open(&context,active_ui,0));activate_text("资源管理");assert_route(1);
     host_back();assert_route(0);assert(!close_count);
     /* Sub-routes still draw it, so an internal pop keeps its title affordance. */
     activate_text("资源管理");assert_route(1);
-    assert(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK);
+    assert(active_ui->committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK);
     back();assert_route(0);assert(!close_count);
     host_back();assert(close_count==1);
 #ifdef RH_MANAGER_UI_TEST
-    assert(!entry->on_open(&context,&ui,0));
+    assert(!entry->on_open(&context,active_ui,0));
     activate_text("资源管理");assert_route(1);
     /* Long holds cycle the banner states; the header is not a list row, so the
        drag-to-reorder long press keeps its meaning while the states turn. */
@@ -541,21 +560,43 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
        navigate() goes through ctx->ui->route, which is what gives a real
        firmware page push/pop its stock transition. */
     multi_page=1;routed_routes=0;context.ui=&ui_api_multi;
+    active_ui=malloc(sizeof(*active_ui));assert(active_ui);
+    assert(!canopus_ui_context_init(active_ui,&backend,0,dispatch,0));
     assert(entry->page_count==6);
-    assert(!entry->on_open(&context,&ui,0));assert_route(0);
-    assert(!(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
+    assert(!entry->on_open(&context,active_ui,0));assert_route(0);
+    assert(!(active_ui->committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
     activate_text("资源管理");assert_route(1);
     assert(routed_routes==1);
-    assert(ui.committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK);
+    assert(active_ui->committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK);
     back();assert_route(0);assert(routed_routes==2);
     /* A header back on the root declines too: close_page from inside the
        callback would consume the gesture and skip the page-out transition.
        There is no header node on the root, so call the entry directly. */
-    {int before=close_count;assert(entry->on_back(&context,&ui,0)==1);
+    {int before=close_count;assert(entry->on_back(&context,active_ui,0)==1);
      assert(close_count==before);assert_route(0);}
     activate_text("混搭微调");assert_route(3);assert(routed_routes==3);
     /* The root page declines back so the firmware plays its page-out. */
-    host_back();assert(close_count==1);
+    host_back();assert(close_count==1);assert_route(0);
+    /* Destination creation may be delayed. Posted updates and repeated input
+       must not render through the revoked source while the move is pending. */
+    defer_route=1;
+    {uint32_t committed=applies;
+        activate_text("资源管理");assert_route(0);assert(pending_route==2);
+        assert(event_result(40,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0)==CANOPUS_UI_ERR_STALE);
+        listener(listener_cookie,1);pump();assert(applies==committed);
+        resume_route(pending_route-1u);pending_route=0;assert_route(1);
+        /* A late pause for the old page cannot unbind the new page. */
+        entry->on_pause(&context,0,0);listener(listener_cookie,1);pump();assert_route(1);
+    }
+    back();assert_route(1);assert(pending_route==1);
+    resume_route(pending_route-1u);pending_route=0;assert_route(0);defer_route=0;
+    route_failure=CANOPUS_SVC_ERR_BUSY;
+    assert(event_result(40,CANOPUS_UI_EVENT_ACTIVATE,0,0,0,0)==CANOPUS_SVC_ERR_BUSY);
+    assert_route(0);route_failure=0;
+    /* Root resume preserves a reload result and its dwell timer. */
+    tap(31,60000);status.reload_result=0;listener(listener_cookie,1);pump();find_text("重载完成");
+    activate_text("资源管理");back();assert_route(0);find_text("重载完成");
     entry->on_close(&context,0);
+    free(active_ui);active_ui=&ui;
     puts(width==432?"native UI P65: passed":height==480?"native UI .043: passed":"native UI .155: passed");return 0;
 }

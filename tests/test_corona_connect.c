@@ -64,7 +64,7 @@ static int fs_close(const struct canopus_context_v1 *c,int fd) { int rc;(void)c;
 static int fs_exists(const struct canopus_context_v1 *c,const char *p) { char name[512];struct stat st;(void)c;io();realpath_for(name,p);return stat(name,&st)==0 ? 1:(errno==ENOENT ? 0:-errno); }
 static int fs_mkdir(const struct canopus_context_v1 *c,const char *p) { char name[512];(void)c;io();realpath_for(name,p);return mkdir(name,0700)<0 ? -errno:0; }
 static int fs_remove(const struct canopus_context_v1 *c,const char *p) { char name[512];(void)c;io();realpath_for(name,p);return unlink(name)<0 ? -errno:0; }
-static int fs_root(const struct canopus_context_v1 *c,char *out,uint32_t size) { (void)c;io();assert(size>24);strcpy(out,"/data/canopus/m.corona");return 0; }
+static int fs_root(const struct canopus_context_v1 *c,char *out,uint32_t size) { (void)c;io();assert(size>=sizeof("/data/canopus/m.corona"));strcpy(out,"/data/canopus/m.corona");return 0; }
 static void *mem_alloc(const struct canopus_context_v1 *c,uint32_t n) {
     struct allocation *p;(void)c;assert(!callback_active);if(alloc_fail)return 0;
     p=malloc(sizeof(*p)+n);assert(p);p->bytes=n;p->next=allocations;allocations=p;

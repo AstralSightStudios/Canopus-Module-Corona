@@ -13,8 +13,9 @@
 #else
 #define RH_LEGACY_APP_FILES_ROOT "/data/quickapp/files/ng.lst.corona/"
 #endif
+#define RH_NATIVE_APP_FILES_ROOT "/data/canopus/m.corona/"
 #if RH_NATIVE_MANAGER
-#define RH_APP_FILES_ROOT "/data/canopus/m.corona/"
+#define RH_APP_FILES_ROOT RH_NATIVE_APP_FILES_ROOT
 #else
 #define RH_APP_FILES_ROOT RH_LEGACY_APP_FILES_ROOT
 #endif

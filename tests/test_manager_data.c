@@ -24,7 +24,7 @@ static uint32_t blocks,peak_blocks,live_bytes,peak_bytes;
 struct allocation_header { uint64_t bytes; uint64_t alignment; };
 static int resolve(char out[1024],const char *p) {
     if(p[0]=='/') {
-        if(strncmp(p,"/data/canopus/m.corona/",23)==0) p+=23;
+        if(strncmp(p,"/data/canopus/m.corona/",sizeof("/data/canopus/m.corona/")-1u)==0) p+=sizeof("/data/canopus/m.corona/")-1u;
         else if(strcmp(p,"/data/canopus/m.corona")==0) p="";
         else if(strncmp(p,"/data/quickapp/files/ng.lst.corona/",34)==0) {
             return snprintf(out,1024,"%s/legacy/%s",sandbox,p+34)>=1024 ? -22:0;
@@ -65,7 +65,7 @@ static int fs_readdir(const struct canopus_context_v1 *c,void *dir,struct canopu
     if(strlen(e->d_name)>=sizeof(out->name))return -22;strcpy(out->name,e->d_name);out->is_dir=e->d_type==DT_DIR;return 0;
 }
 static int fs_closedir(const struct canopus_context_v1 *c,void *dir) {(void)c;assert(open_directories);open_directories--;return closedir(dir)<0?-errno:0;}
-static int fs_root(const struct canopus_context_v1 *c,char *p,uint32_t n) {(void)c;if(n<24)return -22;strcpy(p,"/data/canopus/m.corona");return 0;}
+static int fs_root(const struct canopus_context_v1 *c,char *p,uint32_t n) {(void)c;if(n<sizeof("/data/canopus/m.corona"))return -22;strcpy(p,"/data/canopus/m.corona");return 0;}
 static void *mem_alloc(const struct canopus_context_v1 *c,uint32_t n) {
     (void)c;if(alloc_budget==0||blocks>=128u||n>262144u-live_bytes)return 0;if(alloc_budget>0)alloc_budget--;
     struct allocation_header *p=malloc(sizeof(*p)+n);if(!p)return 0;p->bytes=n;
@@ -259,7 +259,8 @@ static void test_migration_fresh_retry(void) {
     fail_write_path=0;
     assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==3);
     text=read_fixture("resource-overrides.json");assert(!strcmp(text,"{\"version\":1,\"overrides\":{\"/resource/g.bin\":\"gamma\"}}"));free(text);
-    text=read_fixture("resource-order.json");assert(!strcmp(text,"{\"version\":1,\"order\":[\"gamma\",\"alpha\",\"@system\"]}"));free(text);
+    text=read_fixture("resource-order.json");assert(!strcmp(text,"{\"version\":1,\"order\":[\"@system\"]}"));free(text);
+    {char id[65];assert(!rh_manager_data_order_get(d,0,id,0)&&!strcmp(id,"gamma"));assert(!rh_manager_data_order_get(d,1,id,0)&&!strcmp(id,"alpha"));}
     assert(fs_exists(&ctx,"resource-legacy-imported")==1);
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
@@ -606,4 +607,43 @@ static void test_v2_config_and_overlay_cleanup(void) {
     assert(fs_exists(&ctx,"themes/alpha/icons/x.bin")==1);
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
 }
-int main(void) {test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+static void test_empty_install_and_read_failures(void) {
+    struct rh_manager_data *d=0;struct rh_manager_mix_item item;struct rh_manager_option option;
+    char id[65],*text;uint32_t n;
+    strcpy(sandbox,"/tmp/corona-manager-empty-XXXXXX");assert(mkdtemp(sandbox));
+    /* Opening either page on a fresh install performs no normalization write. */
+    fail_write=1;assert(!rh_manager_data_create(&ctx,0,&d));
+    assert(!strcmp(rh_manager_data_root(d),"/data/canopus/m.corona/"));
+    assert(rh_manager_data_order_count(d)==1);
+    assert(!rh_manager_data_order_get(d,0,id,0)&&!strcmp(id,"@system"));
+    assert(!rh_manager_data_mix_count(d,&n)&&n==5);
+    for(uint32_t i=0;i<n;i++) {
+        assert(!rh_manager_data_mix_get(d,i,&item));assert(item.feature&&!strcmp(item.choice,"@default"));
+        assert(!rh_manager_data_option_count(d,item.key,&n)&&n==(i==4?2u:3u));
+        assert(!rh_manager_data_option_get(d,item.key,0,&option)&&option.selected);
+        n=5;
+    }
+    assert(!rh_manager_data_refresh(d));assert(!fs_exists(&ctx,"resource-order.json"));
+    fail_write=0;assert(!rh_manager_data_choose(d,"feature:launcher","@blur"));
+    assert(!rh_manager_data_prepare_apply(d,"active/1"));
+    text=read_fixture("active/1/backgrounds.cfg");assert(strstr(text,"launcher=blur\n"));free(text);
+    assert(!rh_manager_data_complete_apply(d,0));
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+
+    setup();
+    /* A late parse error must discard partial choices and preserve the file.
+     * Package listing remains available; applying or deleting cannot overwrite it. */
+    fixture("resource-overrides.json","{\"version\":2,\"overrides\":{\"/resource/a/x.bin\":\"beta\"},\"features\":{\"launcher\":\"@system\",\"invalid\":\"@default\"}}");
+    assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_order_count(d)==3);
+    assert(rh_manager_data_mix_count(d,&n)==-22);
+    assert(rh_manager_data_choose(d,"feature:launcher","@blur")==-22);
+    assert(rh_manager_data_prepare_apply(d,"active/40")==-22);
+    assert(rh_manager_data_delete(d,"beta")==-22);assert(fs_exists(&ctx,"themes/beta/x.bin")==1);
+    text=read_fixture("resource-overrides.json");assert(strstr(text,"\"invalid\""));free(text);
+    fixture("resource-overrides.json","{\"version\":2,\"overrides\":{},\"features\":{}}");
+    assert(!rh_manager_data_mix_count(d,&n)&&n==7);
+    assert(!rh_manager_data_mix_get(d,0,&item)&&!strcmp(item.choice,"@default"));
+    assert(!rh_manager_data_mix_get(d,5,&item)&&!strcmp(item.choice,"@default"));
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+int main(void) {test_empty_install_and_read_failures();test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}

@@ -9,13 +9,15 @@ python3 tests/fixtures/manager-emulator/generate.py 155 /tmp/corona-seed-155
 python3 scripts/test-manager-emulator.py 155 \
   --library /tmp/corona-manager-155-library \
   --work /tmp/corona-manager-155-evidence \
-  --package /absolute/path/to/canopus_corona-0.3.0.canopus \
+  --package /absolute/path/to/corona-0.3.1.canopus \
   --firmware-source /absolute/path/to/miwear.watch.q66tc_v4.100.155_full_f1c824fe \
   --seed-dir /tmp/corona-seed-155 \
   --scenario tests/fixtures/manager-emulator/155.json
 ```
 
 For `.043`, use `043`, its own library/work/seed, and the local `miwear.watch.p67tc_v3.101.043_full_a4ce8564` firmware directory. `MIRAGECTL`, `MAB_SMOKE`, `FACETORY_PACKAGER`, `MIRAGE_QEMU` and `CANOPUS_ROOT` override tool/check-out discovery. `MAB_SMOKE` must use the current native Canopus Core API and package limit; a bridge accepting only `watchface` / `quickapp` is insufficient. The harness pins the input package to `evidence/corona-input.canopus` and installs that copy, recording module, bridge and QEMU hashes. Production installer resources default to the matching family in `Canopus-Private`; `--installer-dir` accepts an explicitly prepared directory. The harness does not build dependencies or edit that checkout.
+
+For the fresh-install regression, omit `--seed-dir` and use `043-empty.json` or `155-empty.json` with the production package. These scenarios check the system row, built-in mixed choices, repeated push/pop and the unchanged home body after returning; they do not require the compile-only probe hook. A pixel/screenshot pass remains emulator evidence, not a device reboot guarantee.
 
 The seed contains forty synthetic installed themes, one system divider, forty-one resource paths, two explicit mixed choices, and a protected first package. Tiny preview images are procedural LVGL v9 ARGB8888 tiles; no firmware resource images are included. The real target calendar path is a resource key so the default/theme preview can be compared against the original system image. Fixture generation writes only the requested empty output directory.
 

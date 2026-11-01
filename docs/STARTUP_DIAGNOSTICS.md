@@ -41,7 +41,7 @@ service itself refuses `/dev/canopus`; registration never uses `ctx->fs`.
 Example (pointer values omitted):
 
 ```text
-RHSTART1 target=xiaomi-band-10-pro-3.101.043 version=0.3.0
+RHSTART1 target=xiaomi-band-10-pro-3.101.043 version=0.3.1
 config=/data/files/ng.lst.corona/mappings.tsv
 ctor.begin rc=0 errno=0 detail=0x...
 register.begin rc=0 errno=0 detail=0x...

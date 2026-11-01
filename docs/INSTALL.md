@@ -1,6 +1,8 @@
 # Resource Hook 安装与验收
 
-适用交付：Canopus-Module-Resource-Hook **0.3.0**，支持 Xiaomi Band 11
+**0.3.1 升级要求**：模块 ID 保持 `corona`，`version_code = 4`，数据目录保持 `/data/canopus/m.corona/`。原生页面修复依赖 Canopus `ds-newdevice-supports` 的 `af4f9b30` 或包含该提交的后续版本；先更新对应固件的 Supervisor，再安装 `corona-0.3.1.canopus`。只更新模块而保留旧 Supervisor，无法注册新增的页面恢复/暂停回调。
+
+适用交付：Canopus-Module-Resource-Hook **0.3.1**，支持 Xiaomi Band 11
 **4.100.139 / 4.100.155 / 4.100.177 / 4.100.179**、Xiaomi Band 10 Pro **3.101.043**
 与 REDMI Watch 6 **3.100.043**。各固件使用独立
 ELF 和收据，不能混用。新版模块交付为 `.canopus` 包，包含按精确 target 绑定的
@@ -86,7 +88,7 @@ CMI2 校验模块 ID、版本、生命周期、精确 target、固件 SHA-256 �
 3. 检查 `mappings.tsv.example`，按实际资源源路径修改，然后保存为
    `/data/quickapp/files/ng.lst.corona/mappings.tsv`。样例里的 `/resource/` 只是示例规则，
    不意味着固件的所有字体和图片都经过这个目录。
-4. 在 AstroBox 的 Canopus 入口选择交付目录根部的 `canopus_corona-0.3.0.canopus`。
+4. 在 AstroBox 的 Canopus 入口选择交付目录根部的 `corona-0.3.1.canopus`。
    客户端查询设备精确 target、选择并校验回执与 ELF，再通过原生通道暂存并提交 INSTALL。
    新装模块保持禁用；升级返回 `REBOOT_REQUIRED(8)` 也表示成功，重启并重新引导框架后生效。
    主题资源与 Corona Manager 单独安装，原生模块包不包含主题资源。
@@ -313,7 +315,7 @@ stop/deactivate 在安装后返回 SDK 的 `CANOPUS_RESULT_REBOOT_REQUIRED`。
   先禁用旧模块并完整重启，确认它不再恢复后再安装新模块；不能同时启用两者。
 - 框架 module ID、registration、receipt、registry 统一为 `corona`；快应用包名与主题目录
   仍使用 `ng.lst.corona`。
-- semver 为 0.3.0，`version_code` 为 3，CMI2 格式版本为 2（176 字节）。
+- semver 为 0.3.1，`version_code` 为 4，CMI2 格式版本为 2（176 字节）。
   后续升级需增加 `version_code`；同版本返回 `STAGE_DUPLICATE(-105)`，
   低版本返回 `STAGE_DOWNGRADE(-109)`，更高版本安装成功后重启生效。
 
