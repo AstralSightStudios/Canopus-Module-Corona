@@ -993,29 +993,10 @@ int rh_manager_data_option_count(struct rh_manager_data *d,const char *key,uint3
     for(i=0;i<d->order_count;i++) { rc=theme_available(d,key,d->order[i]); if(rc<0) return rc; if(rc) n++; } *out=n; return 0;
 }
 static int relative_destination(struct rh_manager_data *d,const char *key,const char *id,char out[256]) {
-    int feature=feature_index(key),theme=find_id(d->ids,d->count,id),path; uint32_t i; struct pack p; int rc;
+    int feature=feature_index(key),theme=find_id(d->ids,d->count,id),path; uint32_t i;
     out[0]=0; if(theme<0) return -22;
-    if(feature>=0) {
-        /* Keep background choices compact; full-size images are only loaded when applied. */
-        if(feature<4) return 0;
-        rc=load_pack(d,id,&p); if(rc) return rc;
-        if(feature==4) {
-#if RH_HAS_NATIVE_CALENDAR
-            const struct mapping *best=0; uint32_t best_length=0;
-            /* Calendar background remains an ordinary mapping and obeys the
-             * same longest-prefix rule as the open hook. */
-            for(i=0;i<p.count;i++) {
-                const char *source=p.maps[i].source; uint32_t length=slen(source);
-                if((directory_source(source) ? prefix(RH_CALENDAR_BACKGROUND,source):equal(source,RH_CALENDAR_BACKGROUND)) && length>best_length) { best=&p.maps[i]; best_length=length; }
-            }
-            if(best) {
-                if(directory_source(best->source)) rc=path_join(out,best->destination,&RH_CALENDAR_BACKGROUND[best_length]);
-                else rc=put(out,256,best->destination);
-            }
-#endif
-        }
-        free_pack(d,&p); return rc;
-    }
+    /* Feature choices stay compact; their images are only loaded when applied. */
+    if(feature>=0) return 0;
     path=path_index(d,key); if(path<0) return -22;
     for(i=0;i<d->paths[path].count;i++) if(d->paths[path].options[i].theme==(uint32_t)theme) return put(out,256,d->paths[path].options[i].destination);
     return -22;
@@ -1031,12 +1012,8 @@ static int preview_valid(struct rh_manager_data *d,char path[256]) {
 }
 static int system_preview(struct rh_manager_data *d,const char *key,char out[256]) {
     int feature=feature_index(key),rc=0; char original[256]; out[0]=0;
-    if(feature>=0) {
-        if(feature!=4 || !RH_HAS_NATIVE_CALENDAR) return 0; /* no static system image */
-#if RH_HAS_NATIVE_CALENDAR
-        if(put(original,sizeof(original),RH_CALENDAR_BACKGROUND)) return -22;
-#endif
-    } else if(prefix(key,"@quickapp-icon/")) {
+    if(feature>=0) return 0;
+    if(prefix(key,"@quickapp-icon/")) {
         if(!d->hooks.quickapp_icon) return 0; rc=d->hooks.quickapp_icon(d->hooks.cookie,key+15,original); if(rc<=0) return rc<0 ? rc:0;
     } else { if(put(original,sizeof(original),key)) return -22; }
     if(original[0]!='/' || path_join(out,"/.rh_sys",original)) return -22;

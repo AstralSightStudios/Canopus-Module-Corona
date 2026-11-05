@@ -1,6 +1,7 @@
 #define _DARWIN_C_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
 #include "manager_data.h"
+#include "resource_hook_target.h"
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
@@ -104,6 +105,23 @@ static void test_core(void) {
         if(i==0) assert(!strcmp(option.id,RH_MANAGER_DEFAULT)&&option.selected);
         if(i==3) assert(!strcmp(option.id,"alpha"));
     }
+    fail_stat_path=0;
+    assert(!rh_manager_data_option_count(d,"feature:calendar",&n)&&n==3);
+    /* Calendar choices must not probe the system image, even when it is unreadable. */
+    fail_stat_path=RH_CALENDAR_BACKGROUND;
+    for(uint32_t i=0;i<n;i++) {
+        assert(!rh_manager_data_option_get(d,"feature:calendar",i,&option));
+        assert(!option.preview[0]);
+        assert(option.selected==(i==0));
+        if(i==2) assert(!strcmp(option.id,"alpha"));
+    }
+    assert(!rh_manager_data_choose(d,"feature:calendar","alpha"));
+    for(uint32_t i=0;i<n;i++) {
+        assert(!rh_manager_data_option_get(d,"feature:calendar",i,&option));
+        assert(!option.preview[0]);
+        assert(option.selected==(i==2));
+    }
+    assert(!rh_manager_data_choose(d,"feature:calendar",RH_MANAGER_DEFAULT));
     fail_stat_path=0;
     assert(!rh_manager_data_choose(d,"/resource/a/x.bin","beta"));assert(!rh_manager_data_mix_get(d,0,&item));assert(!strcmp(item.key,"/resource/a/x.bin")&&!strcmp(item.choice_name,"B"));
     assert(!rh_manager_data_move(d,2,0));assert(!rh_manager_data_option_get(d,"/resource/a/x.bin",0,&option));assert(!strcmp(option.preview,"/.rh_sys/resource/a/x.bin"));
