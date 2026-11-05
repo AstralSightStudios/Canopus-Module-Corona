@@ -508,6 +508,14 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     activate_text("资源管理");assert_route(1);
     s.remote_connected=1;s.phase=RH_XFER_PHASE_RECEIVING;s.percent=68;assert(!rh_manager_set_transfer_state(&s));pump();
     find_text("正在接收 · 68%");
+    /* The pinned banner and scroll viewport are siblings; the list must start
+       below the card and its gap, with the same space removed from its height. */
+    {uint32_t banner=find_key(60),scroll=find_key(10);int content_height=width>=300?(int)height-56:444;
+        assert(active_ui->committed.nodes[banner].parent==active_ui->committed.nodes[scroll].parent);
+        assert(active_ui->committed.visuals[banner].y==0);
+        assert(active_ui->committed.visuals[scroll].y==active_ui->committed.layouts[banner].height+8);
+        assert(active_ui->committed.layouts[scroll].height==content_height-active_ui->committed.visuals[scroll].y);
+    }
     i=find_type(CANOPUS_UI_NODE_PROGRESS,0);assert(active_ui->committed.values[i].value==68);
     s.phase=RH_XFER_PHASE_VERIFYING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在校验完整性");
     s.phase=RH_XFER_PHASE_INSTALLING;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在解压并登记");
@@ -521,6 +529,8 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     /* Errors persist in the banner until the user dismisses the card; any
        later phase transition brings the banner back. */
     tap(60,30000);assert_no_text("传输中断");
+    assert(active_ui->committed.visuals[find_key(10)].y==0);
+    assert(active_ui->committed.layouts[find_key(10)].height==(width>=300?(int)height-56:444));
     s.phase=RH_XFER_PHASE_RECEIVING;s.percent=20;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在接收 · 20%");
     {struct rh_transfer_ui_state idle={0};assert(!rh_manager_set_transfer_state(&idle));pump();assert_no_text("正在接收 · 20%");}
     host_back();assert_route(0);assert(!close_count);

@@ -351,7 +351,8 @@ static int scroll_begin(struct canopus_ui_tree_v1 *t,uint32_t total,int height,i
     TRY(component(t,KEY_SCROLL,CANOPUS_UI_NODE_SCROLL,"","",EV_SCROLL,ON));
     TRY(box(t,KEY_SCROLL,(int)U.width,height,0,top,0,0,-1,1));
     v.flags=CANOPUS_UI_VISUAL_FLAG_ABSOLUTE|CANOPUS_UI_VISUAL_FLAG_CLIP|CANOPUS_UI_VISUAL_FLAG_VIRTUAL_CONTENT;
-    v.content_height=total;v.scroll_y=U.scroll[U.route];
+    /* node_set_visual replaces the box visual, including its viewport origin. */
+    v.y=(int16_t)top;v.content_height=total;v.scroll_y=U.scroll[U.route];
     return U.ctx->ui->node_set_visual(t,KEY_SCROLL,&v);
 }
 /* True while the committed window already spans the visible part of the
