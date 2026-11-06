@@ -4,6 +4,12 @@
 #define LIMIT_BYTES (64u * 1024u * 1024u)
 #define CHECKPOINT_BYTES 65536u
 #define WORK_BYTES 4096u
+/* Verification/installation run back-to-back within one owner tick until this
+ * wall-clock budget is spent, so throughput no longer scales with the 10 ms
+ * heartbeat. The step cap bounds a tick when no clock is available or the
+ * clock is coarser than the budget. */
+#define WORK_BUDGET_MS 6u
+#define WORK_MAX_STEPS 256u
 #define RECORD_BYTES 128u
 #define HELLO 1u
 #define OPEN 2u
@@ -453,21 +459,33 @@ static void verify_step(struct rh_connect *r) {
     if(save_record(r)) { latch(r,IO);return; }
     r->ack_dirty=1;
 }
-static void installation_step(struct rh_connect *r) {
+/* Returns 0 when the installer is busy and the tick should yield. */
+static int installation_step(struct rh_connect *r) {
     int rc;
-    if(!r->hooks.install_begin || !r->hooks.install_step || !r->hooks.install_abort) { latch(r,UNSUPPORTED);return; }
+    if(!r->hooks.install_begin || !r->hooks.install_step || !r->hooks.install_abort) { latch(r,UNSUPPORTED);return 1; }
     if(!r->install_started) {
         rc=r->hooks.find_hash ? r->hooks.find_hash(r->hooks.cookie,r->hash):0;
-        if(rc==1) { installed(r);return; }
-        if(rc==-(int)BUSY)return;
-        if(rc<0) { latch(r,error_code(rc));return; }
+        if(rc==1) { installed(r);return 1; }
+        if(rc==-(int)BUSY)return 0;
+        if(rc<0) { latch(r,error_code(rc));return 1; }
         r->install_started=1;
         rc=r->hooks.install_begin(r->hooks.cookie,r->archive,r->p.total,r->install_generation);
-        if(rc==-(int)BUSY) { r->install_started=0;return; }
+        if(rc==-(int)BUSY) { r->install_started=0;return 0; }
     } else rc=r->hooks.install_step(r->hooks.cookie,r->hash);
-    if(rc==-(int)BUSY)return;
+    if(rc==-(int)BUSY)return 0;
     if(rc==1)installed(r);
     else if(rc<0) { latch(r,error_code(rc));abort_install(r);(void)save_record(r); }
+    return 1;
+}
+static void background_work(struct rh_connect *r) {
+    uint32_t (*clock)(const struct canopus_context_v1 *)=r->ctx->time ? r->ctx->time->monotonic_ms:0;
+    uint32_t start=clock ? clock(r->ctx):0u,steps=0;
+    for(;;) {
+        if(r->p.phase==RH_XFER_PHASE_VERIFYING)verify_step(r);
+        else if(r->p.phase==RH_XFER_PHASE_INSTALLING) { if(!installation_step(r))return; }
+        else return;
+        if(++steps>=WORK_MAX_STEPS || (clock && (uint32_t)(clock(r->ctx)-start)>=WORK_BUDGET_MS))return;
+    }
 }
 int rh_connect_create(const struct canopus_context_v1 *ctx,const struct rh_connect_hooks *hooks,struct rh_connect **out) {
     struct rh_connect *r;uint8_t a[RECORD_BYTES],b[RECORD_BYTES],*chosen;char root[256];int x,y,rc;uint32_t n;
@@ -528,8 +546,7 @@ void rh_connect_poll(struct rh_connect *r) {
     else if(r->p.phase==RH_XFER_PHASE_RECEIVING && !r->p.detail &&
             (r->flush_requested || r->frames>=4u || (r->used && r->p.written+r->used==r->p.total)))
         (void)flush_step(r);
-    else if(r->p.phase==RH_XFER_PHASE_VERIFYING)verify_step(r);
-    else if(r->p.phase==RH_XFER_PHASE_INSTALLING)installation_step(r);
+    else if(r->p.phase==RH_XFER_PHASE_VERIFYING || r->p.phase==RH_XFER_PHASE_INSTALLING)background_work(r);
     else if(r->p.phase==RH_XFER_PHASE_INSTALLED && r->terminal_dirty)persist_installed(r);
     send_pending(r);notify(r);
 }

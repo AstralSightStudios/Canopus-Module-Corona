@@ -7,7 +7,7 @@
 - `src/corona_connect.c`：12 字节帧解析、单个 4 KiB 接收缓冲、累计 ACK 与事件重试、控制屏障、租约和接收记录恢复、磁盘 SHA-256 校验。
 - `src/corona_archive.c`：不依赖系统 zlib 的分步 Store / Deflate ZIP 读取器，检查目录与本地头、CRC、路径和输出预算。
 - `src/manager_data.c`：manifest 与引用校验、不可变安装代次、哈希查询、安装恢复记录和 revision 分页 LIST；原生 UI 与接收器共用同一 catalog。
-- `src/corona_runtime.c`：串联接收、解压和登记，通过模块 owner 上的 10 ms 定时器推进；TIME v2 可用时启用后台定时器。页面关闭不撤销任务，安装成功不自动应用。
+- `src/corona_runtime.c`：串联接收、解压和登记，通过模块 owner 上的 10 ms 定时器推进；TIME v2 可用时启用后台定时器。页面关闭不撤销任务，安装成功不自动应用。校验与安装阶段在每个 tick 内连续推进，直到用满 6 ms 预算或 256 步（无时钟时按步数封顶），不再固定为「每 10 ms 一个 4 KiB 读」；安装 hook 返回 BUSY 时立即让出，等下一次 tick 再试。
 - `src/module.c`：首次激活时启动接收器，初始激活失败时撤回 listener、timer 和临时工作区。
 
 验证入口：
@@ -23,7 +23,7 @@ python3 scripts/test-corona-runtime.py
 
 当前清理使用 FS v2 的 `rmdir`：在文件回收、目录句柄关闭后按后序删除空目录，先检查 `canopus_services_has(ctx, CANOPUS_SVC_FS, 2)` 再访问新增成员。staging 每次定时步骤最多删除一个目录，安装恢复记录和当前安装目录仍受保护；删除主题时回收该主题全部安装代次。FS v1 或缺少接口时兼容保留空目录，实际 `rmdir` 失败不会被当成成功。ZIP 路径单个组件受 SDK 目录枚举限制，最多 63 个 UTF-8 字节，超过返回 LIMIT；展开后的完整路径仍最多 255 字节。安装目录遍历深度最多 16 层，manifest 最多 64 KiB、256 条映射。manifest / schema 校验在一个有界步骤内完成，资源树遍历每步最多读一个目录项或同步一个文件，登记记录、注册表发布和排序刷新分别推进。
 
-后台定时器不保证 CPU 在息屏后一直唤醒。原生文件调用和 manifest / 登记事务的单次耗时仍须实机测量。尚未执行蓝牙实传、断电恢复、flash 延迟和设备堆峰值验收。ZIP 目录重复与重叠校验用固定 RAM、按条目回读实现，总体为 O(n²)，文件很多时安装总耗时需要测量。
+后台定时器不保证 CPU 在息屏后一直唤醒。原生文件调用和 manifest / 登记事务的单次耗时仍须实机测量。尚未执行蓝牙实传、断电恢复、flash 延迟和设备堆峰值验收。ZIP 目录重复与重叠校验用固定 RAM、按条目回读实现，总体为 O(n²)，文件很多时安装总耗时需要测量。校验与安装的 6 ms 预算按实际 wall clock 计量：解压仍以 512 字节块写盘，flash 延迟越高，单 tick 能推进的步数越少，这是设计上的让出点。
 
 安装发布点是 v2 `interconnect-themes.json` 的原子替换，包含 revision、themeId、安装代次和原始 ZIP SHA；兼容旧数组索引。`registry-install.pending` 仅在完整校验与同步后写入，恢复后才能清理它引用的 staging；CANCEL 在发布前撤销该记录，发布后保持 INSTALLED。发布后的排序或接收记录保存错误不撤销安装结果。旧安装代次在覆盖更新后暂保留，卸载主题时一并回收；活动引用仍受原生管理器的活动配置与刷新事务保护。
 

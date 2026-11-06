@@ -23,6 +23,9 @@ static uint32_t reply_size,sends,io_calls,short_write,short_read;
 static int write_fail_after=-1,fail_sync,fail_record_write,fail_read,fail_close,record_sync_fail_after=-1;
 static int send_busy,remote=1,find_result,install_result,begin_result,begin_count,step_count,abort_count;
 static int callback_active,alloc_fail,list_result;
+/* Each clock read advances by clock_advance. The default exceeds the work
+ * budget so every poll runs exactly one step; zero freezes the clock. */
+static uint32_t clock_ms,clock_advance=1000;
 static uint32_t list_revision=7,live_bytes,peak_bytes;
 static uint8_t fd_record[256],fd_open[256];
 struct allocation { struct allocation *next;uint32_t bytes;uint64_t alignment; };
@@ -97,7 +100,9 @@ static void changed(void *cookie,const struct rh_transfer_ui_state *state) { (vo
 static const struct canopus_fs_obj fs={.open=fs_open,.read=fs_read,.write=fs_write,.seek=fs_seek,.size=fs_size,.sync=fs_sync,.close=fs_close,.exists=fs_exists,.mkdir=fs_mkdir,.remove=fs_remove,.get_data_path=fs_root};
 static const struct canopus_mem_obj mem={.alloc=mem_alloc,.free=mem_free};
 static const struct canopus_connect_obj connect={.send=connect_send,.listen=connect_listen,.remote_listening=listening};
-static const struct canopus_context_v1 ctx={.struct_size=sizeof(ctx),.fs=&fs,.mem=&mem,.connect=&connect};
+static uint32_t monotonic(const struct canopus_context_v1 *c) { uint32_t now=clock_ms;(void)c;clock_ms+=clock_advance;return now; }
+static const struct canopus_time_obj time_api={.monotonic_ms=monotonic};
+static const struct canopus_context_v1 ctx={.struct_size=sizeof(ctx),.fs=&fs,.mem=&mem,.connect=&connect,.time=&time_api};
 static const struct rh_connect_hooks hooks={.install_begin=install_begin,.install_step=install_step,.install_abort=install_abort,.find_hash=find_hash,.list=list,.changed=changed};
 static const uint8_t abc_hash[32]={0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
 static const uint8_t large_hash[32]={0x6d,0x1c,0xf2,0x2d,0x7c,0xc0,0x9b,0x08,0x5d,0xfc,0x25,0xee,0x1a,0x1f,0x3a,0xe0,0x26,0x58,0x04,0xc6,0x07,0xbc,0x20,0x74,0xad,0x25,0x3b,0xcc,0x82,0xfd,0x81,0xee};
@@ -114,7 +119,7 @@ static void setup(void) {
     strcpy(sandbox,"/tmp/corona-connect-XXXXXX");assert(mkdtemp(sandbox));
     listener=0;receiver=0;memset(&ui,0,sizeof(ui));reply_size=sends=io_calls=short_write=short_read=0;
     write_fail_after=record_sync_fail_after=-1;fail_sync=fail_record_write=fail_read=fail_close=send_busy=find_result=begin_result=begin_count=step_count=abort_count=alloc_fail=list_result=0;
-    remote=1;install_result=1;peak_bytes=0;
+    remote=1;install_result=1;peak_bytes=0;clock_advance=1000;
     assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver));assert(listener);
 }
 static void teardown(void) {
@@ -348,10 +353,29 @@ static void test_token_exhaustion(void) {
     assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver));uint8_t body[40]={0};memcpy(body,abc_hash,32);body[32]=2;
     request(2,2,0,3,body,40);ticks(1);assert(reply[1]==8 && reply_size==12);teardown();
 }
+static void test_work_runs_within_one_tick(void) {
+    uint32_t token;setup();clock_advance=0;
+    token=open_task(100000,large_hash,1,1);upload(token,0,100000);
+    /* The FINISH tick only answers; the next tick verifies the whole 100 KB
+     * archive, opens the installer and finishes it, instead of advancing one
+     * 4 KiB read or one install step per 10 ms heartbeat. */
+    request(5,2,token,0,0,0);ticks(1);assert(reply[0]==0x85 && !reply[1] && ui.phase==RH_XFER_PHASE_VERIFYING);
+    ticks(1);assert(ui.phase==RH_XFER_PHASE_INSTALLED && !ui.detail && begin_count==1 && step_count==1);
+    teardown();
+    /* A busy installer yields after one step and resumes on the next tick. */
+    setup();clock_advance=0;install_result=-2;
+    token=open_task(100000,large_hash,1,1);upload(token,0,100000);
+    request(5,2,token,0,0,0);ticks(1);
+    ticks(1);assert(ui.phase==RH_XFER_PHASE_INSTALLING && begin_count==1 && step_count==1 && !ui.detail);
+    ticks(1);assert(ui.phase==RH_XFER_PHASE_INSTALLING && begin_count==1 && step_count==2 && !ui.detail);
+    install_result=1;ticks(1);assert(ui.phase==RH_XFER_PHASE_INSTALLED && !ui.detail && step_count==3);
+    teardown();
+}
 int main(void) {
     test_roundtrip();test_retry_and_barriers();test_backpressure_and_ack();test_short_write_failure();test_reboot_checkpoint();
     test_hash_and_install_recovery();test_corruption_and_high_water();test_failed_open_and_limits();test_failed_open_shutdown();test_token_exhaustion();
     test_committed_install_checkpoint_failure();test_deleted_package_reinstall();test_cached_open_repairs_high_water();
     test_oversized_controls();test_ack_survives_control_reply();test_installer_busy_is_retryable();
+    test_work_runs_within_one_tick();
     puts("corona_connect: production receiver, persistence and fault checks passed");return 0;
 }

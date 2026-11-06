@@ -160,7 +160,8 @@ static int install_step(void *cookie, const uint8_t hash[32]) {
     }
     if(!R.registering) {
         rc=rh_manager_data_install_begin(R.catalog,R.staging,R.generation,hash);
-        if(rc==CANOPUS_SVC_ERR_BUSY)return 0;
+        /* Protocol BUSY: the receiver yields the tick instead of spinning. */
+        if(rc==CANOPUS_SVC_ERR_BUSY)return -2;
         if(rc)return protocol_error(rc);
         R.registering=1;return 0;
     }

@@ -6,6 +6,8 @@
 
 /* All methods, callbacks and hooks run on the serialized module/UI owner.
  * The caller owns the background timer: poll once per tick, including screen-off.
+ * A poll may run several verify/install steps within a bounded time slice.
+ * An install step returning -2 (BUSY) makes the receiver yield until next poll.
  * Hook errors are negative protocol codes (1..11), not platform errno values.
  * An installer must release its state in abort, including after step returns 1.
  * begin/step return 0 while working, 1 only after recoverable registry commit.
