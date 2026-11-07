@@ -471,7 +471,7 @@ static void pixels_initialized(void) {
     for (unsigned y = 0; y < HEIGHT; ++y)
         for (unsigned x = 0; x < STRIDE / 2; ++x)
             assert(dst_pixels[y * STRIDE / 2 + x] ==
-                   (x < WIDTH ? 0xad95u : 0x1234u));
+                   (x < WIDTH ? 0xb596u : 0x1234u));
 }
 static void pixels_untouched(void) {
     padding_untouched();

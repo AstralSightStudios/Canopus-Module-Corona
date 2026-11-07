@@ -33,7 +33,10 @@ static inline int p67_blur_downsample_bgr888(const struct p67_blur_pixel_view *v
             const unsigned char *p=v->pixels+(y*4+dy)*v->stride+(x*4+dx)*3;
             b+=p[0]; g+=p[1]; r+=p[2];
         }
-        out[y*P67_BLUR_WIDTH+x]=(uint16_t)(((r/16>>3)<<11)|((g/16>>2)<<5)|(b/16>>3));
+        /* Round the 16-pixel sums straight to 5/6 bits; truncating shifts
+         * bias R/B darker than G and tint whites green. */
+        out[y*P67_BLUR_WIDTH+x]=(uint16_t)((((r*31u+2040u)/4080u)<<11)|
+            (((g*63u+2040u)/4080u)<<5)|((b*31u+2040u)/4080u));
     }
     return 1;
 }

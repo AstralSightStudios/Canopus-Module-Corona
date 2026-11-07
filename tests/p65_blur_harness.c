@@ -124,7 +124,7 @@ static void test_success_and_restore(void) {
     assert(rd((uint32_t)source+4u)==(P65_BLUR_WIDTH|(P65_BLUR_HEIGHT<<16)));
     assert(rd((uint32_t)source+8u)==160u);
     uint16_t pixel;memcpy(&pixel,at(rd((uint32_t)source+16u),2),2);
-    assert(pixel==0x8962u); /* BGR input -> RGB565,70% darkening,constant boxfilter */
+    assert(pixel==0x8963u); /* BGR input -> RGB565,70% darkening,constant boxfilter */
     before=creates;p65_blur_watch(1);assert(creates==before && captures==1 && live_allocs==1);
     p65_blur_reset();p65_blur_watch(1);assert(p65_blur_source(":blur")!=source && captures==2);
     p65_blur_watch(1);assert(live_allocs==1 && max_live<=3u);
@@ -159,7 +159,7 @@ static void test_downsample_bottom_and_padding(void) {
     struct p65_blur_pixel_view v={p,1300u*514u,1300u,432u,514u,15u};
     for(unsigned x=0;x<432u;++x) {p[513u*1300u+x*3u+2u]=255;}
     assert(p65_blur_downsample_bgr888(&v,plane,P65_BLUR_PIXELS));
-    assert(plane[(P65_BLUR_HEIGHT-1u)*P65_BLUR_WIDTH]==0x7800u);
+    assert(plane[(P65_BLUR_HEIGHT-1u)*P65_BLUR_WIDTH]==0x8000u);
     v.size--;assert(!p65_blur_downsample_bgr888(&v,plane,P65_BLUR_PIXELS));free(p);
 }
 int main(void) {

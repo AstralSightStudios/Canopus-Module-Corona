@@ -3,7 +3,9 @@
 #include <stdint.h>
 
 /* Parameterized Band11 box-pass arithmetic: edge windows shrink rather than
- * replicate pixels, and each axis truncates channels separately. The accepted
+ * replicate pixels, and each axis rounds channels separately. Rounding, not
+ * truncation, is required: a truncated 5-bit R/B step loses twice the share of
+ * a 6-bit G step, so repeated passes tint white content green. The accepted
  * pipelines keep their own downsample and upscale operations. Bounded
  * arguments cover both supported low-resolution planes and prevent overflow.
  * Optional inherited darkening is applied once before filtering. */
@@ -15,8 +17,8 @@ static inline int rh_blur_filter_rgb565(uint16_t *src, uint16_t *tmp,
     if(!src || !tmp || src==tmp || !width || !height || width>84u ||
        height>130u || radius>8 || passes>8 || darken_percent>100) return 0;
     if(darken_percent!=100) for(i=0;i<width*height;++i) {
-        unsigned v=src[i],r=(v>>11)*darken_percent/100;
-        unsigned g=((v>>5)&63)*darken_percent/100,b=(v&31)*darken_percent/100;
+        unsigned v=src[i],r=((v>>11)*darken_percent+50)/100;
+        unsigned g=(((v>>5)&63)*darken_percent+50)/100,b=((v&31)*darken_percent+50)/100;
         src[i]=(uint16_t)((r<<11)|(g<<5)|b);
     }
     for(pass=0;pass<passes;++pass) for(axis=0;axis<2;++axis) {
@@ -30,6 +32,7 @@ static inline int rh_blur_filter_rgb565(uint16_t *src, uint16_t *tmp,
                     r+=v>>11; g+=(v>>5)&63; b+=v&31; ++count;
                 }
             }
+            r+=count/2; g+=count/2; b+=count/2;
             out[y*width+x]=(uint16_t)(((r/count)<<11)|((g/count)<<5)|(b/count));
         }
     }

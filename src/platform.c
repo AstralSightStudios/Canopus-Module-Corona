@@ -242,9 +242,10 @@ static void downsample_4x_and_darken(const uint16_t *src, uint32_t src_stride_px
     for (y = 0; y < 130u; ++y) {
         for (x = 0; x < 53u; ++x) {
             uint16_t p = src[(y * 4u + 1u) * src_stride_px + (x * 4u + 1u)];
-            uint32_t r = ((p >> 11) & 0x1Fu) * 7u / 10u;
-            uint32_t g = ((p >> 5)  & 0x3Fu) * 7u / 10u;
-            uint32_t b = (p         & 0x1Fu) * 7u / 10u;
+            /* Round: truncation darkens 5-bit R/B more than 6-bit G. */
+            uint32_t r = (((p >> 11) & 0x1Fu) * 7u + 5u) / 10u;
+            uint32_t g = (((p >> 5)  & 0x3Fu) * 7u + 5u) / 10u;
+            uint32_t b = ((p         & 0x1Fu) * 7u + 5u) / 10u;
             dst[y * 53u + x] = (uint16_t)((r << 11) | (g << 5) | b);
         }
     }
@@ -268,19 +269,19 @@ static void bilinear_upscale_4x(const uint16_t *src, uint16_t *dst, uint32_t dst
 
             for (dy = 0; dy < 4u; ++dy) {
                 uint32_t wy1 = dy, wy0 = 4u - dy;
-                uint32_t r0 = (r00 * wy0 + r01 * wy1) >> 2;
-                uint32_t g0 = (g00 * wy0 + g01 * wy1) >> 2;
-                uint32_t b0 = (b00 * wy0 + b01 * wy1) >> 2;
-                uint32_t r1 = (r10 * wy0 + r11 * wy1) >> 2;
-                uint32_t g1 = (g10 * wy0 + g11 * wy1) >> 2;
-                uint32_t b1 = (b10 * wy0 + b11 * wy1) >> 2;
+                uint32_t r0 = (r00 * wy0 + r01 * wy1 + 2u) >> 2;
+                uint32_t g0 = (g00 * wy0 + g01 * wy1 + 2u) >> 2;
+                uint32_t b0 = (b00 * wy0 + b01 * wy1 + 2u) >> 2;
+                uint32_t r1 = (r10 * wy0 + r11 * wy1 + 2u) >> 2;
+                uint32_t g1 = (g10 * wy0 + g11 * wy1 + 2u) >> 2;
+                uint32_t b1 = (b10 * wy0 + b11 * wy1 + 2u) >> 2;
 
                 uint32_t y = sy * 4u + dy;
                 for (dx = 0; dx < 4u; ++dx) {
                     uint32_t wx1 = dx, wx0 = 4u - dx;
-                    uint32_t r = (r0 * wx0 + r1 * wx1) >> 2;
-                    uint32_t g = (g0 * wx0 + g1 * wx1) >> 2;
-                    uint32_t b = (b0 * wx0 + b1 * wx1) >> 2;
+                    uint32_t r = (r0 * wx0 + r1 * wx1 + 2u) >> 2;
+                    uint32_t g = (g0 * wx0 + g1 * wx1 + 2u) >> 2;
+                    uint32_t b = (b0 * wx0 + b1 * wx1 + 2u) >> 2;
                     uint32_t x = sx * 4u + dx;
                     dst[y * dst_stride_px + x] = (uint16_t)((r << 11) | (g << 5) | b);
                 }

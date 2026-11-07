@@ -137,8 +137,9 @@ static void reference(uint16_t *src, uint16_t *tmp, unsigned w, unsigned h,
                       unsigned radius, unsigned passes, unsigned darken) {
     for (unsigned i = 0; i < w * h; ++i) {
         unsigned v = src[i];
-        src[i] = (uint16_t)((((v >> 11) * darken / 100) << 11) |
-            ((((v >> 5) & 63) * darken / 100) << 5) | ((v & 31) * darken / 100));
+        src[i] = (uint16_t)(((((v >> 11) * darken + 50) / 100) << 11) |
+            (((((v >> 5) & 63) * darken + 50) / 100) << 5) |
+            (((v & 31) * darken + 50) / 100));
     }
     for (unsigned pass = 0; pass < passes; ++pass) {
         for (unsigned axis = 0; axis < 2; ++axis) {
@@ -152,8 +153,8 @@ static void reference(uint16_t *src, uint16_t *tmp, unsigned w, unsigned h,
                     unsigned v = in[axis ? n * w + x : y * w + n];
                     r += v >> 11; g += (v >> 5) & 63; b += v & 31; ++count;
                 }
-                out[y * w + x] = (uint16_t)(((r / count) << 11) |
-                    ((g / count) << 5) | (b / count));
+                out[y * w + x] = (uint16_t)((((r + count / 2) / count) << 11) |
+                    (((g + count / 2) / count) << 5) | ((b + count / 2) / count));
             }
         }
     }
