@@ -20,7 +20,14 @@ struct rh_connect_hooks {
     int (*install_begin)(void *, const char *archive_path, uint32_t archive_bytes,
                          uint32_t generation);
     int (*install_step)(void *, const uint8_t hash[32]);
+    /* Also releases extract_step state. */
     void (*install_abort)(void *);
+    /* Optional. While receiving, may read the written prefix of the archive via
+     * fd, borrowed for this call only; its position need not be restored.
+     * Returns 0 while work remains, nonzero when idle until more bytes arrive.
+     * It reports no errors: install_begin/step must still complete without it. */
+    int (*extract_step)(void *, int32_t fd, uint32_t written, uint32_t archive_bytes,
+                        uint32_t generation);
     /* 0: intent durably revoked; 1: registry already committed; negative
      * protocol code: cancellation failed, so do not report CANCELED. */
     int (*install_cancel)(void *, const uint8_t hash[32]);

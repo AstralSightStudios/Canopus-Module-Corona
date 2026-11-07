@@ -66,9 +66,8 @@ def raw_entry(compressed, contents, method=8):
     return local + cd + struct.pack("<IHHHHIIH", 0x06054b50, 0, 0, 1, 1, len(cd), len(local), 0)
 
 
-def check(data, expected=1, mode=0, existing=False, expected_files=None):
-    global COUNT
-    COUNT += 1
+def run(data, expected, mode, existing, expected_files):
+    """Returns the harness output after checking the extracted tree."""
     with tempfile.TemporaryDirectory(prefix="corona-zip-") as work:
         root = Path(work)
         archive, staging = root / "upload.zip", root / "stage"
@@ -79,7 +78,10 @@ def check(data, expected=1, mode=0, existing=False, expected_files=None):
         result = subprocess.run([str(BINARY), str(archive), str(staging), str(expected), str(mode)],
                                 text=True, capture_output=True)
         if result.returncode:
-            raise AssertionError(f"fixture {COUNT}: {result.stdout}\n{result.stderr}")
+            raise AssertionError(f"fixture {COUNT} mode {mode}: {result.stdout}\n{result.stderr}")
+        output = result.stdout.split()
+        if mode == 8 and output[1] == "fallback":
+            staging = root / "stage.full"
         if expected == 1:
             if expected_files is not None:
                 for name, contents in expected_files:
@@ -100,6 +102,23 @@ def check(data, expected=1, mode=0, existing=False, expected_files=None):
             assert not staging.exists(), "size failure created staging"
         if existing:
             assert (staging / "must-survive").read_text() == "owned"
+        return output
+
+
+def check(data, expected=1, mode=0, existing=False, expected_files=None, streamed=None):
+    """Every plain fixture is also streamed; streaming may fall back but must
+    reach the same verdict and tree as full extraction."""
+    global COUNT
+    COUNT += 1
+    run(data, expected, mode, existing, expected_files)
+    if mode or existing:
+        return
+    output = run(data, expected, 8, False, expected_files)
+    if expected == 1 and streamed is None:
+        streamed = True
+    if streamed is not None:
+        assert (output[1] == "stream") == streamed, (COUNT, output)
+    return int(output[2])
 
 
 rng = random.Random(11951)
@@ -108,7 +127,10 @@ entries = [("icons/", b""), ("icons/a.bin", bytes(range(256)) * 140),
 for method in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
     for descriptor in (False, True):
         data = packed(entries, method, descriptor)
-        check(data)
+        # A stored entry with a data descriptor has no knowable length.
+        early = check(data, streamed=not (descriptor and method == zipfile.ZIP_STORED))
+        if len(data) > 4096 and not (descriptor and method == zipfile.ZIP_STORED):
+            assert early, "no entry was extracted before the archive completed"
         check(data, mode=1)
 check(packed(entries), mode=5)
 check(packed(entries, comment=b"comment" * 9000))
@@ -183,7 +205,8 @@ cd_at = records[0][0]
 eocd = data.rfind(b"PK\x05\x06")
 chunks = [data[at:(records[i+1][0] if i+1 < len(records) else eocd)]
           for i, (at, _) in enumerate(records)]
-check(data[:cd_at] + b"".join(reversed(chunks)) + data[eocd:])
+# Streaming requires directory order to match local order, so this falls back.
+check(data[:cd_at] + b"".join(reversed(chunks)) + data[eocd:], streamed=False)
 
 # Signed and unsigned data descriptors, including mismatch and truncated streams.
 data = packed([("corona.json", MANIFEST)], descriptor=True)
@@ -247,7 +270,8 @@ for extra in (b"\x01\x00\x00\x00", b"\x02\x00\x10\x00", b"\x01"):
 
 # Long history and many blocks are compared byte-for-byte against zipfile.
 random_block = bytes(rng.randrange(256) for _ in range(32768))
-check(packed([("corona.json", MANIFEST), ("long.bin", random_block * 8)]))
+assert check(packed([("corona.json", MANIFEST), ("long.bin", random_block * 8)]))
+assert check(packed([("corona.json", MANIFEST), ("long.bin", random_block * 8)], descriptor=True))
 for _ in range(96):
     invalid = bytes(rng.randrange(256) for _ in range(rng.randrange(1, 100)))
     try:

@@ -12,16 +12,17 @@ static struct {
     struct rh_connect *receiver;
     struct rh_archive *archive;
     struct rh_manager_data *catalog;
-    int32_t timer;
+    /* source is owned only while a streamed extraction finishes after upload. */
+    int32_t timer, source;
     uint32_t generation, attempt, archive_bytes;
-    int extracted, preparing, registering;
+    int extracted, preparing, registering, streaming;
     char staging[64], archive_path[256];
     /* One directory iterator and scalar traversal state; FS v2 removes
      * drained directories in postorder, while FS v1 retains their shells. */
     void *cleanup_dir;
     char cleanup_path[256], cleanup_after[64], cleanup_best[64];
     uint8_t cleanup_active, cleanup_best_dir, cleanup_validate, cleanup_remove;
-} R = { .timer = -1 };
+} R = { .timer = -1, .source = -1 };
 
 static int catalog(void) {
     return R.catalog ? 0 : rh_manager_ui_get_data(R.ctx, &R.catalog);
@@ -109,9 +110,10 @@ static void cleanup_step(void) {
 static void abort_install(void *cookie) {
     (void)cookie;
     if (R.archive) rh_archive_destroy(R.archive);
+    if(R.source>=0) (void)R.ctx->fs->close(R.ctx,R.source);
     if(R.catalog)rh_manager_data_install_abort(R.catalog);
-    R.archive = 0;
-    R.extracted = R.preparing = R.registering = 0;
+    R.archive = 0;R.source = -1;
+    R.extracted = R.preparing = R.registering = R.streaming = 0;
     R.staging[0]=0;
     if(R.ctx) cleanup_wake();
 }
@@ -120,9 +122,12 @@ static int begin_install(void *cookie, const char *path, uint32_t bytes,
     int rc;
     (void)cookie;
     if(R.extracted && R.generation==generation && R.archive_bytes==bytes) return 0;
-    abort_install(0);
+    /* An extraction streamed during upload resumes where it stopped. */
+    if(!R.streaming || R.preparing || R.generation!=generation || R.archive_bytes!=bytes) {
+        abort_install(0);
+        R.generation=generation;R.archive_bytes=bytes;R.attempt=0;R.preparing=1;
+    }
     if (!generation || length(path)>=sizeof(R.archive_path)) return -7;
-    R.generation=generation;R.archive_bytes=bytes;R.attempt=0;R.preparing=1;
     copy_text(R.archive_path,path);
     rc = catalog();
     if (rc) return protocol_error(rc);
@@ -135,27 +140,62 @@ static char *decimal(char *p,uint32_t value) {
     do {reverse[count++]=(char)('0'+value%10u);value/=10u;} while(value);
     while(count) *p++=reverse[--count];*p=0;return p;
 }
-static int install_step(void *cookie, const uint8_t hash[32]) {
-    char id[65],*p;
+/* Claims a fresh staging/<generation>-<attempt>, then opens its extractor. */
+static int prepare(void) {
     struct canopus_fs_stat st;
+    char *p;
+    int rc;
+    copy_text(R.staging,"staging/");p=decimal(R.staging+8,R.generation);*p++='-';decimal(p,R.attempt);
+    rc=R.ctx->fs->stat(R.ctx,R.staging,&st);
+    if(!rc) {if(R.attempt==UINT32_MAX)return -8;++R.attempt;return 0;}
+    if(rc!=CANOPUS_SVC_ERR_NOTFOUND) return -5;
+    rc=R.streaming ? rh_archive_stream_create(R.ctx,R.archive_bytes,R.staging,&R.archive)
+                   : rh_archive_create(R.ctx,R.archive_path,R.archive_bytes,R.staging,&R.archive);
+    if(rc) return rc;
+    R.preparing=0;return 0;
+}
+/* Streaming is only an optimization. Release its staging to cleanup and leave
+ * every verdict to a full extraction into a fresh staging path. */
+static void fall_back(void) {
+    if(R.archive) rh_archive_destroy(R.archive);
+    if(R.source>=0) (void)R.ctx->fs->close(R.ctx,R.source);
+    R.archive=0;R.source=-1;
+    R.streaming=0;R.preparing=1;R.staging[0]=0;
+    cleanup_wake();
+}
+static int extract_step(void *cookie, int32_t fd, uint32_t written, uint32_t bytes,
+                        uint32_t generation) {
     int rc;
     (void)cookie;
-    if(R.preparing) {
-        copy_text(R.staging,"staging/");p=decimal(R.staging+8,R.generation);*p++='-';decimal(p,R.attempt);
-        rc=R.ctx->fs->stat(R.ctx,R.staging,&st);
-        if(!rc) {if(R.attempt==UINT32_MAX)return -8;++R.attempt;return 0;}
-        if(rc!=CANOPUS_SVC_ERR_NOTFOUND) return -5;
-        rc=rh_archive_create(R.ctx,R.archive_path,R.archive_bytes,R.staging,&R.archive);
-        if(rc) return rc;
-        R.preparing=0;return 0;
+    if(R.generation!=generation || R.archive_bytes!=bytes) {
+        abort_install(0);
+        R.generation=generation;R.archive_bytes=bytes;R.attempt=0;R.preparing=1;
+        rc=R.ctx->fs->mkdir(R.ctx,"staging");
+        R.streaming=generation && (rc>=0 || rc==CANOPUS_SVC_ERR_EXIST);
     }
+    if(!R.streaming) return 1;
+    rc=R.preparing ? prepare():rh_archive_stream_step(R.archive,fd,written);
+    if(rc<0) fall_back();
+    return rc!=0;
+}
+static int install_step(void *cookie, const uint8_t hash[32]) {
+    char id[65];
+    int rc;
+    (void)cookie;
+    if(R.preparing) return prepare();
     if (!R.extracted) {
         if (!R.archive) return -7;
-        rc = rh_archive_step(R.archive);
+        if(R.streaming) {
+            if(R.source<0) R.source=R.ctx->fs->open(R.ctx,R.archive_path,CANOPUS_FS_READ);
+            rc=R.source<0 ? -5:rh_archive_stream_step(R.archive,R.source,R.archive_bytes);
+            /* The complete archive never waits; anything else falls back. */
+            if(rc<0 || rc==2) {fall_back();return 0;}
+        } else rc = rh_archive_step(R.archive);
         if (rc <= 0) return rc;
         rh_archive_destroy(R.archive);
-        R.archive = 0;
-        R.extracted = 1;
+        if(R.source>=0) (void)R.ctx->fs->close(R.ctx,R.source);
+        R.archive = 0;R.source = -1;
+        R.extracted = 1;R.streaming = 0;
         return 0;
     }
     if(!R.registering) {
@@ -222,6 +262,7 @@ int rh_connect_runtime_start(const struct canopus_context_v1 *ctx) {
     hooks.install_begin = begin_install;
     hooks.install_step = install_step;
     hooks.install_abort = abort_install;
+    hooks.extract_step = extract_step;
     hooks.install_cancel = cancel_install;
     hooks.find_hash = find_hash;
     hooks.list = list;
@@ -255,6 +296,7 @@ void rh_connect_runtime_stop(void) {
     }
     R.receiver = 0;
     abort_install(0);
+    R.generation=0;
     if(R.cleanup_dir) (void)R.ctx->fs->closedir(R.ctx,R.cleanup_dir);
     R.cleanup_dir=0;R.cleanup_active=R.cleanup_remove=0;
     R.catalog=0;

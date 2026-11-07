@@ -20,6 +20,18 @@ int rh_archive_create(const struct canopus_context_v1 *ctx,
  * UNSUPPORTED=-11. Errors latch until destruction. */
 int rh_archive_step(struct rh_archive *a);
 void rh_archive_destroy(struct rh_archive *a);
+/* Streaming variant: extracts entries in local-header order while the archive
+ * is still arriving, then validates the complete directory without rewriting
+ * files. It needs Deflate (or sized) entries and a directory listed in local
+ * order; any error, including those limits, leaves the decision to a full
+ * rh_archive_create pass into a fresh staging path. */
+int rh_archive_stream_create(const struct canopus_context_v1 *ctx,
+                             uint32_t archive_bytes, const char *staging_path,
+                             struct rh_archive **out);
+/* fd is borrowed for this call only; its position is not preserved. Reads stay
+ * below available, which must never shrink. Returns as step, plus 2 while
+ * waiting for more bytes. Plain step rejects streaming readers. */
+int rh_archive_stream_step(struct rh_archive *a, int32_t fd, uint32_t available);
 /* Available only after step returned 1. Copies the absolute manifest path. */
 int rh_archive_manifest(struct rh_archive *a, char out[256]);
 #endif

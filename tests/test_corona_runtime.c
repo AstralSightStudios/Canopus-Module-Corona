@@ -88,6 +88,16 @@ static void assert_staging_empty(void) {
         assert(!strcmp(entry.name,".")||!strcmp(entry.name,".."));
     assert(rc==1);assert(!fs_closedir(&ctx,dir));
 }
+/* True once some live staging directory holds the extracted manifest. */
+static int streamed_manifest(void) {
+    struct canopus_fs_dirent entry;void *dir=fs_opendir(&ctx,"staging");char name[300];int found=0;
+    assert(dir);
+    while(fs_readdir(&ctx,dir,&entry)==0) {
+        if(!strcmp(entry.name,".")||!strcmp(entry.name,"..")||!strcmp(entry.name,"abandoned"))continue;
+        snprintf(name,sizeof(name),"staging/%s/corona.json",entry.name);found|=fs_exists(&ctx,name)==1;
+    }
+    assert(!fs_closedir(&ctx,dir));return found;
+}
 static void put32(uint8_t *p,uint32_t v) {for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(i*8));}
 static uint32_t get32(const uint8_t *p) {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static void tick(void) {uint32_t before=rmdir_calls;assert(timer_callback);timer_callback(&ctx,3,0);assert(rmdir_calls-before<=1u);}
@@ -112,6 +122,9 @@ int main(int argc,char **argv) {
     control(1,1,0,0,version,2);assert(response_bytes==32&&!response[1]);
     control(2,2,0,size,open_payload,40);assert(!response[1]);token=get32(response+4);assert(token);
     for(uint32_t offset=0;offset<size;){uint32_t n=size-offset;if(n>468)n=468;request(3,0,token,offset,data+offset,n);offset+=n;tick();}
+    /* Idle receive ticks extract the upload before FINISH is even sent. */
+    for(unsigned i=0;i<20;i++)tick();
+    assert(streamed_manifest()==!!strcmp(argv[4],"fallback"));
     control(4,3,token,0,0,0);assert(!response[1]&&get32(response+8)==size);
     assert(catalog && !rh_manager_data_prepare_apply(catalog,"active/900"));
     control(5,4,token,0,0,0);assert(!response[1]);

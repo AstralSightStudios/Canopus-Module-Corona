@@ -4,10 +4,10 @@
 #define LIMIT_BYTES (64u * 1024u * 1024u)
 #define CHECKPOINT_BYTES 65536u
 #define WORK_BYTES 4096u
-/* Verification/installation run back-to-back within one owner tick until this
- * wall-clock budget is spent, so throughput no longer scales with the 10 ms
- * heartbeat. The step cap bounds a tick when no clock is available or the
- * clock is coarser than the budget. */
+/* Extraction, verification and installation run back-to-back within one owner
+ * tick until this wall-clock budget is spent, so throughput no longer scales
+ * with the 10 ms heartbeat. The step cap bounds a tick when no clock is
+ * available or the clock is coarser than the budget. */
 #define WORK_BUDGET_MS 6u
 #define WORK_MAX_STEPS 256u
 #define RECORD_BYTES 128u
@@ -87,7 +87,7 @@ struct rh_connect {
     struct sha sha;
     char incoming[256],archive[256];
     uint8_t task,nonce_valid,lease,started,ack_dirty,flush_requested,install_started;
-    uint8_t notified,notifying,remote,checkpoint_failed,terminal_dirty;
+    uint8_t notified,notifying,remote,checkpoint_failed,terminal_dirty,extracting;
     struct rh_transfer_ui_state last_ui;
 };
 static uint32_t get32(const uint8_t *p) { return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24; }
@@ -216,14 +216,15 @@ static int open_archive(struct rh_connect *r,int fresh) {
     return 0;
 }
 /* One native write per tick. A batch remains owned until every short write has
- * completed. A failed partial batch cannot advance the acknowledged prefix. */
+ * completed. A failed partial batch cannot advance the acknowledged prefix.
+ * Every write seeks, since extraction shares the descriptor between flushes. */
 static int flush_step(struct rh_connect *r) {
     int32_t n;
     if(!r->used)return 1;
     if(r->p.detail)return -1;
     r->flush_requested=1;
     if(open_archive(r,0)) { latch(r,IO);return -1; }
-    if(!r->done && r->ctx->fs->seek(r->ctx,r->fd,r->p.written,CANOPUS_FS_SEEK_SET)!=(int64_t)r->p.written) { latch(r,IO);return -1; }
+    if(r->ctx->fs->seek(r->ctx,r->fd,r->p.written+r->done,CANOPUS_FS_SEEK_SET)!=(int64_t)(r->p.written+r->done)) { latch(r,IO);return -1; }
     n=r->ctx->fs->write(r->ctx,r->fd,r->work+r->done,r->used-r->done);
     if(n<=0 || (uint32_t)n>r->used-r->done) { latch(r,IO);return -1; }
     r->done+=(uint32_t)n;
@@ -244,8 +245,8 @@ static void send_pending(struct rh_connect *r) {
     if(rc==0)r->out_len=0; /* BUSY, not listening and transport errors retain it. */
 }
 static void abort_install(struct rh_connect *r) {
-    if(r->install_started && r->hooks.install_abort)r->hooks.install_abort(r->hooks.cookie);
-    r->install_started=0;
+    if((r->install_started || r->extracting) && r->hooks.install_abort)r->hooks.install_abort(r->hooks.cookie);
+    r->install_started=r->extracting=0;
 }
 static void remember_terminal(struct rh_connect *r) {
     if(r->task && (r->p.phase==RH_XFER_PHASE_INSTALLED || r->p.phase==RH_XFER_PHASE_CANCELED))r->terminal=r->p;
@@ -453,7 +454,7 @@ static void verify_step(struct rh_connect *r) {
         sha_update(&r->sha,r->work,(uint32_t)n);r->verify_offset+=(uint32_t)n;return;
     }
     sha_final(&r->sha,digest);
-    if(!same(digest,r->hash,32)) { latch(r,HASH);(void)save_record(r);return; }
+    if(!same(digest,r->hash,32)) { latch(r,HASH);abort_install(r);(void)save_record(r);return; }
     rc=close_archive(r);if(rc) { latch(r,IO);return; }
     free_workspace(r);r->p.phase=RH_XFER_PHASE_INSTALLING;
     if(save_record(r)) { latch(r,IO);return; }
@@ -477,12 +478,19 @@ static int installation_step(struct rh_connect *r) {
     else if(rc<0) { latch(r,error_code(rc));abort_install(r);(void)save_record(r); }
     return 1;
 }
+/* Returns 0 when extraction has caught up with the written prefix. */
+static int extraction_step(struct rh_connect *r) {
+    if(!r->hooks.extract_step || r->fd<0 || !r->p.written || r->p.detail)return 0;
+    r->extracting=1;
+    return !r->hooks.extract_step(r->hooks.cookie,r->fd,r->p.written,r->p.total,r->install_generation);
+}
 static void background_work(struct rh_connect *r) {
     uint32_t (*clock)(const struct canopus_context_v1 *)=r->ctx->time ? r->ctx->time->monotonic_ms:0;
     uint32_t start=clock ? clock(r->ctx):0u,steps=0;
     for(;;) {
         if(r->p.phase==RH_XFER_PHASE_VERIFYING)verify_step(r);
         else if(r->p.phase==RH_XFER_PHASE_INSTALLING) { if(!installation_step(r))return; }
+        else if(r->p.phase==RH_XFER_PHASE_RECEIVING) { if(!extraction_step(r))return; }
         else return;
         if(++steps>=WORK_MAX_STEPS || (clock && (uint32_t)(clock(r->ctx)-start)>=WORK_BUDGET_MS))return;
     }
@@ -546,7 +554,9 @@ void rh_connect_poll(struct rh_connect *r) {
     else if(r->p.phase==RH_XFER_PHASE_RECEIVING && !r->p.detail &&
             (r->flush_requested || r->frames>=4u || (r->used && r->p.written+r->used==r->p.total)))
         (void)flush_step(r);
-    else if(r->p.phase==RH_XFER_PHASE_VERIFYING || r->p.phase==RH_XFER_PHASE_INSTALLING)background_work(r);
+    /* Ticks without a flush extract the received prefix ahead of FINISH. */
+    else if(r->p.phase==RH_XFER_PHASE_RECEIVING || r->p.phase==RH_XFER_PHASE_VERIFYING ||
+            r->p.phase==RH_XFER_PHASE_INSTALLING)background_work(r);
     else if(r->p.phase==RH_XFER_PHASE_INSTALLED && r->terminal_dirty)persist_installed(r);
     send_pending(r);notify(r);
 }

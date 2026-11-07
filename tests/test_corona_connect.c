@@ -27,6 +27,7 @@ static int callback_active,alloc_fail,list_result;
  * budget so every poll runs exactly one step; zero freezes the clock. */
 static uint32_t clock_ms,clock_advance=1000;
 static uint32_t list_revision=7,live_bytes,peak_bytes;
+static uint32_t extract_written,extract_generation,extract_count;
 static uint8_t fd_record[256],fd_open[256];
 struct allocation { struct allocation *next;uint32_t bytes;uint64_t alignment; };
 static struct allocation *allocations;
@@ -90,6 +91,14 @@ static int install_begin(void *cookie,const char *archive,uint32_t n,uint32_t ge
 }
 static int install_step(void *cookie,const uint8_t hash[32]) { (void)cookie;assert(!callback_active && hash);step_count++;return install_result; }
 static void install_abort(void *cookie) { (void)cookie;assert(!callback_active);abort_count++; }
+/* Moves the shared descriptor, as a real extractor does, so a flush that does
+ * not seek corrupts the archive and fails its hash. */
+static int extract_step(void *cookie,int32_t fd,uint32_t written,uint32_t n,uint32_t gen) {
+    uint8_t byte;(void)cookie;assert(!callback_active && fd>=0 && written && written<=n && gen);
+    if(gen==extract_generation)assert(written>=extract_written);
+    extract_generation=gen;extract_written=written;extract_count++;
+    assert(lseek(fd,0,SEEK_SET)==0 && read(fd,&byte,1)==1);return 1;
+}
 static int find_hash(void *cookie,const uint8_t hash[32]) { (void)cookie;(void)hash;assert(!callback_active);return find_result; }
 static int list(void *cookie,uint32_t revision,uint32_t index,uint8_t *p,uint32_t *n) {
     (void)cookie;assert(!callback_active && *n==468 && index==0);
@@ -103,7 +112,7 @@ static const struct canopus_connect_obj connect={.send=connect_send,.listen=conn
 static uint32_t monotonic(const struct canopus_context_v1 *c) { uint32_t now=clock_ms;(void)c;clock_ms+=clock_advance;return now; }
 static const struct canopus_time_obj time_api={.monotonic_ms=monotonic};
 static const struct canopus_context_v1 ctx={.struct_size=sizeof(ctx),.fs=&fs,.mem=&mem,.connect=&connect,.time=&time_api};
-static const struct rh_connect_hooks hooks={.install_begin=install_begin,.install_step=install_step,.install_abort=install_abort,.find_hash=find_hash,.list=list,.changed=changed};
+static const struct rh_connect_hooks hooks={.install_begin=install_begin,.install_step=install_step,.install_abort=install_abort,.extract_step=extract_step,.find_hash=find_hash,.list=list,.changed=changed};
 static const uint8_t abc_hash[32]={0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
 static const uint8_t large_hash[32]={0x6d,0x1c,0xf2,0x2d,0x7c,0xc0,0x9b,0x08,0x5d,0xfc,0x25,0xee,0x1a,0x1f,0x3a,0xe0,0x26,0x58,0x04,0xc6,0x07,0xbc,0x20,0x74,0xad,0x25,0x3b,0xcc,0x82,0xfd,0x81,0xee};
 static void cleanup_tree(const char *name) {
@@ -119,7 +128,7 @@ static void setup(void) {
     strcpy(sandbox,"/tmp/corona-connect-XXXXXX");assert(mkdtemp(sandbox));
     listener=0;receiver=0;memset(&ui,0,sizeof(ui));reply_size=sends=io_calls=short_write=short_read=0;
     write_fail_after=record_sync_fail_after=-1;fail_sync=fail_record_write=fail_read=fail_close=send_busy=find_result=begin_result=begin_count=step_count=abort_count=alloc_fail=list_result=0;
-    remote=1;install_result=1;peak_bytes=0;clock_advance=1000;
+    remote=1;install_result=1;peak_bytes=0;clock_advance=1000;extract_generation=extract_written=0;
     assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver));assert(listener);
 }
 static void teardown(void) {
@@ -132,7 +141,7 @@ static void crash(void) {
     while(allocations) { struct allocation *p=allocations;allocations=p->next;live_bytes-=p->bytes;free(p); }
     listener=0;listener_cookie=0;receiver=0;assert(!live_bytes);
 }
-static void restart_receiver(void) { crash();assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver)); }
+static void restart_receiver(void) { crash();extract_generation=extract_written=0;assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver)); }
 static void ticks(unsigned n) { while(n--)rh_connect_poll(receiver); }
 static void deliver(const uint8_t *p,uint32_t n,uint32_t kind) {
     uint32_t before=io_calls;assert(listener);callback_active=1;listener(&ctx,kind,p,n,listener_cookie);callback_active=0;assert(before==io_calls);
@@ -353,6 +362,24 @@ static void test_token_exhaustion(void) {
     assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver));uint8_t body[40]={0};memcpy(body,abc_hash,32);body[32]=2;
     request(2,2,0,3,body,40);ticks(1);assert(reply[1]==8 && reply_size==12);teardown();
 }
+static void test_extraction_shares_descriptor(void) {
+    uint8_t p[468],expected[8*468],actual[8*468];uint32_t token,at=0;int fd;setup();
+    extract_count=0;token=open_task(sizeof(expected),large_hash,1,1);
+    for(unsigned batch=0;batch<2;batch++) {
+        for(unsigned i=0;i<4;i++,at+=468) {
+            for(unsigned k=0;k<468;k++)p[k]=(uint8_t)(at*7u+k*13u);
+            memcpy(expected+at,p,468);request(3,0,token,at,p,468);
+        }
+        /* One tick flushes; the idle tick after it extracts the new prefix. */
+        ticks(2);assert(extract_count && extract_written==at);
+    }
+    fd=fs_open(&ctx,"/data/canopus/m.corona/incoming/archive.zip",CANOPUS_FS_READ);
+    assert(fs_read(&ctx,fd,actual,sizeof(actual))==(int)sizeof(actual) && !memcmp(actual,expected,sizeof(actual)));
+    assert(!fs_close(&ctx,fd));
+    /* Canceling the task releases the extractor through install_abort. */
+    request(6,2,token,0,0,0);ticks(1);assert(reply[0]==0x86 && !reply[1] && abort_count==1);
+    teardown();
+}
 static void test_work_runs_within_one_tick(void) {
     uint32_t token;setup();clock_advance=0;
     token=open_task(100000,large_hash,1,1);upload(token,0,100000);
@@ -376,6 +403,6 @@ int main(void) {
     test_hash_and_install_recovery();test_corruption_and_high_water();test_failed_open_and_limits();test_failed_open_shutdown();test_token_exhaustion();
     test_committed_install_checkpoint_failure();test_deleted_package_reinstall();test_cached_open_repairs_high_water();
     test_oversized_controls();test_ack_survives_control_reply();test_installer_busy_is_retryable();
-    test_work_runs_within_one_tick();
+    test_work_runs_within_one_tick();test_extraction_shares_descriptor();
     puts("corona_connect: production receiver, persistence and fault checks passed");return 0;
 }

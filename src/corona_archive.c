@@ -11,9 +11,15 @@
 #define BAD (-7)
 #define IO (-5)
 #define LIMIT (-8)
+#define WAIT 2
+/* One inflate_step consumes at most a dynamic header (~570 bytes) plus 512
+ * outputs (~1.1 KiB) and refills 512 bytes ahead. Reads beyond the received
+ * prefix still fail closed, so this margin only decides when to wait. */
+#define INFLATE_AHEAD 4096u
 struct tree { uint16_t count[16], symbol[288]; uint16_t symbols; };
 enum stage { EOCD, CENTRAL, EXTRA_C, LOCAL, EXTRA_L, DESCRIPTOR, COMPARE,
-             MAKE_PATH, OUTPUT, FINISH_FILE, NEXT_ENTRY, COMPLETE };
+             MAKE_PATH, OUTPUT, FINISH_FILE, NEXT_ENTRY, COMPLETE,
+             STREAM_LOCAL, STREAM_EXTRA, STREAM_DESCRIPTOR, STREAM_NEXT };
 struct rh_archive {
     const struct canopus_context_v1 *ctx;
     int32_t source, target;
@@ -26,6 +32,10 @@ struct rh_archive {
     uint16_t flags, method, name_bytes, version;
     uint32_t stamp;
     uint8_t directory, manifest_seen, descriptor, final;
+    /* Streaming walks local headers while the prefix [0, available) grows.
+     * Its entry sequence is summed and later matched against the directory. */
+    uint32_t available, stream_at, stream_count, stream_sum, sum;
+    uint8_t streaming, unsized;
     char root[256], name[256], manifest[256], path[256];
     uint8_t scratch[IO_BYTES + 24u];
     uint8_t input[IO_BYTES], output[IO_BYTES], history[32768];
@@ -42,9 +52,19 @@ static unsigned length(const char *s) { unsigned n=0; while(s[n]) n++; return n;
 static int same(const char *a,const char *b) { while(*a && *a==*b) { a++;b++; } return *a==*b; }
 static void clear(void *p,uint32_t n) { uint8_t *b=p; while(n--) *b++=0; }
 static int latch(struct rh_archive *a,int rc) { a->error=rc; return rc; }
+static uint32_t crc_byte(uint32_t c,uint8_t byte) {
+    c^=byte;for(unsigned k=0;k<8;k++)c=(c>>1)^((0u-(c&1u))&0xedb88320u);return c;
+}
+/* Pins the k-th entry's local range and content; streamed and directory
+ * sequences must agree, so a reordered directory falls back to full extraction. */
+static uint32_t entry_sum(uint32_t s,const struct rh_archive *a) {
+    const uint32_t v[4]={a->local,a->end,a->expected_crc,a->unpacked};
+    for(unsigned i=0;i<4;i++)for(unsigned k=0;k<4;k++)s=crc_byte(s,(uint8_t)(v[i]>>(8u*k)));
+    return s;
+}
 static int read_at(struct rh_archive *a,uint32_t at,void *p,uint32_t n) {
     uint32_t done=0;
-    if(at>a->bytes || n>a->bytes-at) return BAD;
+    if(at>a->available || n>a->available-at) return BAD;
     if(a->ctx->fs->seek(a->ctx,a->source,at,CANOPUS_FS_SEEK_SET)!=(int64_t)at) return IO;
     while(done<n) {
         int32_t r=a->ctx->fs->read(a->ctx,a->source,(uint8_t *)p+done,n-done);
@@ -172,8 +192,7 @@ static int fixed_trees(struct rh_archive *a) {
 static int emit(struct rh_archive *a,uint8_t byte) {
     if(a->produced>=a->unpacked || a->total>=AR_LIMIT)return a->total>=AR_LIMIT?LIMIT:BAD;
     a->history[a->produced&32767u]=byte;a->produced++;a->total++;
-    a->output[a->output_n++]=byte;
-    a->crc^=byte;for(unsigned k=0;k<8;k++)a->crc=(a->crc>>1)^((0u-(a->crc&1u))&0xedb88320u);
+    a->output[a->output_n++]=byte;a->crc=crc_byte(a->crc,byte);
     return 0;
 }
 /* One call emits at most IO_BYTES. A no-output Deflate block ends this call,
@@ -250,6 +269,7 @@ static int central_step(struct rh_archive *a) {
     int rc;uint8_t *p=a->scratch;
     if(a->index==a->entries) {
         if(a->cursor!=a->cd_end || a->local_sum!=a->cd || !a->manifest_seen)return BAD;
+        if(a->streaming && (a->cd!=a->stream_at || a->entries!=a->stream_count || a->sum!=a->stream_sum))return BAD;
         a->stage=COMPLETE;return 1;
     }
     if(a->cursor>a->cd_end || a->cd_end-a->cursor<46u)return BAD;
@@ -317,7 +337,10 @@ static int compare_step(struct rh_archive *a) {
     int rc;uint8_t *p=a->scratch;
     if(a->compared==a->index) {
         if(a->end-a->local>a->cd-a->local_sum)return BAD;
-        a->local_sum+=a->end-a->local;a->made=length(a->root)+1u;a->stage=MAKE_PATH;return 0;
+        a->local_sum+=a->end-a->local;
+        /* Streamed entries are already on disk; only their identity is checked. */
+        if(a->streaming) {a->total+=a->unpacked;a->sum=entry_sum(a->sum,a);a->stage=NEXT_ENTRY;return 0;}
+        a->made=length(a->root)+1u;a->stage=MAKE_PATH;return 0;
     }
     rc=read_at(a,a->compare,p,46u);if(rc)return rc;
     uint32_t n=le16(p+28),prior_local=le32(p+42),compressed=le32(p+20);
@@ -375,7 +398,7 @@ static int output_step(struct rh_archive *a) {
     a->output_at=a->output_n=0;
     if(a->method==0u) {
         if(a->compressed!=a->unpacked)return BAD;
-        if(a->produced==a->unpacked) {a->stage=FINISH_FILE;return 0;}
+        if(a->produced==a->unpacked) {a->stage=a->streaming?STREAM_DESCRIPTOR:FINISH_FILE;return 0;}
         uint32_t n=a->unpacked-a->produced;if(n>IO_BYTES)n=IO_BYTES;
         rc=read_at(a,a->data+a->produced,a->input,n);if(rc)return rc;
         for(unsigned i=0;i<n;i++){rc=emit(a,a->input[i]);if(rc)return rc;}
@@ -383,17 +406,77 @@ static int output_step(struct rh_archive *a) {
     }
     rc=inflate_step(a);if(rc)return rc;
     if(a->inflate_state==4 && !a->output_n) {
-        if(a->input_pos-a->input_n+a->input_at!=a->input_end || a->produced!=a->unpacked)return BAD;
-        a->stage=FINISH_FILE;
+        uint32_t used=a->input_pos-a->input_n+a->input_at;
+        /* A streamed descriptor entry ends where its Deflate stream ends. */
+        if(a->unsized) {a->compressed=used-a->data;a->unpacked=a->produced;}
+        else if(used!=a->input_end || a->produced!=a->unpacked)return BAD;
+        a->stage=a->streaming?STREAM_DESCRIPTOR:FINISH_FILE;
     }
     return 0;
 }
-int rh_archive_create(const struct canopus_context_v1 *ctx,const char *archive_path,
-                      uint32_t archive_bytes,const char *staging_path,struct rh_archive **out) {
+/* Local headers are trusted only for extraction order. Every rule the
+ * directory pass enforces still runs once the archive is complete. */
+static int stream_local_step(struct rh_archive *a) {
+    uint8_t *p=a->scratch;uint32_t at=a->stream_at,header;int rc;
+    if(a->bytes-at<30u)return BAD;
+    if(a->available-at<30u)return WAIT;
+    rc=read_at(a,at,p,30u);if(rc)return rc;
+    if(le32(p)==0x02014b50u) {a->total=0;a->stage=EOCD;return 0;}
+    if(le32(p)!=0x04034b50u || a->stream_count==65535u)return BAD;
+    a->version=le16(p+4);a->flags=le16(p+6);a->method=le16(p+8);a->stamp=le32(p+10);
+    a->expected_crc=le32(p+14);a->compressed=le32(p+18);a->unpacked=le32(p+22);a->name_bytes=le16(p+26);
+    if(a->version<10u || a->version>20u || (a->flags&~0x080eu) || (a->method!=0u && a->method!=8u) || (!a->method && (a->flags&6u)) || (a->method==8u && a->version<20u))return BAD;
+    if(!a->name_bytes || a->name_bytes>255u)return BAD;
+    header=30u+a->name_bytes+le16(p+28);
+    if(header>a->bytes-at)return BAD;
+    if(header>a->available-at)return WAIT;
+    a->local=at;a->data=at+header;a->extra=at+30u+a->name_bytes;a->extra_end=a->data;
+    /* Without sizes the entry must be Deflate: a stored length is unknowable. */
+    a->unsized=(uint8_t)((a->flags&8u) && !a->compressed && !a->unpacked);
+    if(a->unsized) {
+        if(!a->method)return BAD;
+        a->compressed=a->bytes-a->data;a->unpacked=AR_LIMIT-a->total;
+    } else {
+        if(a->compressed>a->bytes-a->data || a->unpacked==UINT32_MAX)return BAD;
+        if(a->unpacked>AR_LIMIT-a->total)return LIMIT;
+    }
+    rc=read_at(a,at+30u,a->name,a->name_bytes);if(rc)return rc;a->name[a->name_bytes]=0;
+    rc=valid_name(a->name,a->name_bytes);if(rc!=1)return rc<0?rc:BAD;
+    a->directory=(uint8_t)(a->name[a->name_bytes-1u]=='/');
+    rc=full_path(a,a->name,a->path);if(rc)return rc;
+    a->made=length(a->root)+1u;a->stage=STREAM_EXTRA;return 0;
+}
+static int stream_descriptor_step(struct rh_archive *a) {
+    uint32_t crc=a->crc^UINT32_MAX,count;uint8_t *p=a->scratch;int rc;
+    a->end=a->data+a->compressed;
+    if(a->flags&8u) {
+        if(a->bytes-a->end<12u)return BAD;
+        count=a->bytes-a->end>=16u?16u:12u;
+        if(a->end>a->available || a->available-a->end<count)return WAIT;
+        rc=read_at(a,a->end,p,count);if(rc)return rc;
+        if(a->expected_crc && a->expected_crc!=crc)return BAD;
+        if(count==16u && le32(p)==0x08074b50u && le32(p+4)==crc && le32(p+8)==a->compressed && le32(p+12)==a->unpacked)a->end+=16u;
+        else if(le32(p)==crc && le32(p+4)==a->compressed && le32(p+8)==a->unpacked)a->end+=12u;
+        else return BAD;
+        a->expected_crc=crc;
+    }
+    a->stage=FINISH_FILE;return 0;
+}
+/* Whether the next OUTPUT step can run on the received prefix. */
+static int stream_ready(const struct rh_archive *a) {
+    uint32_t need;
+    if(a->output_at<a->output_n)return 1;
+    if(!a->method)need=a->data+(a->unpacked-a->produced>IO_BYTES?a->produced+IO_BYTES:a->unpacked);
+    else if(a->inflate_state==4)return 1;
+    else need=a->input_end-a->input_pos>INFLATE_AHEAD?a->input_pos+INFLATE_AHEAD:a->input_end;
+    return a->available>=need;
+}
+static int create(const struct canopus_context_v1 *ctx,const char *archive_path,
+                  uint32_t archive_bytes,const char *staging_path,struct rh_archive **out) {
     struct rh_archive *a;int rc;
     if(!out)return BAD;*out=0;
     if(!ctx || !ctx->fs || !ctx->mem || !ctx->mem->alloc || !ctx->mem->free || !ctx->fs->open || !ctx->fs->read || !ctx->fs->write || !ctx->fs->seek || !ctx->fs->size || !ctx->fs->sync || !ctx->fs->close || !ctx->fs->exists || !ctx->fs->stat || !ctx->fs->mkdir)return -11;
-    if(!archive_path || !staging_path || !staging_path[0] || length(staging_path)>255u || staging_path[length(staging_path)-1u]=='/' || archive_bytes<22u)return BAD;
+    if(!staging_path || !staging_path[0] || length(staging_path)>255u || staging_path[length(staging_path)-1u]=='/' || archive_bytes<22u)return BAD;
     if(archive_bytes>AR_LIMIT)return LIMIT;
     a=ctx->mem->alloc(ctx,(uint32_t)sizeof(*a));if(!a)return LIMIT;
     clear(a,sizeof(*a));a->ctx=ctx;a->source=a->target=-1;a->bytes=archive_bytes;a->scan=archive_bytes-22u;
@@ -409,18 +492,30 @@ int rh_archive_create(const struct canopus_context_v1 *ctx,const char *archive_p
         if(n+1u+m>255u){rh_archive_destroy(a);return LIMIT;}
         a->root[n++]='/';canopus_memcpy(a->root+n,staging_path,m+1u);
     }
-    a->source=ctx->fs->open(ctx,archive_path,CANOPUS_FS_READ);
-    if(a->source<0){rh_archive_destroy(a);return IO;}
-    int64_t source_bytes=ctx->fs->size(ctx,a->source);
-    if(source_bytes<0){rh_archive_destroy(a);return IO;}
-    if(source_bytes<archive_bytes){rh_archive_destroy(a);return BAD;}
+    if(!archive_path) {a->streaming=1;a->stage=STREAM_LOCAL;}
+    else {
+        a->available=archive_bytes;
+        a->source=ctx->fs->open(ctx,archive_path,CANOPUS_FS_READ);
+        if(a->source<0){rh_archive_destroy(a);return IO;}
+        int64_t source_bytes=ctx->fs->size(ctx,a->source);
+        if(source_bytes<0){rh_archive_destroy(a);return IO;}
+        if(source_bytes<archive_bytes){rh_archive_destroy(a);return BAD;}
+    }
     rc=ctx->fs->exists(ctx,staging_path);
     if(rc || ctx->fs->mkdir(ctx,staging_path)<0) {rh_archive_destroy(a);return rc>0?BAD:IO;}
     *out=a;return 0;
 }
-int rh_archive_step(struct rh_archive *a) {
+int rh_archive_create(const struct canopus_context_v1 *ctx,const char *archive_path,
+                      uint32_t archive_bytes,const char *staging_path,struct rh_archive **out) {
+    if(out)*out=0;
+    return archive_path ? create(ctx,archive_path,archive_bytes,staging_path,out):BAD;
+}
+int rh_archive_stream_create(const struct canopus_context_v1 *ctx,uint32_t archive_bytes,
+                             const char *staging_path,struct rh_archive **out) {
+    return create(ctx,0,archive_bytes,staging_path,out);
+}
+static int step(struct rh_archive *a) {
     int rc=0;
-    if(!a)return BAD;if(a->error)return a->error;
     switch(a->stage) {
     case EOCD:rc=eocd_step(a);break;
     case CENTRAL:rc=central_step(a);break;
@@ -431,16 +526,38 @@ int rh_archive_step(struct rh_archive *a) {
     case COMPARE:rc=compare_step(a);break;
     case MAKE_PATH:rc=mkdir_path_step(a);break;
     case OUTPUT:rc=output_step(a);break;
-    case FINISH_FILE:
+    case FINISH_FILE: {
+        enum stage next=a->streaming?STREAM_NEXT:NEXT_ENTRY;
         if(a->produced!=a->unpacked || (a->crc^UINT32_MAX)!=a->expected_crc)rc=BAD;
-        else if(a->target<0)a->stage=NEXT_ENTRY;
+        else if(a->target<0)a->stage=next;
         else if(a->ctx->fs->sync(a->ctx,a->target)<0)rc=IO;
-        else {int32_t fd=a->target;a->target=-1;if(a->ctx->fs->close(a->ctx,fd)<0)rc=IO;else a->stage=NEXT_ENTRY;}
+        else {int32_t fd=a->target;a->target=-1;if(a->ctx->fs->close(a->ctx,fd)<0)rc=IO;else a->stage=next;}
         break;
+    }
     case NEXT_ENTRY:a->cursor=a->next;a->index++;a->stage=CENTRAL;break;
+    case STREAM_LOCAL:rc=stream_local_step(a);break;
+    case STREAM_EXTRA:rc=extra_step(a,MAKE_PATH);break;
+    case STREAM_DESCRIPTOR:rc=stream_descriptor_step(a);break;
+    case STREAM_NEXT:
+        a->stream_sum=entry_sum(a->stream_sum,a);a->stream_count++;
+        a->stream_at=a->end;a->stage=STREAM_LOCAL;break;
     case COMPLETE:return 1;
     }
     return rc<0?latch(a,rc):rc;
+}
+int rh_archive_step(struct rh_archive *a) {
+    if(!a || a->streaming)return BAD;
+    return a->error ? a->error:step(a);
+}
+int rh_archive_stream_step(struct rh_archive *a,int32_t fd,uint32_t available) {
+    int rc;
+    if(!a || !a->streaming)return BAD;
+    if(a->error)return a->error;
+    if(fd<0 || available>a->bytes || available<a->available)return latch(a,BAD);
+    a->available=available;
+    if((a->stage==EOCD && available<a->bytes) || (a->stage==OUTPUT && !stream_ready(a)))return WAIT;
+    a->source=fd;rc=step(a);a->source=-1;
+    return rc;
 }
 void rh_archive_destroy(struct rh_archive *a) {
     if(!a)return;

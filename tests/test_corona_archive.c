@@ -38,6 +38,31 @@ static int fs_root(const struct canopus_context_v1 *ctx,char *p,uint32_t n) {(vo
 static const struct canopus_fs_obj fs={.get_data_path=fs_root,.open=fs_open,.read=fs_read,.write=fs_write,.seek=fs_seek,.size=fs_size,.sync=fs_sync,.close=fs_close,.exists=fs_exists,.stat=fs_stat,.mkdir=fs_mkdir};
 static const struct canopus_mem_obj mem={.alloc=mem_alloc,.free=mem_free};
 static const struct canopus_context_v1 ctx={.fs=&fs,.mem=&mem};
+/* Mirrors the runtime: extract while a growing prefix is readable, and on any
+ * streaming error discard that staging and extract the complete archive. */
+static int stream(const char *archive,const char *staging,uint32_t bytes,unsigned *early,int *streamed) {
+    struct rh_archive *a=0;int fd=fs_open(&ctx,archive,CANOPUS_FS_READ),rc;
+    uint32_t available=0,seed=bytes*2654435761u+1u;unsigned steps=0;char full[1024];
+    assert(fd>=0);rc=rh_archive_stream_create(&ctx,bytes,staging,&a);
+    if(!rc){char not_ready[256];assert(rh_archive_manifest(a,not_ready)==-7);assert(rh_archive_step(a)==-7);}
+    while(!rc || rc==2) {
+        assert(++steps<2000000u);seed=seed*1103515245u+12345u;
+        assert(rc!=2 || available<bytes);
+        if(available<bytes && (rc==2 || !(seed>>29))) {
+            available+=1u+(seed>>16)%1500u;if(available>bytes)available=bytes;
+        }
+        rc=rh_archive_stream_step(a,fd,available);
+        if(!rc && available<bytes)++*early;
+    }
+    if(rc==1){char manifest[256];assert(!rh_archive_manifest(a,manifest));assert(strstr(manifest,"corona.json")||strstr(manifest,"canora.json"));assert(rh_archive_stream_step(a,fd,bytes)==1);}
+    if(rc<0 && a)assert(rh_archive_stream_step(a,fd,bytes)==rc);
+    rh_archive_destroy(a);assert(!fs_close(&ctx,fd));
+    *streamed=rc==1;if(rc==1)return rc;
+    snprintf(full,sizeof(full),"%s.full",staging);a=0;
+    rc=rh_archive_create(&ctx,archive,bytes,full,&a);
+    while(!rc && ++steps<2000000u)rc=rh_archive_step(a);
+    rh_archive_destroy(a);return rc;
+}
 int main(int argc,char **argv) {
     assert(argc>=5);struct stat st;assert(!stat(argv[1],&st));
     int expected=atoi(argv[3]);unsigned mode=(unsigned)atoi(argv[4]);
@@ -48,6 +73,12 @@ int main(int argc,char **argv) {
     if(mode==6)fail_size=1;
     if(mode==7)short_size=1;
     const char *staging=argv[2];
+    if(mode==8) {
+        unsigned early=0;int streamed=0,rc=stream(argv[1],staging,(uint32_t)st.st_size,&early,&streamed);
+        assert(!live && !handles);assert(peak<48u*1024u);
+        if(rc!=expected){fprintf(stderr,"%s: streamed got %d, expected %d\n",argv[1],rc,expected);return 1;}
+        printf("%d %s %u\n",rc,streamed?"stream":"fallback",early);return 0;
+    }
     if(mode==5){char parent[1024];snprintf(parent,sizeof(parent),"%s",argv[2]);char *slash=strrchr(parent,'/');assert(slash);*slash=0;assert(!chdir(parent));staging=strrchr(argv[2],'/')+1;}
     struct rh_archive *a=0;int rc=rh_archive_create(&ctx,argv[1],(uint32_t)st.st_size,staging,&a);unsigned steps=0;
     if(!rc){char not_ready[256];assert(rh_archive_manifest(a,not_ready)==-7);}
