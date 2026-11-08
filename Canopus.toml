@@ -1,8 +1,8 @@
 schema = 1
 [module]
 id = "corona"
-version = "0.3.1"
-version_code = 4
+version = "0.3.2"
+version_code = 5
 kind = "target"
 language = "c"
 lifecycle = "resident-after-activation"

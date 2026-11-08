@@ -82,7 +82,7 @@ def build_bundle(device_family, targets, out_dir):
         font_status = ('NOT_PROBED' if 'xiaomi-band-11-4.100.177' in targets
                        else 'USER_REPORTED_PASS')
         installer_manifest.update({
-            'module_build_id': 'resource-hook-0.3.1', 'font_reload': True,
+            'module_build_id': 'resource-hook-0.3.2', 'font_reload': True,
             'font_reload_device_status': font_status,
             'receipt_format_version': 2,
             'hardware_status': 'NOT_PROBED', 'gpu_recovery': 'UNSUPPORTED',
@@ -93,10 +93,10 @@ def build_bundle(device_family, targets, out_dir):
         # Destination paths
         if device_family == 'band11':
             versions = '-'.join(target.rsplit('.', 1)[1] for target in targets)
-            folder_name = 'resource-hook-0.3.1-quickapp-band11-' + versions
+            folder_name = 'resource-hook-0.3.2-quickapp-band11-' + versions
             zip_name = folder_name + '.zip'
         else:
-            folder_name = 'resource-hook-0.3.1-quickapp-band10-pro-1043'
+            folder_name = 'resource-hook-0.3.2-quickapp-band10-pro-1043'
             zip_name = folder_name + '.zip'
 
         dest_folder = out_dir / folder_name
@@ -134,7 +134,7 @@ def build_bundle(device_family, targets, out_dir):
             'module': 'corona',
             'version': module_version,
             'features': ['transactional-font-reload', 'quickapp-launcher-icons', 'calendar-reload'],
-            'module_build_id': 'resource-hook-0.3.1',
+            'module_build_id': 'resource-hook-0.3.2',
             'font_reload': True, 'font_reload_device_status': font_status,
             'gpu_recovery': 'UNSUPPORTED', 'framework_restart_safety': 'UNSUPPORTED',
             'targets': target_metadata,

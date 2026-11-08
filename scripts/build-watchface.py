@@ -45,7 +45,7 @@ background_metadata = OPTIONS['background_metadata']
 
 
 def default_output_name(targets):
-    prefix = 'module-installer-resource-hook-0.3.1-'
+    prefix = 'module-installer-resource-hook-0.3.2-'
     if set(targets) == set(DEFAULT_TARGETS):
         return prefix + 'band11'
     if len(targets) == 1:
@@ -154,7 +154,7 @@ def main():
             device_docs.write_text(
                 f'# Resource Hook installer\n\n'
                 f'Targets: {device_name}, firmware {target_versions}. This watchface installs '
-                f'the {module_description} (`resource-hook-0.3.1`) in the disabled state.\n\n'
+                f'the {module_description} (`resource-hook-0.3.2`) in the disabled state.\n\n'
                 'Pack only `main.lua` and the .bin files in this directory. '
                 'Requires the current Canopus Supervisor with CMI2 support. '
                 'Opening the watchface installs the module; upgrades take effect after reboot.\n\n'
@@ -169,7 +169,7 @@ def main():
             manifest['font_reload_device_status'] = font_status
             manifest['gpu_recovery'] = 'UNSUPPORTED'
             manifest['framework_restart_safety'] = 'UNSUPPORTED'
-            manifest['module_build_id'] = 'resource-hook-0.3.1'
+            manifest['module_build_id'] = 'resource-hook-0.3.2'
             manifest['receipt_format_version'] = 2
             manifest['hardware_status'] = 'NOT_PROBED'
             manifest.update(background_metadata(device_targets, diagnostics))
@@ -211,7 +211,7 @@ def main():
             copy_tree(generated / device_name, package / device_name)
         (package / 'README.md').write_text(
             f'# Resource Hook installer ({", ".join(groups)})\n\n'
-            'Build output from the latest checked `resource-hook-0.3.1` ELF. '
+            'Build output from the latest checked `resource-hook-0.3.2` ELF. '
             'The unsigned CMI2 receipt binds the artifact to its exact firmware target.\n\n'
             + ''.join(f'- `{name}/`: complete watchface source/resources and ready-to-pack ZIP.\n'
                       f'- `{name}/build/manifest.json`: target and resource hashes.\n'
@@ -228,10 +228,10 @@ def main():
                 'receipt_sha256': hashlib.sha256(receipts[target].read_bytes()).hexdigest(),
             }
         build_meta = {
-            'name': output.name, 'version': '0.3.1',
+            'name': output.name, 'version': '0.3.2',
             'runtime_id': 'corona', 'project_id': 'corona',
             'targets': targets,
-            'module_build_id': 'resource-hook-0.3.1',
+            'module_build_id': 'resource-hook-0.3.2',
             'target_details': target_details,
             'receipt_format_version': 2,
             'hardware_status': 'NOT_PROBED',

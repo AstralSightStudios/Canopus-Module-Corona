@@ -116,7 +116,7 @@ class FontTargetContract(unittest.TestCase):
             with self.subTest(path=name):
                 self.assertNotIn('RH_EXPERIMENTAL_FONT_RELOAD', source)
                 self.assertNotIn('resource-hook-font-experimental.elf', source)
-                self.assertNotIn('resource-hook-0.3.1-font-exp', source)
+                self.assertNotIn('resource-hook-0.3.2-font-exp', source)
 
 
 class LegacyInstallerContract(unittest.TestCase):
@@ -126,7 +126,7 @@ class LegacyInstallerContract(unittest.TestCase):
         self.assertEqual(INSTALLER['TARGETS'], list(TARGET_IDS) + ['xiaomi-band-11-4.100.177'])
         self.assertEqual(INSTALLER['device_groups'](['xiaomi-band-11-4.100.177']),
                          {'xiaomi-band-11': ['xiaomi-band-11-4.100.177']})
-        prefix = 'module-installer-resource-hook-0.3.1-'
+        prefix = 'module-installer-resource-hook-0.3.2-'
         name = INSTALLER['default_output_name']
         self.assertEqual(name(TARGET_IDS[:2]), prefix + 'band11')
         self.assertEqual(name(list(reversed(TARGET_IDS[:2]))), prefix + 'band11')

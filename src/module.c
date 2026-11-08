@@ -16,7 +16,7 @@
 #endif
 
 #define RH_MODULE_ID "corona"
-#define RH_VERSION "0.3.1"
+#define RH_VERSION "0.3.2"
 /* Resolve app-scoped control paths using the selected firmware target. */
 #define RH_CONTROL_CONFIG RH_CONFIG_PATH
 #define RH_RELOAD_PREFIX "resource-hook-reload-v1\t"
@@ -1672,7 +1672,7 @@ __attribute__((constructor)) static void rh_module_entry(
     cp((char *)canopus_module_descriptor.module_id, RH_MODULE_ID, 32);
     cp((char *)canopus_module_descriptor.module_version, RH_VERSION, 16);
     cp((char *)canopus_module_descriptor.build_id,
-       "resource-hook-0.3.1", 32);
+       "resource-hook-0.3.2", 32);
     cp((char *)canopus_module_descriptor.target_id, RH_TARGET_ID, 32);
     canopus_module_descriptor.prepare = prepare;
     canopus_module_descriptor.activate = activate;

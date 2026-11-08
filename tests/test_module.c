@@ -1604,7 +1604,7 @@ static void font_status(int32_t result, uint32_t pending, uint32_t changed) {
 static int test_font_integration(void) {
     struct canopus_module_descriptor_v1 *d = &canopus_module_descriptor;
     unsigned before;
-    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.1"));
+    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.2"));
     font_status(0, 0, 0);
     font_rc = 1;
     assert(d->activate(&test_context) == 0);
@@ -2700,8 +2700,8 @@ int main(int argc, char **argv) {
     assert(d->struct_size == sizeof(*d) && d->abi_major == CANOPUS_ABI_MAJOR &&
            d->abi_minor == CANOPUS_ABI_MINOR);
     assert(!strcmp((const char *)d->module_id, "corona"));
-    assert(!strcmp((const char *)d->module_version, "0.3.1"));
-    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.1"));
+    assert(!strcmp((const char *)d->module_version, "0.3.2"));
+    assert(!strcmp((const char *)d->build_id, "resource-hook-0.3.2"));
 #if defined(RH_TARGET_P65) && RH_TARGET_P65
     assert(!strcmp((const char *)d->target_id, "redmi-watch-6-3.100.043"));
 #elif defined(RH_TARGET_1043) && RH_TARGET_1043

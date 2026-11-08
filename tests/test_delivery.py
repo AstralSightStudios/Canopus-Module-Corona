@@ -17,7 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = os.environ.get('RESOURCE_HOOK_TARGET', 'xiaomi-band-11-4.100.139')
 PAYLOAD = Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
-    ROOT / 'build/payload-0.3.1' / TARGET))
+    ROOT / 'build/payload-0.3.2' / TARGET))
 spec = importlib.util.spec_from_file_location('verify_payload', ROOT / 'scripts/verify-payload.py')
 verifier = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verifier)
@@ -131,7 +131,7 @@ class Delivery(unittest.TestCase):
 
     def test_package_contains_the_verified_payload_and_receipt(self):
         import tarfile
-        with tarfile.open(PAYLOAD / 'corona-0.3.1.canopus') as archive:
+        with tarfile.open(PAYLOAD / 'corona-0.3.2.canopus') as archive:
             self.assertEqual(archive.extractfile(f'artifacts/{TARGET}/module.elf').read(),
                              (PAYLOAD / 'resource-hook.elf').read_bytes())
             self.assertEqual(archive.extractfile(f'receipts/{TARGET}.cmi').read(),
@@ -147,7 +147,7 @@ class Delivery(unittest.TestCase):
         manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
         metadata = json.loads((PAYLOAD / 'release.json').read_text())
         self.assertEqual(manifest['module']['id'], 'corona')
-        self.assertEqual(manifest['module']['version'], '0.3.1')
+        self.assertEqual(manifest['module']['version'], '0.3.2')
         self.assertEqual(metadata['project_id'], manifest['module']['id'])
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)
         self.assertEqual(metadata['version'], manifest['module']['version'])
@@ -165,7 +165,7 @@ class Delivery(unittest.TestCase):
             })
             self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
             self.assertEqual(metadata['background_device_status'], 'NOT_PROBED')
-        self.assertEqual(metadata['module_build_id'], 'resource-hook-0.3.1')
+        self.assertEqual(metadata['module_build_id'], 'resource-hook-0.3.2')
         self.assertEqual(metadata['gpu_recovery'], 'UNSUPPORTED')
         self.assertEqual(metadata['framework_restart_safety'], 'UNSUPPORTED')
         self.assertFalse(metadata['automatic_ui_restart'])

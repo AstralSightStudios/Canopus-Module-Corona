@@ -21,7 +21,7 @@ from band11_module_load import registry
 from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
 
 PAYLOAD = pathlib.Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
-    ROOT / 'build/payload-0.3.1' / TARGET))
+    ROOT / 'build/payload-0.3.2' / TARGET))
 APP_ROOT = '/data/quickapp/files/ng.lst.corona/'
 CONFIG_PATH = APP_ROOT + 'mappings.tsv'
 THEME_ROOT = APP_ROOT + 'themes/'

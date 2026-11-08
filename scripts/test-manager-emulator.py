@@ -8,7 +8,7 @@ firmware. Screenshots alone produce `captured`, never `passed` or device evidenc
 
 Example (set MIRAGECTL, MAB_SMOKE and FACETORY_PACKAGER for your machine):
   python3 scripts/test-manager-emulator.py 155 --library /tmp/corona-155-library \
-    --work /tmp/corona-155-evidence --package dist/corona-0.3.1.canopus \
+    --work /tmp/corona-155-evidence --package dist/corona-0.3.2.canopus \
     --firmware-source /path/to/miwear.watch.q66tc_v4.100.155_full_f1c824fe \
     --scenario tests/fixtures/manager-emulator/155.json
 

@@ -160,7 +160,7 @@ def main():
         for name in ('Canopus.toml', 'README.md', '.gitignore'):
             shutil.copyfile(ROOT / name, source / name)
         (stage / 'README.md').write_text(
-            '# Resource Hook 0.3.1 integration delivery\n\n'
+            '# Resource Hook 0.3.2 integration delivery\n\n'
             f'Targets: {", ".join(targets)}. New artifact physical device: NOT_PROBED.\n\n'
             'Font reload: legacy targets have user reports; .177/.179 are NOT_PROBED. '
             'P65 font reload, native backgrounds, blur and calendar are included by default; device NOT_PROBED. '
@@ -193,7 +193,7 @@ def main():
             **({'target': targets[0]} if len(targets) == 1 else {}),
             'targets': targets, 'firmware_sha256': {target: TARGETS[target] for target in targets},
             'passed_steps': steps, 'physical_device': 'NOT_PROBED',
-            'module_build_id': 'resource-hook-0.3.1',
+            'module_build_id': 'resource-hook-0.3.2',
             'receipt_format_version': 2,
             'delivery_format': 'canopus', 'package': package_name,
             'transport': 'wearpacket-l2-cpc2',
@@ -219,7 +219,7 @@ def main():
             'xiaomi-band-11-4.100.139-4.100.155'
             if set(targets) == {'xiaomi-band-11-4.100.139', 'xiaomi-band-11-4.100.155'}
             else 'multi-device')
-        archive = stage / f'resource-hook-0.3.1-{archive_target}.zip'
+        archive = stage / f'resource-hook-0.3.2-{archive_target}.zip'
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
             for path in files + [stage / 'SHA256SUMS']:
                 bundle.write(path, path.relative_to(stage))

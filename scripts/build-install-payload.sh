@@ -107,7 +107,7 @@ metadata = {
     "receipt_module_version": manifest['module']['version_code'], "receipt_format_version": 2,
     "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi2",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",
-    "module_build_id": "resource-hook-0.3.1",
+    "module_build_id": "resource-hook-0.3.2",
     "gpu_recovery": "UNSUPPORTED", "framework_restart_safety": "UNSUPPORTED",
     "automatic_ui_restart": False, "complete_cache_refresh": False,
 }

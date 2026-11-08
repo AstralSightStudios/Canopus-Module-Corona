@@ -16,7 +16,7 @@ TARGETS = {
 }
 FIRMWARE = TARGETS[TARGET]  # Backward-compatible .139 default.
 MODULE_ID = "corona"
-MODULE_VERSION = 4
+MODULE_VERSION = 5
 MAX_ARTIFACT = 4194304
 
 

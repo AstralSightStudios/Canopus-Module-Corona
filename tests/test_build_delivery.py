@@ -76,7 +76,7 @@ class CanonicalDelivery(unittest.TestCase):
             manifest_path = Path(command[command.index('--manifest') + 1])
             manifest = tomllib.loads(manifest_path.read_text())
             self.assertEqual(manifest['module']['id'], 'corona')
-            self.assertEqual(manifest['module']['version_code'], 4)
+            self.assertEqual(manifest['module']['version_code'], 5)
             self.packaged_targets = manifest['targets']['include']
             for relative in manifest['resources']['files']:
                 self.assertEqual((manifest_path.parent / relative).read_bytes(),
@@ -116,7 +116,7 @@ class CanonicalDelivery(unittest.TestCase):
     def test_default_is_155_canopus_without_lua_or_watchface(self):
         self.invoke()
         self.assertEqual(self.packaged_targets, [BAND155])
-        self.assertTrue((self.output / 'corona-0.3.1.canopus').is_file())
+        self.assertTrue((self.output / 'corona-0.3.2.canopus').is_file())
         self.assertEqual((self.output / 'source' / self.png_input.relative_to(self.root)).read_bytes(),
                          self.png_input.read_bytes())
         self.assertFalse((self.output / 'watchface').exists())
@@ -130,12 +130,12 @@ class CanonicalDelivery(unittest.TestCase):
         self.assertEqual(metadata['native_firmware_suites'], {})
         self.assertIn('--firmware-tests', metadata['native_firmware_suites_not_run'][BAND155])
         self.assertEqual(metadata['delivery_format'], 'canopus')
-        self.assertEqual(metadata['package'], 'corona-0.3.1.canopus')
+        self.assertEqual(metadata['package'], 'corona-0.3.2.canopus')
         self.assertEqual(metadata['transport'], 'wearpacket-l2-cpc2')
         self.assertNotIn('native_install_targets', metadata)
-        self.assertIn('  corona-0.3.1.canopus\n', (self.output / 'SHA256SUMS').read_text())
+        self.assertIn('  corona-0.3.2.canopus\n', (self.output / 'SHA256SUMS').read_text())
         self.assertTrue(any(command[1:3] == ['package', 'verify'] and
-                            Path(command[-1]).name == 'corona-0.3.1.canopus'
+                            Path(command[-1]).name == 'corona-0.3.2.canopus'
                             for command, _ in self.commands))
 
     def test_aggregate_contains_all_selected_fresh_targets_without_transport_gate(self):
@@ -145,7 +145,7 @@ class CanonicalDelivery(unittest.TestCase):
         self.assertEqual(self.packaged_targets, selected)
         self.assertEqual(self.packaged_artifacts,
                          {target: self.artifact(target) for target in selected})
-        self.assertTrue((self.output / 'corona-0.3.1.canopus').is_file())
+        self.assertTrue((self.output / 'corona-0.3.2.canopus').is_file())
         metadata = json.loads((self.output / 'validation.json').read_text())
         self.assertEqual(metadata['targets'], selected)
         self.assertFalse(self.native_commands())
