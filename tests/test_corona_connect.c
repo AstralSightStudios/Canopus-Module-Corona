@@ -244,6 +244,16 @@ static void test_hash_and_install_recovery(void) {
     token=open_task(3,abc_hash,4,8);assert(ui.phase==4);
     teardown();
 }
+static void test_active_refusal_is_retryable(void) {
+    uint32_t token;setup();token=open_task(3,abc_hash,1,1);request(3,0,token,0,"abc",3);ticks(1);
+    install_result=-9;request(5,2,token,0,0,0);ticks(10);assert(ui.detail==9 && ui.phase==5);
+    /* ACTIVE describes the refused attempt's catalog state, not this session: a
+     * client that re-opens the same content resumes instead of stranding the
+     * transfer on a state only a delete could clear. */
+    token=open_task(3,abc_hash,2,3);assert(token && ui.phase==1 && !ui.detail && ui.written_offset==3);
+    install_result=1;request(5,4,token,0,0,0);ticks(10);assert(ui.phase==4 && !ui.detail);
+    teardown();
+}
 static void test_corruption_and_high_water(void) {
     uint32_t token;char name[512];setup();token=open_task(3,abc_hash,1,1);
     /* Either slot alone must retain every token already exposed to the peer. */
@@ -400,7 +410,7 @@ static void test_work_runs_within_one_tick(void) {
 }
 int main(void) {
     test_roundtrip();test_retry_and_barriers();test_backpressure_and_ack();test_short_write_failure();test_reboot_checkpoint();
-    test_hash_and_install_recovery();test_corruption_and_high_water();test_failed_open_and_limits();test_failed_open_shutdown();test_token_exhaustion();
+    test_hash_and_install_recovery();test_active_refusal_is_retryable();test_corruption_and_high_water();test_failed_open_and_limits();test_failed_open_shutdown();test_token_exhaustion();
     test_committed_install_checkpoint_failure();test_deleted_package_reinstall();test_cached_open_repairs_high_water();
     test_oversized_controls();test_ack_survives_control_reply();test_installer_busy_is_retryable();
     test_work_runs_within_one_tick();test_extraction_shares_descriptor();
