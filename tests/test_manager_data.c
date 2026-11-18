@@ -664,4 +664,41 @@ static void test_empty_install_and_read_failures(void) {
     assert(!rh_manager_data_mix_get(d,5,&item)&&!strcmp(item.choice,"@default"));
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
-int main(void) {test_empty_install_and_read_failures();test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+static void test_stale_install_journal(void) {
+    struct rh_manager_data *d=0;uint8_t hash[32]={11};char id[65];
+    /* A reference outlives the package it names: a mounted pack is deleted, and
+     * the retained journal still records the replacement that was legal then.
+     * Recovery must repair or drop it, never refuse every later install. */
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));
+    fixture("resource-active-generations.json","{\"version\":1,\"generations\":[],\"protectedThemes\":[\"gamma\"]}");
+    make_staging("stale",gamma);fail_rename_path="themes/gamma/7";
+    assert(rh_manager_data_install(d,"staging/stale",7u,hash,id)==-EIO);fail_rename_path=0;
+    assert(fs_exists(&ctx,"registry-install.pending")==1&&fs_exists(&ctx,"staging/stale/g.bin")==1);
+    assert(!rh_manager_data_refresh(d));
+    assert(fs_exists(&ctx,"registry-install.pending")==0&&fs_exists(&ctx,"themes/gamma/7/g.bin")==1);
+    assert(rh_manager_data_revision(d)==2u);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+
+    /* Orphan journal: staging was released and the package directory never
+     * appeared, so there is nothing to replay. It must not strand the catalog. */
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("orphan",gamma);
+    fail_rename_path="themes/gamma/7";assert(rh_manager_data_install(d,"staging/orphan",7u,hash,id)==-EIO);fail_rename_path=0;
+    assert(!fs_remove(&ctx,"staging/orphan/g.bin")&&!fs_remove(&ctx,"staging/orphan/corona.json"));
+    {char path[1024];assert(!resolve(path,"staging/orphan"));assert(!rmdir(path));}
+    assert(!rh_manager_data_refresh(d));
+    assert(fs_exists(&ctx,"registry-install.pending")==0&&fs_exists(&ctx,"themes/gamma/7")==0&&rh_manager_data_revision(d)==1u);
+    make_staging("fresh",gamma);fixture("staging/fresh/g.bin","G2");
+    assert(!rh_manager_data_install(d,"staging/fresh",7u,hash,id)&&!strcmp(id,"gamma"));
+    assert(fs_exists(&ctx,"themes/gamma/7/g.bin")==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+
+    /* A device left by an earlier build: the revision was already published while
+     * the journal stayed behind, so it can never be replayed. The registry wins. */
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("superseded",gamma);
+    fail_rename_path="themes/gamma/7";assert(rh_manager_data_install(d,"staging/superseded",7u,hash,id)==-EIO);fail_rename_path=0;
+    fixture("interconnect-themes.json","{\"version\":2,\"revision\":2,\"themes\":[{\"id\":\"alpha\",\"generation\":0}]}");
+    assert(!rh_manager_data_refresh(d)&&rh_manager_data_revision(d)==2u);
+    assert(fs_exists(&ctx,"registry-install.pending")==0&&fs_exists(&ctx,"themes/gamma/7")==0);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
+int main(void) {test_stale_install_journal();test_empty_install_and_read_failures();test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
