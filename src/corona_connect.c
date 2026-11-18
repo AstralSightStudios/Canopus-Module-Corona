@@ -346,8 +346,12 @@ static void process_open(struct rh_connect *r,const uint8_t *c) {
             rc=workspace(r);if(!rc)rc=open_archive(r,1);if(rc)goto failed;
         }
     } else if(r->p.phase==RH_XFER_PHASE_RECEIVING ||
-              (r->p.phase==RH_XFER_PHASE_ERROR && (r->p.detail==BUSY || r->p.detail==OFFSET || r->p.detail==IO))) {
-        /* Reopen and verify the committed prefix still exists before clearing IO. */
+              (r->p.phase==RH_XFER_PHASE_ERROR && (r->p.detail==BUSY || r->p.detail==OFFSET ||
+                                                    r->p.detail==IO || r->p.detail==ACTIVE))) {
+        /* Reopen and verify the committed prefix still exists before clearing IO.
+         * ACTIVE is included because it describes the previous attempt's catalog
+         * state, not this session: a client that saw the refusal and re-Opened the
+         * same content must be able to retry once that reference was released. */
         rc=close_archive(r);if(!rc)rc=open_archive(r,0);if(!rc)rc=workspace(r);if(rc)goto failed;
         r->p.phase=RH_XFER_PHASE_RECEIVING;r->p.detail=0;
     }
