@@ -124,6 +124,7 @@ CC="$CC" python3 "$ROOT/tests/test_platform_io.py"
 CC="$CC" python3 "$ROOT/tests/test_quickapp_icon_native.py"
 CC="$CC" python3 "$ROOT/tests/test_font_reload_targets.py"
 python3 "$ROOT/tests/test_build_delivery.py"
+python3 "$ROOT/tests/test_delivery.py" FirmwareSelection
 "$CC" -std=c11 -Wall -Wextra -Werror -I"$ROOT/include" \
     "$ROOT/src/resource_hook.c" "$ROOT/src/config.c" "$ROOT/tools/check_config.c" \
     -o "$ROOT/build/check-config"

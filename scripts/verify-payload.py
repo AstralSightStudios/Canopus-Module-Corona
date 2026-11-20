@@ -17,7 +17,8 @@ TARGETS = {
 }
 FIRMWARE = TARGETS[TARGET]  # Backward-compatible .139 default.
 MODULE_ID = "corona"
-# Version code tracks the module manifest so a release bump never desyncs verification.
+# Source builds follow the manifest; payload export replaces this binding with
+# the release's literal version code so the copied verifier stays independent.
 MODULE_VERSION = tomllib.loads((Path(__file__).resolve().parents[1] / 'Canopus.toml').read_text())['module']['version_code']
 MAX_ARTIFACT = 4194304
 
