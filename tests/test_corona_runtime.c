@@ -81,6 +81,10 @@ static struct canopus_services_v1 services;
 static const struct canopus_context_v1 ctx={.struct_size=sizeof(ctx),.services=&services,.fs=&fs,.mem=&mem,.connect=&connect_api,.time=&time_api};
 int rh_manager_ui_get_data(const struct canopus_context_v1 *c,struct rh_manager_data **out) {int rc=0;if(!catalog)rc=rh_manager_data_create(c,0,&catalog);if(!rc)*out=catalog;return rc;}
 int rh_manager_set_transfer_state(const struct rh_transfer_ui_state *s) {state=*s;return 0;}
+/* The mediator lives in module.c; this suite drives the runtime directly. */
+static int (*recorded_transfer_cancel)(void);
+void rh_module_set_transfer_cancel(int (*cancel)(void)) {recorded_transfer_cancel=cancel;}
+int rh_module_cancel_transfer(void) {return recorded_transfer_cancel ? recorded_transfer_cancel():CANOPUS_SVC_ERR_UNSUPPORTED;}
 static void assert_staging_empty(void) {
     struct canopus_fs_dirent entry;void *dir=fs_opendir(&ctx,"staging");int rc;
     assert(dir);

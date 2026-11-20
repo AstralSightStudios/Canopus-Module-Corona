@@ -18,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = os.environ.get('RESOURCE_HOOK_TARGET', 'xiaomi-band-11-4.100.139')
 PAYLOAD = Path(os.environ.get('RESOURCE_HOOK_PAYLOAD',
     ROOT / 'build/payload-0.3.2' / TARGET))
+# Release identity tracks the module manifest so a version bump never desyncs these checks.
+MODULE_VERSION = tomllib.loads((ROOT / 'Canopus.toml').read_text())['module']['version']
+PACKAGE = f'corona-{MODULE_VERSION}.canopus'
 spec = importlib.util.spec_from_file_location('verify_payload', ROOT / 'scripts/verify-payload.py')
 verifier = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verifier)
@@ -56,17 +59,20 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual(set(self.suites('xiaomi-band-11-4.100.179')), {'test_calendar_native'})
         self.assertEqual(set(self.suites('redmi-watch-6-3.100.043')), {'firmware_p65', 'firmware_p65_features', 'firmware_p65_font', 'test_p65_calendar_native', 'test_p65_blur'})
 
-    def test_p65_payload_release_metadata_without_compilation(self):
+    def write_payload_metadata(self, directory, target):
         script = (ROOT / 'scripts/build-install-payload.sh').read_text()
         block = re.search(r'python3 - "\$STAGE" "\$TARGET_ID" "\$FIRMWARE" "\$ROOT/Canopus.toml" <<\'PY\'\n(.*?)\nPY',
                           script, re.S)
         self.assertIsNotNone(block)
+        command = ['release-metadata', str(directory), target, verifier.TARGETS[target],
+                   str(ROOT / 'Canopus.toml')]
+        with mock.patch.object(sys, 'argv', command), mock.patch.dict(os.environ, {}, clear=True):
+            exec(compile(block[1], 'payload-release-metadata', 'exec'), {})
+
+    def test_p65_payload_release_metadata_without_compilation(self):
         target = 'redmi-watch-6-3.100.043'
         with tempfile.TemporaryDirectory(prefix='p65-release-metadata-') as temporary:
-            command = ['release-metadata', temporary, target, verifier.TARGETS[target],
-                       str(ROOT / 'Canopus.toml')]
-            with mock.patch.object(sys, 'argv', command), mock.patch.dict(os.environ, {}, clear=True):
-                exec(compile(block[1], 'payload-release-metadata', 'exec'), {})
+            self.write_payload_metadata(temporary, target)
             metadata = json.loads((Path(temporary) / 'release.json').read_text())
         self.assertEqual(metadata['target'], target)
         self.assertEqual(metadata['firmware_sha256'], verifier.TARGETS[target])
@@ -75,6 +81,25 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
         self.assertEqual(metadata['target_features'][target]['device_status'], 'NOT_PROBED')
         self.assertTrue(metadata['target_features'][target]['calendar'])
+
+    def test_exported_verifier_runs_without_a_checkout_and_pins_the_release(self):
+        with tempfile.TemporaryDirectory(prefix='standalone-verifier-') as temporary:
+            directory = Path(temporary)
+            self.write_payload_metadata(directory, TARGET)
+            detached = directory / 'detached'
+            detached.mkdir()
+            script = detached / 'verify-payload.py'
+            shutil.move(directory / script.name, script)
+            result = subprocess.run([sys.executable, str(script), '--help'],
+                                    cwd=detached, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # A different nearby checkout must not change an exported pin.
+            (directory / 'Canopus.toml').write_text('[module]\nversion_code = 999\n')
+            spec = importlib.util.spec_from_file_location('standalone_payload', script)
+            exported = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(exported)
+            self.assertEqual(exported.MODULE_VERSION, verifier.MODULE_VERSION)
+            self.assertIn('  verify-payload.py\n', (directory / 'SHA256SUMS').read_text())
 
     def test_unknown_native_target_refused(self):
         with self.assertRaisesRegex(ValueError, 'unsupported target'):
@@ -94,6 +119,21 @@ class Delivery(unittest.TestCase):
 
     def test_valid_receipt(self):
         self.assertEqual(len(self.check()), 64)
+
+    def test_standalone_verifier_accepts_payload_and_rejects_wrong_version(self):
+        script = self.directory / 'verify-payload.py'
+        shutil.copyfile(PAYLOAD / script.name, script)
+        command = [sys.executable, str(script), str(self.directory), '--target', TARGET]
+        result = subprocess.run(command, cwd=self.directory, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('payload verified:', result.stdout)
+        receipt = self.directory / 'receipt.bin'
+        data = bytearray(receipt.read_bytes())
+        struct.pack_into('<I', data, 20, verifier.MODULE_VERSION + 1)
+        receipt.write_bytes(data)
+        result = subprocess.run(command, cwd=self.directory, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('version or size mismatch', result.stderr)
 
     def test_wrong_expected_target(self):
         other = next(target for target in verifier.TARGETS if target != TARGET)
@@ -131,7 +171,7 @@ class Delivery(unittest.TestCase):
 
     def test_package_contains_the_verified_payload_and_receipt(self):
         import tarfile
-        with tarfile.open(PAYLOAD / 'corona-0.3.3.canopus') as archive:
+        with tarfile.open(PAYLOAD / PACKAGE) as archive:
             self.assertEqual(archive.extractfile(f'artifacts/{TARGET}/module.elf').read(),
                              (PAYLOAD / 'resource-hook.elf').read_bytes())
             self.assertEqual(archive.extractfile(f'receipts/{TARGET}.cmi').read(),
@@ -147,7 +187,7 @@ class Delivery(unittest.TestCase):
         manifest = tomllib.loads((ROOT / 'Canopus.toml').read_text())
         metadata = json.loads((PAYLOAD / 'release.json').read_text())
         self.assertEqual(manifest['module']['id'], 'corona')
-        self.assertEqual(manifest['module']['version'], '0.3.3')
+        self.assertEqual(manifest['module']['version'], MODULE_VERSION)
         self.assertEqual(metadata['project_id'], manifest['module']['id'])
         self.assertEqual(metadata['runtime_id'], verifier.MODULE_ID)
         self.assertEqual(metadata['version'], manifest['module']['version'])
@@ -165,7 +205,7 @@ class Delivery(unittest.TestCase):
             })
             self.assertEqual(metadata['background_targets'], ['launcher', 'control_center', 'notifications', 'widgets'])
             self.assertEqual(metadata['background_device_status'], 'NOT_PROBED')
-        self.assertEqual(metadata['module_build_id'], 'resource-hook-0.3.3')
+        self.assertEqual(metadata['module_build_id'], f'resource-hook-{MODULE_VERSION}')
         self.assertEqual(metadata['gpu_recovery'], 'UNSUPPORTED')
         self.assertEqual(metadata['framework_restart_safety'], 'UNSUPPORTED')
         self.assertFalse(metadata['automatic_ui_restart'])

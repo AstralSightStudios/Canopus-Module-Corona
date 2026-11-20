@@ -447,6 +447,27 @@ static void installed(struct rh_connect *r) {
     remember_terminal(r);abort_install(r);(void)close_archive(r);free_workspace(r);
     persist_installed(r);r->ack_dirty=1;
 }
+/* Device-side cancellation from the Manager UI, mirroring the remote CANCEL
+ * op: the installer's durable intent is revoked first, so a registry that
+ * already committed becomes INSTALLED instead of being undone, and only a
+ * fully revoked intent reaches the CANCELED terminal. The lease and token are
+ * retained exactly like the remote path, so the peer can still QUERY the
+ * terminal state and restart the same content through a new OPEN. */
+int rh_connect_cancel(struct rh_connect *r) {
+    struct progress before;int rc;
+    if(!r || r->notifying)return -(int)BAD;
+    if(!r->task || r->p.phase==RH_XFER_PHASE_INSTALLED || r->p.phase==RH_XFER_PHASE_CANCELED)return 0;
+    before=r->p;
+    rc=r->hooks.install_cancel ? r->hooks.install_cancel(r->hooks.cookie,r->hash):0;
+    if(rc==1) { installed(r);notify(r);return 0; }
+    if(rc<0)return rc;
+    r->p.phase=RH_XFER_PHASE_CANCELED;r->p.detail=0;
+    rc=save_record(r);
+    if(rc) { r->p=before;latch(r,IO);notify(r);return -(int)IO; }
+    r->used=r->done=r->frames=0;r->flush_requested=0;abort_install(r);(void)close_archive(r);
+    (void)r->ctx->fs->remove(r->ctx,r->archive);free_workspace(r);remember_terminal(r);
+    r->ack_dirty=1;notify(r);return 0;
+}
 static void verify_step(struct rh_connect *r) {
     int32_t n;uint32_t wanted;uint8_t digest[32];int rc;
     if(workspace(r) || open_archive(r,0)) { latch(r,IO);return; }

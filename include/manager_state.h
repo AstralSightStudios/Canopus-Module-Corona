@@ -51,6 +51,13 @@ void rh_manager_get_transfer_state(struct rh_transfer_ui_state *out);
 int rh_manager_set_transfer_state(const struct rh_transfer_ui_state *state);
 int rh_manager_subscribe(rh_manager_state_listener listener, void *cookie);
 void rh_manager_unsubscribe(rh_manager_state_listener listener, void *cookie);
+/* Device-side cancel of the active transfer task. The Connect runtime
+ * registers its handler at start and clears it at stop; without one the call
+ * reports CANOPUS_SVC_ERR_UNSUPPORTED instead of failing silently. Returns
+ * 0 when the task is revoked (or nothing was active), a service error
+ * otherwise; the UI observes the new phase through the transfer snapshot. */
+void rh_module_set_transfer_cancel(int (*cancel)(void));
+int rh_module_cancel_transfer(void);
 /* Config generation must already be prepared. Nonzero generation identifies
  * this transaction. BUSY rejects without replacing the active transaction.
  * Accepted requests return 0; completion is observed in the status snapshot. */

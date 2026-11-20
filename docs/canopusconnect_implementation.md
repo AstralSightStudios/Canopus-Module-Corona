@@ -25,7 +25,9 @@ python3 scripts/test-corona-runtime.py
 
 后台定时器不保证 CPU 在息屏后一直唤醒。原生文件调用和 manifest / 登记事务的单次耗时仍须实机测量。尚未执行蓝牙实传、断电恢复、flash 延迟和设备堆峰值验收。ZIP 目录重复与重叠校验用固定 RAM、按条目回读实现，总体为 O(n²)，文件很多时安装总耗时需要测量。接收期间的流式解压与 RX 处理共用 owner，6 ms 预算是否压低接收吞吐需实机测量。校验与安装的 6 ms 预算按实际 wall clock 计量：解压仍以 512 字节块写盘，flash 延迟越高，单 tick 能推进的步数越少，这是设计上的让出点。
 
-安装发布点是 v2 `interconnect-themes.json` 的原子替换，包含 revision、themeId、安装代次和原始 ZIP SHA；兼容旧数组索引。`registry-install.pending` 仅在完整校验与同步后写入，恢复后才能清理它引用的 staging；CANCEL 在发布前撤销该记录，发布后保持 INSTALLED。发布后的排序或接收记录保存错误不撤销安装结果。恢复只在磁盘允许时才重放：目标目录与 staging 都不在（孤立记录），或该 revision 已被其他提交占用时，丢弃陈旧记录而不是让每次刷新都失败；引用闸门只属于 `install_begin`，恢复阶段不再因残留引用拒绝重放。旧安装代次在覆盖更新后暂保留，卸载主题时一并回收；活动引用仍受原生管理器的活动配置与刷新事务保护。
+安装发布点是 v2 `interconnect-themes.json` 的原子替换，包含 revision、themeId、安装代次和原始 ZIP SHA；兼容旧数组索引。`registry-install.pending` 仅在完整校验与同步后写入，恢复后才能清理它引用的 staging；CANCEL 在发布前撤销该记录，发布后保持 INSTALLED。发布后的排序或接收记录保存错误不撤销安装结果。恢复只在磁盘允许时才重放：目标目录与 staging 都不在（孤立记录），或该 revision 已被其他提交占用时，丢弃陈旧记录而不是让每次刷新都失败。新日志在写入前记录 `previousGeneration`：数字表示当时存在的旧安装代次（0 为旧目录布局），null 表示仅经 NOTFOUND 确认的不存在。恢复时旧代次已消失则丢弃陈旧意图，安装前已不存在的包则允许带悬空引用的新装；rename 创建的父目录不视为旧包。重放前仍重查引用与磁盘上的权威 registry，仍存在且被引用的旧包拒绝重放；探测失败一律视为错误而不是削弱保护。缺少该字段的旧日志使用当前 registry 判断旧包代次；未登记且已 rename 的候选目录可以完成发布。旧日志若仍有 staging、旧路径缺失且带引用，无法分辨安装前悬空与安装后删除，保守丢弃意图并保留 staging，后续可重新安装。旧安装代次在覆盖更新后暂保留，卸载主题时一并回收；活动引用仍受原生管理器的活动配置与刷新事务保护。
+
+设备端取消入口（0.3.3 后新增）：原生 Manager 资源页的传输横幅是取消入口——活动阶段（接收 / 校验 / 解压登记）与已中断错误状态点击横幅进入「取消传输」确认页，已取消状态仍是点击即收起。确认页调用 `rh_module_cancel_transfer()`（module.c mediator），由 Connect runtime 注册的处理函数转发到 `rh_connect_cancel()`；接收器语义与远端 CANCEL op 完全一致：先撤销 `registry-install.pending` 意图，登记已提交则转 INSTALLED，仅完整撤销才进入 CANCELED 并删除 `incoming/archive.zip`；lease 与 token 保留，发送端仍可 QUERY 终态并用新 OPEN 重启同内容任务。该入口存在的目的是解除「设备上残留未结束任务、不同内容 OPEN 一律 BUSY 且发送端无从拿到 token」的死锁。未注册处理器的构建（验收模拟器）返回 UNSUPPORTED，确认页显示原因而不是静默失败。
 
 下文的队列容量和吞吐数字是原实验基线：相邻 Canopus 当前已采用 16 槽 RX（分配失败回退 4 槽）、4 槽响应队列及每个 owner tick 最多处理 4 请求。新增 L2 修复在同一会话发送失败时保留明文队头，发送时使用独立副本，避免原厂发送接口原地加密后重试造成二次加密；会话失效才丢弃。该修复的 BT 栈帧增加 552 字节，设备栈余量尚未实测。不得将原 4 槽模型直接套用到新固件或据此增加手机窗口。
 
@@ -35,6 +37,7 @@ python3 scripts/test-corona-runtime.py
 - ZIP 读取器通过 224 个 ASan/UBSan 用例，覆盖 Store / Deflate、descriptor、恶意路径、重复与范围重叠、CRC、组件长度以及 I/O 故障。每个默认模式用例另以随机增长的可读前缀流式重跑，失败时整包回退，结论与解压结果须与整包路径一致。
 - 原生登记三目标 host 测试验证逐步 I/O 预算、提交前后恢复、取消撤销、提交后排序失败和损坏资源重装。
 - 完整 runtime 集成测试用真实 CRPack 验证接收到登记、UI apply 与安装交错、失败后重启恢复、CANCEL 与 journal 交错。流式解压与接收缓冲同时存在后，当前小包场景模块动态分配峰值约 58.5 KiB，不包括固件队列、文件系统内部内存与调用栈，也不是设备堆上限保证。
+- 设备端取消有两条 host 测试线：`test_corona_connect.c` 覆盖 `rh_connect_cancel` 的接收中撤销、卡死错误解除、hook 撤销失败可重试、登记已提交转 INSTALLED、记录写失败锁存 IO；`test_manager_ui.c` 覆盖横幅进入确认页、确认调用 mediator、失败文案与多页路由计数。
 
 ## 1. 发送窗口的依据
 

@@ -173,6 +173,19 @@ int rh_module_request_reload_from(uint32_t generation,const char *dir) {
 }
 int rh_module_request_reload(uint32_t generation) {return rh_module_request_reload_from(generation,"unused");}
 int rh_manager_set_transfer_state(const struct rh_transfer_ui_state *s) {transfer=*s;listener(listener_cookie,RH_MANAGER_CHANGED_TRANSFER);return 0;}
+    /* Mediator stubs: a successful device-side cancel publishes the CANCELED
+       phase exactly like the real receiver's notify path does. */
+static int (*transfer_cancel_fn)(void);static uint32_t cancels;static int cancel_rc;
+static int fake_transfer_cancel(void) {
+    if(cancel_rc) return cancel_rc;
+    transfer.phase=RH_XFER_PHASE_CANCELED;transfer.detail=0;
+    listener(listener_cookie,RH_MANAGER_CHANGED_TRANSFER);return 0;
+}
+void rh_module_set_transfer_cancel(int (*fn)(void)) {transfer_cancel_fn=fn;}
+int rh_module_cancel_transfer(void) {
+    if(!transfer_cancel_fn) return CANOPUS_SVC_ERR_UNSUPPORTED;
+    cancels++;return transfer_cancel_fn();
+}
 int rh_manager_assets_install(const struct canopus_context_v1 *c) {(void)c;return 0;}
 int rh_manager_asset_ensure(enum rh_manager_asset a,const char **path) {(void)a;*path="/data/canopus/m.corona/assets/image.bin";return 0;}
 const char *rh_manager_asset_path(enum rh_manager_asset a) {(void)a;return "/data/canopus/m.corona/assets/image.bin";}
@@ -532,6 +545,26 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     assert(active_ui->committed.visuals[find_key(10)].y==0);
     assert(active_ui->committed.layouts[find_key(10)].height==(width>=300?(int)height-56:444));
     s.phase=RH_XFER_PHASE_RECEIVING;s.percent=20;assert(!rh_manager_set_transfer_state(&s));pump();find_text("正在接收 · 20%");
+    /* The active banner is the cancel entry: tapping it opens the CANCEL
+       confirmation page, whose action revokes the task through the mediator
+       and returns to the list showing the canceled banner, which then
+       dismisses like any other terminal state. */
+    rh_module_set_transfer_cancel(fake_transfer_cancel);
+    tap(60,40000);assert_route(6);find_text("传输任务");
+    visible_copy("已接收的内容将被丢弃");
+    activate_text("确认取消");pump();assert(cancels==1);assert_route(1);
+    find_text("任务已取消");
+    tap(60,40100);assert_no_text("任务已取消");
+    /* A latched error keeps its banner until it is canceled from the page:
+       dismissing it can never clear the task that blocks new content. */
+    s.phase=RH_XFER_PHASE_ERROR;s.detail=2;assert(!rh_manager_set_transfer_state(&s));pump();
+    find_text("传输中断");
+    tap(60,40200);assert_route(6);
+    back();assert_route(1);find_text("传输中断");
+    cancel_rc=5;tap(60,40300);assert_route(6);
+    activate_text("确认取消");pump();visible_copy("取消失败，请稍后重试。");assert(cancels==2);
+    cancel_rc=0;activate_text("确认取消");pump();assert(cancels==3);assert_route(1);
+    find_text("任务已取消");
     {struct rh_transfer_ui_state idle={0};assert(!rh_manager_set_transfer_state(&idle));pump();assert_no_text("正在接收 · 20%");}
     host_back();assert_route(0);assert(!close_count);
     entry->on_close(&context,0);
@@ -558,7 +591,8 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
         if(i==4) {assert(transfer.phase==RH_XFER_PHASE_ERROR && transfer.detail==6);}
         if(i==5) {assert(transfer.phase==RH_XFER_PHASE_CANCELED);}
     }
-    assert(probe_value("routes_mask")==63 && probe_value("phases_mask")==127);
+    /* Seven routes visited: the cancel confirmation page is part of the flow. */
+    assert(probe_value("routes_mask")==127 && probe_value("phases_mask")==127);
     /* The four intentional backend rejections above are latched even though
        later renders recover. A clean emulator scenario expects zero. */
     assert(probe_value("render_failures")==4);
@@ -572,7 +606,7 @@ event(10,CANOPUS_UI_EVENT_SCROLL,0,0,0,208);
     multi_page=1;routed_routes=0;context.ui=&ui_api_multi;
     active_ui=malloc(sizeof(*active_ui));assert(active_ui);
     assert(!canopus_ui_context_init(active_ui,&backend,0,dispatch,0));
-    assert(entry->page_count==6);
+    assert(entry->page_count==7);
     assert(!entry->on_open(&context,active_ui,0));assert_route(0);
     assert(!(active_ui->committed.nodes[find_key(2)].flags&CANOPUS_UI_NODE_FLAG_HEADER_BACK));
     activate_text("资源管理");assert_route(1);

@@ -237,6 +237,19 @@ void rh_manager_unsubscribe(rh_manager_state_listener listener, void *cookie) {
     }
 }
 
+/* Device-side transfer cancellation: the UI publishes intent, the Connect
+ * runtime owns the receiver. The mediator keeps the UI free of a direct
+ * runtime dependency, so acceptance emulators without a receiver report
+ * UNSUPPORTED instead of failing silently. */
+static int (*manager_transfer_cancel)(void);
+void rh_module_set_transfer_cancel(int (*cancel)(void)) {
+    manager_transfer_cancel = cancel;
+}
+int rh_module_cancel_transfer(void) {
+    return manager_transfer_cancel ? manager_transfer_cancel()
+                                   : CANOPUS_SVC_ERR_UNSUPPORTED;
+}
+
 static void *snapshot_alloc(void *cookie, uint32_t size) {
     (void)cookie;
     return rh_platform_alloc(size);

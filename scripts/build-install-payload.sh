@@ -85,18 +85,27 @@ for evidence in "$ROOT/targets/$TARGET_ID"/*; do
         *.json|*.md) cp "$evidence" "$STAGE/evidence/" ;;
     esac
 done
-cp "$ROOT/scripts/verify-payload.py" "$STAGE/verify-payload.py"
 python3 - "$STAGE" "$TARGET_ID" "$FIRMWARE" "$ROOT/Canopus.toml" <<'PY'
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import sys
 import tomllib
 p = Path(sys.argv[1])
 manifest_path = Path(sys.argv[4])
 manifest = tomllib.loads(manifest_path.read_text())
+# The distributed verifier pins this release without depending on the checkout.
+verifier_source = (manifest_path.parent / 'scripts/verify-payload.py').read_text()
+verifier_source, replacements = re.subn(
+    r'^MODULE_VERSION = .+$',
+    f"MODULE_VERSION = {manifest['module']['version_code']!r}",
+    verifier_source, flags=re.MULTILINE)
+if replacements != 1:
+    raise ValueError('expected one module version binding in payload verifier')
+(p / 'verify-payload.py').write_text(verifier_source)
 options = runpy.run_path(str(manifest_path.parent / 'scripts/build_options.py'))
 metadata = {
     **options['feature_metadata']([sys.argv[2]]),
@@ -107,7 +116,7 @@ metadata = {
     "receipt_module_version": manifest['module']['version_code'], "receipt_format_version": 2,
     "target": sys.argv[2], "firmware_sha256": sys.argv[3], "format": "elf-cmi2",
     "lifecycle": "resident-after-activation", "physical_device": "NOT_PROBED",
-    "module_build_id": "resource-hook-0.3.3",
+    "module_build_id": "resource-hook-" + manifest['module']['version'],
     "gpu_recovery": "UNSUPPORTED", "framework_restart_safety": "UNSUPPORTED",
     "automatic_ui_restart": False, "complete_cache_refresh": False,
 }
