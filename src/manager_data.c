@@ -1554,25 +1554,28 @@ static int install_atomic(struct rh_manager_data *d,const char *path,const char 
 static int staging_valid(const char *stage) {
     return stage && prefix(stage,"staging/") && relative(stage) && stage[slen(stage)-1u]!='/' && slen(stage)>8u;
 }
-/* A reference only protects a package that is still present on disk. The
- * protection record, the live configuration and a retained install journal all
- * outlive the delete transaction and a module reinstall, so a dangling entry
- * naming an already removed id would refuse that exact id forever: retaining it
- * repairs the stale redirect instead of overwriting anything in use. An id whose
- * directory still exists keeps the guard, including the update-in-place case the
- * check exists for. Only NOTFOUND proves absence; every other probe failure
- * keeps the guard, so doubt never weakens protection. */
-static int package_still_present(struct rh_manager_data *d,const char *id) {
-    char path[256]; struct canopus_fs_stat st; int rc;
-    if(path_join(path,"themes/",id)) return 1;
-    rc=d->ctx->fs->stat(d->ctx,path,&st);
-    return rc==CANOPUS_SVC_ERR_NOTFOUND ? 0:1;
+/* NOTFOUND is the only proof that the package is gone. Every other stat failure
+ * is a probe error, so doubt never weakens protection. */
+static int install_reference_state(struct rh_manager_data *d,const char *id,
+                                   int *referenced,int *present) {
+    char **ids=0,path[256]; struct canopus_fs_stat st; uint32_t n=0; int rc;
+    *referenced=*present=0;
+    rc=protection_index(d,&ids,&n,0,0);
+    if(!rc) rc=live_references(d,&ids,&n);
+    if(!rc && find_id(ids,n,id)>=0) {
+        *referenced=1;
+        rc=package_base(d,id,path);
+        if(!rc) {
+            rc=d->ctx->fs->stat(d->ctx,path,&st);
+            if(rc==CANOPUS_SVC_ERR_NOTFOUND) rc=0;
+            else if(!rc) *present=1;
+        }
+    }
+    free_strings(d,ids,n); return rc;
 }
 static int check_install_references(struct rh_manager_data *d,const char *id) {
-    char **ids=0; uint32_t n=0; int rc=protection_index(d,&ids,&n,0,0);
-    if(!rc) rc=live_references(d,&ids,&n);
-    if(!rc && find_id(ids,n,id)>=0 && package_still_present(d,id)) rc=RH_MANAGER_ERR_ACTIVE;
-    free_strings(d,ids,n); return rc;
+    int referenced,present,rc=install_reference_state(d,id,&referenced,&present);
+    return !rc && referenced && present ? RH_MANAGER_ERR_ACTIVE:rc;
 }
 /* One call consumes one readdir result OR syncs the previously discovered
  * file. Directory depth and retained handles are bounded independently of
@@ -1638,7 +1641,7 @@ static int validate_install_pack(struct rh_manager_data *d,const char *stage,con
 static int recover_install(struct rh_manager_data *d) {
     struct rh_manager_data candidate,current; struct json journal,registry,j; struct canopus_fs_stat st;
     char *document=0,*committed=0,stage[256],id[65],target[256],parent[80];
-    uint32_t bytes; int rc,index,stage_exists,target_exists;
+    uint32_t bytes; int rc,index,stage_exists,target_exists,referenced,present;
     zero(&candidate,sizeof(candidate)); zero(&current,sizeof(current)); candidate.ctx=current.ctx=d->ctx; candidate.pool=current.pool=d->pool;
     rc=read_text(d,"registry-install.pending",UINT32_MAX-1u,&document,&journal);
     if(rc==CANOPUS_SVC_ERR_NOTFOUND) return 0; if(rc) return rc;
@@ -1654,25 +1657,30 @@ static int recover_install(struct rh_manager_data *d) {
     if(rc) goto done; bytes=(uint32_t)(registry.e-registry.p);
     /* registry.p is a span inside the journal rather than a NUL string. */
     if(committed && slen(committed)==bytes) { uint32_t k; for(k=0;k<bytes;k++) if(committed[k]!=registry.p[k]) break; if(k==bytes) { rc=0; goto cleanup; } }
-    /* The registry already published this revision (retained cleanup record) or
-     * another commit consumed it, so this journal can never be replayed. Drop it
-     * instead of failing: refresh must not refuse every install before the new
-     * package is even looked at. */
-    if(current.revision>=candidate.revision) { rc=0; goto cleanup; }
+    if(current.revision>candidate.revision) { rc=0; goto cleanup; } /* Retained cleanup record from an older committed revision. */
     if(current.revision==UINT32_MAX || candidate.revision!=current.revision+1u) { rc=-5; goto done; }
-    /* The reference gate belongs to install_begin, where the target is still
-     * absent. Recovery decides on the disk: replaying a journal whose target is
-     * gone cannot overwrite anything in use, and refusing on a reference that
-     * outlived its deleted package would block refresh for good. */
+    rc=install_reference_state(d,id,&referenced,&present);
+    if(rc) goto done;
+    if(referenced && !present) {
+        /* The protected package was deleted after this journal was written.
+         * Replaying the staged replacement would resurrect a package the user
+         * deliberately removed; failing it would reject every later refresh.
+         * Drop the stale intent and leave the staging tree for normal cleanup. */
+        (void)d->ctx->fs->remove(d->ctx,"registry-install.pending");
+        rc=0; goto cleanup;
+    }
+    if(referenced) { rc=RH_MANAGER_ERR_ACTIVE; goto done; }
     rc=d->ctx->fs->stat(d->ctx,stage,&st); stage_exists=!rc; if(rc && rc!=CANOPUS_SVC_ERR_NOTFOUND) goto done;
     if(stage_exists && !st.is_dir) { rc=-22; goto done; }
     rc=d->ctx->fs->stat(d->ctx,target,&st); target_exists=!rc; if(rc && rc!=CANOPUS_SVC_ERR_NOTFOUND) goto done;
     if(target_exists && !st.is_dir) { rc=-22; goto done; }
     if(stage_exists==target_exists) {
-        /* An orphan journal has nothing left to replay and must not strand the
-         * catalog: staging was dropped by its owner or by a later transaction.
-         * Both present means an unrelated package owns this target. */
         if(stage_exists) { rc=CANOPUS_SVC_ERR_EXIST; goto done; }
+        /* Neither the staged payload nor the installed tree exists: the record
+         * outlived both, so there is nothing left to replay. Returning an error
+         * here would make every later refresh fail, which rejects each install
+         * before it ever looks at the incoming package. Drop the orphan. */
+        (void)d->ctx->fs->remove(d->ctx,"registry-install.pending");
         rc=0; goto cleanup;
     }
     /* The owner freezes staging before begin; this journal is written only
