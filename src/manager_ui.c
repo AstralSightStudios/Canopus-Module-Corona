@@ -6,8 +6,9 @@
 
 #define ON (CANOPUS_UI_NODE_FLAG_VISIBLE | CANOPUS_UI_NODE_FLAG_ENABLED)
 #define TRY(call) do { int _r = (call); if (_r) return _r; } while (0)
-enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, DELETE, ROUTES };
+enum { INDEX, RESOURCES, DETAIL, MIX, SELECT, DELETE, CANCEL, ROUTES };
 enum { EV_BACK=1, EV_RESOURCES, EV_MIX, EV_RELOAD, EV_DELETE, EV_SCROLL, EV_DISMISS,
+       EV_CANCEL,
        EV_ORDER=1000, EV_MIX_ITEM=1000000, EV_OPTION=2000000, EV_CHOOSE=3000000 };
 enum { KEY_SCROLL=10, KEY_ACTION=30, KEY_BANNER=60, KEY_ROW=1000, OPTION_SLOTS=5,
        ROW_STEP=104, BANNER_H=96, WINDOW=7, EDGE=42, SLOP=8 };
@@ -120,6 +121,7 @@ static void write_probe(int rc) {
 }
 #endif
 static int render(void);
+static int build_cancel(struct canopus_ui_tree_v1 *t);
 static void set_error(const char *fallback) {
     const char *s=U.data?rh_manager_data_error(U.data):0;
     copy(U.error,sizeof(U.error),s && *s?s:fallback);
@@ -245,6 +247,7 @@ static int load_route(uint32_t route,int refresh) {
         rc=rh_manager_data_metadata(U.data,U.detail_id,&U.metadata);
         if(!rc) {U.delete_blocked=rh_manager_data_delete_check(U.data,U.detail_id);U.confirm_error[0]=0;}
     }
+    if(!rc && route==CANCEL) U.confirm_error[0]=0;
     if(!rc && route==RESOURCES) U.count=rh_manager_data_order_count(U.data);
     if(!rc && route==MIX) rc=rh_manager_data_mix_count(U.data,&U.count);
     if(!rc && route==SELECT) rc=rh_manager_data_option_count(U.data,U.mix_key,&U.count);
@@ -632,6 +635,22 @@ static const char *transfer_error(uint8_t detail) {
     default:return "传输中断，请重新连接后重试";
     }
 }
+/* A latched error keeps the task active in the receiver, so it still blocks a
+   different-content OPEN; the cancel page is how the user clears it. */
+static int transfer_cancelable(int phase) {
+    return (phase>=RH_XFER_PHASE_RECEIVING && phase<=RH_XFER_PHASE_INSTALLING) ||
+           phase==RH_XFER_PHASE_ERROR;
+}
+static const char *transfer_phase_title(int phase) {
+    switch(phase) {
+    case RH_XFER_PHASE_RECEIVING:return "正在接收";
+    case RH_XFER_PHASE_VERIFYING:return "正在校验完整性";
+    case RH_XFER_PHASE_INSTALLING:return "正在解压并登记";
+    case RH_XFER_PHASE_INSTALLED:return "已完成";
+    case RH_XFER_PHASE_CANCELED:return "已取消";
+    default:return "已中断";
+    }
+}
 /* Left-aligned UTF-8 wrap with a caller-owned line budget: the banner clamps
    its protocol errors to the two lines its card has room for, while the
    confirmation page spends up to four on a full sentence. */
@@ -655,8 +674,10 @@ static int wrap_lines(struct canopus_ui_tree_v1 *t,uint32_t key,const char *s,in
     return 0;
 }
 /* Transfer progress is pinned above the resources list instead of owning a
-   page: the receiver runs headless, so this banner is a passive surface that
-   never gates a transfer, and the idle phase deliberately shows nothing. */
+   page: the receiver runs headless, so this banner never gates a transfer,
+   and the idle phase deliberately shows nothing. An active phase turns the
+   card into the cancel entry (its confirmation lives on the CANCEL route);
+   error states keep their tap-to-dismiss behaviour. */
 static int banner_active(void) {
     int phase=U.transfer.phase;
     if(U.route!=RESOURCES) return 0;
@@ -674,15 +695,18 @@ static int build_banner(struct canopus_ui_tree_v1 *t) {
         title="传输中断";
         message=phase==RH_XFER_PHASE_CANCELED?"任务已取消":transfer_error(U.transfer.detail);
     }
-    /* The card is its own dismiss target and its click is the release inside
-       slop, like the bottom image buttons. Progress states carry no event. */
-    TRY(component(t,KEY_BANNER,CANOPUS_UI_NODE_LIST,"","",phase>=RH_XFER_PHASE_ERROR?EV_DISMISS:0,ON));
+    /* The card is its own target and its click is the release inside slop,
+       like the bottom image buttons. An active or errored task opens the
+       cancel page; only a finished cancellation is a plain dismiss. */
+    TRY(component(t,KEY_BANNER,CANOPUS_UI_NODE_LIST,"","",
+                  phase==RH_XFER_PHASE_CANCELED?EV_DISMISS:EV_CANCEL,ON));
     TRY(box(t,KEY_BANNER,(int)U.row_width,BANNER_H,((int)U.width-(int)U.row_width)/2,0,0x222222,1,24,0));
     TRY(label_box(t,KEY_BANNER+1,title,(int)U.row_width-28,34,14,10,22,0xffffff));
     if(phase>=RH_XFER_PHASE_RECEIVING && phase<=RH_XFER_PHASE_INSTALLING) {
         struct canopus_ui_component_props_v1 p={sizeof(p),"",0,"",0,0,ON,phase==RH_XFER_PHASE_RECEIVING?U.transfer.percent:100,0,100,0,0};
         TRY(U.ctx->ui->component(t,KEY_BANNER+2,CANOPUS_UI_NODE_PROGRESS,&p));
         TRY(box(t,KEY_BANNER+2,(int)U.row_width-32,12,16,58,0,0,-1,0));
+        TRY(label_box(t,KEY_BANNER+3,"点击取消传输",(int)U.row_width-28,21,14,72,17,0xc5cbd5));
     } else TRY(wrap_lines(t,KEY_BANNER+2,message,44,20,0xc5cbd5,2));
     return U.ctx->ui->end(t);
 }
@@ -701,7 +725,7 @@ static int translate_rows(void) {
     return 0;
 }
 static int render(void) {
-    static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源","删除资源"};
+    static const char *const titles[]={"Corona","资源管理","资源详情","混搭微调","选择来源","删除资源","取消传输"};
     struct canopus_ui_tree_v1 *t;const char *title=U.route==SELECT && U.mix_title[0]?U.mix_title:titles[U.route];int rc;
     struct canopus_ui_navigation_page_props_v1 p={sizeof(p),title,len(title)};
     /* The root page is the app, not a sub-view: the stock firmware apps keep
@@ -729,6 +753,7 @@ static int render(void) {
         case DETAIL:rc=build_detail(t);break;
         case SELECT:rc=build_choices(t);break;
         case DELETE:rc=build_confirm(t);break;
+        case CANCEL:rc=build_cancel(t);break;
         default:rc=CANOPUS_UI_ERR_ARGUMENT;break;
         }
     }
@@ -803,6 +828,7 @@ static int back(void) {
     if(U.route==INDEX) return U.ctx->ui->route?0:U.ctx->ui->close_page(U.ctx);
     if(U.route==DETAIL) return navigate(RESOURCES,1);
     if(U.route==DELETE) return navigate(DETAIL,0);
+    if(U.route==CANCEL) return navigate(RESOURCES,0);
     if(U.route==SELECT) return navigate(MIX,0);
     return navigate(INDEX,0);
 }
@@ -860,18 +886,17 @@ static int request_reload(void) {
     rh_module_get_status_snapshot(&U.status);return render();
 }
 /* The confirmation action is a stock ACTION_ROW, not the detail page's bitmap
-   button: a reference-protected package has to show a disabled state, and a
-   bitmap cannot take the grey foreground. Disabled is drawn two ways at once
-   because they cost nothing: the host's CANOPUS_UI_COLOR_DISABLED foreground,
-   plus style.opacity where the exact target has a recovered opacity property.
-   P65 retains the disabled foreground without an unbound style property. The
-   title turns DANGER red while the action is live; the disabled copy keeps its
-   event id because action_row rejects a zero one, and the runtime refuses the
-   dispatch on its own through the cleared ENABLED flag. */
-static int confirm_action(struct canopus_ui_tree_v1 *t,int32_t y,uint8_t enabled) {
-    static const char *const label="删除";
-    const char *detail=enabled?"删除后无法恢复":"当前不可用";
-    struct canopus_ui_action_row_props_v1 p={sizeof(p),label,len(label),detail,len(detail),EV_DELETE,enabled};
+   button: a disabled action has to show a grey state, and a bitmap cannot take
+   the grey foreground. Disabled is drawn two ways at once because they cost
+   nothing: the host's CANOPUS_UI_COLOR_DISABLED foreground, plus style.opacity
+   where the exact target has a recovered opacity property. P65 retains the
+   disabled foreground without an unbound style property. The title turns
+   DANGER red while the action is live; the disabled copy keeps its event id
+   because action_row rejects a zero one, and the runtime refuses the dispatch
+   on its own through the cleared ENABLED flag. */
+static int confirm_action(struct canopus_ui_tree_v1 *t,int32_t y,uint8_t enabled,
+                          const char *label,const char *detail,uint32_t event) {
+    struct canopus_ui_action_row_props_v1 p={sizeof(p),label,len(label),detail,len(detail),event,enabled};
     struct canopus_ui_style_v1 s=CANOPUS_UI_STYLE_DEFAULT;
     TRY(U.ctx->ui->action_row(t,KEY_ACTION,&p));
     TRY(box(t,KEY_ACTION,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,y,0,0,-1,0));
@@ -884,6 +909,7 @@ static int build_confirm(struct canopus_ui_tree_v1 *t) {
     const char *name=U.metadata.name[0]?U.metadata.name:U.detail_id;
     const char *message="删除后，资源包文件与索引将一并移除，且无法恢复。";
     uint32_t color=0xc5cbd5;
+    uint8_t enabled;
     if(U.delete_blocked) {message=U.delete_blocked==RH_MANAGER_ERR_ACTIVE?blocked_text:"无法确认该资源包的使用状态，删除可能失败。";color=0xda593c;}
     else if(U.confirm_error[0]) {message=U.confirm_error;color=0xda593c;}
     TRY(row(t,KEY_ROW,"主题包",name,0));
@@ -891,7 +917,46 @@ static int build_confirm(struct canopus_ui_tree_v1 *t) {
     TRY(wrap_lines(t,KEY_ROW+2,message,110,20,color,4));
     /* Only a live reference is a permanent refusal. Any other preflight error
        (a busy catalog, a stale index) keeps the action so it can be retried. */
-    return confirm_action(t,(int32_t)U.content_height-106,U.delete_blocked!=RH_MANAGER_ERR_ACTIVE);
+    enabled=U.delete_blocked!=RH_MANAGER_ERR_ACTIVE;
+    return confirm_action(t,(int32_t)U.content_height-106,enabled,
+                          "删除",enabled?"删除后无法恢复":"当前不可用",EV_DELETE);
+}
+/* Canceling a transfer mirrors the remote CANCEL op: the staged install intent
+   is revoked first, so a package whose registry already committed stays
+   installed and the confirm result says so instead of pretending otherwise.
+   A latched error is also cancellable — clearing it is what releases a
+   different-content OPEN. The action disables only when the receiver holds
+   nothing anymore; a race (the task finishing meanwhile) resolves as a plain
+   return to the list. */
+static int build_cancel(struct canopus_ui_tree_v1 *t) {
+    /* Four wrapped lines hold this copy on the narrow 204px card. */
+    static const char *const message="取消后，已接收的内容将被丢弃，发送端需要重新发送整个资源包。";
+    static const char *const inactive="当前没有进行中的传输任务，无需操作。";
+    const char *body,*detail;uint32_t color;uint8_t enabled;
+    int phase=U.transfer.phase;
+    enabled=(uint8_t)transfer_cancelable(phase);
+    if(U.confirm_error[0]) {body=U.confirm_error;detail="可返回后重试";color=0xda593c;}
+    else if(enabled) {body=message;detail="已传输内容不会保留";color=0xc5cbd5;}
+    else {body=inactive;detail="返回后无需操作";color=0xda593c;}
+    TRY(row(t,KEY_ROW,"传输任务",transfer_phase_title(phase),0));
+    TRY(box(t,KEY_ROW,(int)U.row_width,96,((int)U.width-(int)U.row_width)/2,0,0,0,-1,0));
+    TRY(wrap_lines(t,KEY_ROW+2,body,110,20,color,4));
+    /* The action label must differ from the page title: both are primary
+       strings, and the header row owns no event id. */
+    return confirm_action(t,(int32_t)U.content_height-106,enabled,"确认取消",detail,EV_CANCEL);
+}
+static int cancel_transfer_confirm(void) {
+    int rc;
+    if(U.busy) return 0;
+    rc=rh_module_cancel_transfer();
+    if(!rc) return navigate(RESOURCES,1);
+    if(rc==CANOPUS_SVC_ERR_UNSUPPORTED)
+        copy(U.confirm_error,sizeof(U.confirm_error),"当前构建没有传输接收器，无法取消。");
+    else if(rc==CANOPUS_SVC_ERR_STATE)
+        copy(U.confirm_error,sizeof(U.confirm_error),"当前没有进行中的传输任务。");
+    else
+        copy(U.confirm_error,sizeof(U.confirm_error),"取消失败，请稍后重试。");
+    return render();
 }
 static int delete_confirm(void) {
     int rc;
@@ -1020,6 +1085,10 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
             if(U.route==DELETE) return delete_confirm();
         }
         if(event==EV_DISMISS && click) {U.banner_hidden=1;return render();}
+        if(event==EV_CANCEL && click) {
+            if(U.route==RESOURCES) {U.scroll[CANCEL]=0;return navigate(CANCEL,0);}
+            if(U.route==CANCEL) return cancel_transfer_confirm();
+        }
         /* The preview wrapper is not a prefab row, so it never sees ACTIVATE;
            its click is the release inside slop, like the image buttons. */
         if(click && event>=EV_CHOOSE && U.route==SELECT) return choose_option(event-EV_CHOOSE);
@@ -1028,6 +1097,7 @@ static int on_event(const struct canopus_context_v1 *ctx,struct canopus_ui_conte
     if(e->type!=CANOPUS_UI_EVENT_ACTIVATE && e->type!=CANOPUS_UI_EVENT_VALUE_CHANGED) return 0;
     if(event==EV_BACK) return back();
     if(event==EV_DELETE && U.route==DELETE) return delete_confirm();
+    if(event==EV_CANCEL && U.route==CANCEL) return cancel_transfer_confirm();
     if(event==EV_RESOURCES) {U.scroll[RESOURCES]=0;return navigate(RESOURCES,1);}
     if(event==EV_MIX) {U.scroll[MIX]=0;return navigate(MIX,1);}
     if(event>=EV_OPTION && event<EV_CHOOSE && U.route==SELECT) return choose_option(event-EV_OPTION);

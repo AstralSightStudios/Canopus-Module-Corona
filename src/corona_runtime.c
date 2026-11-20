@@ -246,6 +246,15 @@ static void changed(void *cookie, const struct rh_transfer_ui_state *state) {
     (void)cookie;
     (void)rh_manager_set_transfer_state(state);
 }
+/* Manager UI entry point for revoking the active task. Protocol negatives
+ * collapse to IO: the banner already shows the phase, so the page only needs
+ * success versus retry-later. */
+static int cancel_transfer(void) {
+    int rc;
+    if (!R.receiver) return CANOPUS_SVC_ERR_STATE;
+    rc = rh_connect_cancel(R.receiver);
+    return rc ? CANOPUS_SVC_ERR_IO : 0;
+}
 static void tick(const struct canopus_context_v1 *ctx, int32_t timer, void *cookie) {
     (void)ctx; (void)timer; (void)cookie;
     cleanup_step();
@@ -269,6 +278,7 @@ int rh_connect_runtime_start(const struct canopus_context_v1 *ctx) {
     hooks.changed = changed;
     rc = rh_connect_create(ctx, &hooks, &R.receiver);
     if (rc) return rc==-11 ? CANOPUS_SVC_ERR_UNSUPPORTED:rc;
+    rh_module_set_transfer_cancel(cancel_transfer);
     R.timer = ctx->time->timer_create(ctx, 10u, 1, tick, 0);
     if (R.timer < 0) { rc = R.timer; goto failed; }
     if (canopus_services_has(ctx, CANOPUS_SVC_TIME, 2) && ctx->time->timer_set_background) {
@@ -290,6 +300,7 @@ failed:
 void rh_connect_runtime_stop(void) {
     if (R.timer >= 0) (void)R.ctx->time->timer_destroy(R.ctx, R.timer);
     R.timer = -1;
+    rh_module_set_transfer_cancel(0);
     if (R.receiver) {
         (void)rh_connect_pause(R.receiver);
         rh_connect_destroy(R.receiver);

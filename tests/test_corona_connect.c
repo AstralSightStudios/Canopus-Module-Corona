@@ -22,6 +22,7 @@ static uint8_t reply[480];
 static uint32_t reply_size,sends,io_calls,short_write,short_read;
 static int write_fail_after=-1,fail_sync,fail_record_write,fail_read,fail_close,record_sync_fail_after=-1;
 static int send_busy,remote=1,find_result,install_result,begin_result,begin_count,step_count,abort_count;
+static int cancel_result,cancel_count;
 static int callback_active,alloc_fail,list_result;
 /* Each clock read advances by clock_advance. The default exceeds the work
  * budget so every poll runs exactly one step; zero freezes the clock. */
@@ -91,6 +92,7 @@ static int install_begin(void *cookie,const char *archive,uint32_t n,uint32_t ge
 }
 static int install_step(void *cookie,const uint8_t hash[32]) { (void)cookie;assert(!callback_active && hash);step_count++;return install_result; }
 static void install_abort(void *cookie) { (void)cookie;assert(!callback_active);abort_count++; }
+static int install_cancel(void *cookie,const uint8_t hash[32]) { (void)cookie;assert(!callback_active && hash);cancel_count++;return cancel_result; }
 /* Moves the shared descriptor, as a real extractor does, so a flush that does
  * not seek corrupts the archive and fails its hash. */
 static int extract_step(void *cookie,int32_t fd,uint32_t written,uint32_t n,uint32_t gen) {
@@ -112,7 +114,7 @@ static const struct canopus_connect_obj connect={.send=connect_send,.listen=conn
 static uint32_t monotonic(const struct canopus_context_v1 *c) { uint32_t now=clock_ms;(void)c;clock_ms+=clock_advance;return now; }
 static const struct canopus_time_obj time_api={.monotonic_ms=monotonic};
 static const struct canopus_context_v1 ctx={.struct_size=sizeof(ctx),.fs=&fs,.mem=&mem,.connect=&connect,.time=&time_api};
-static const struct rh_connect_hooks hooks={.install_begin=install_begin,.install_step=install_step,.install_abort=install_abort,.extract_step=extract_step,.find_hash=find_hash,.list=list,.changed=changed};
+static const struct rh_connect_hooks hooks={.install_begin=install_begin,.install_step=install_step,.install_abort=install_abort,.extract_step=extract_step,.install_cancel=install_cancel,.find_hash=find_hash,.list=list,.changed=changed};
 static const uint8_t abc_hash[32]={0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
 static const uint8_t large_hash[32]={0x6d,0x1c,0xf2,0x2d,0x7c,0xc0,0x9b,0x08,0x5d,0xfc,0x25,0xee,0x1a,0x1f,0x3a,0xe0,0x26,0x58,0x04,0xc6,0x07,0xbc,0x20,0x74,0xad,0x25,0x3b,0xcc,0x82,0xfd,0x81,0xee};
 static void cleanup_tree(const char *name) {
@@ -129,6 +131,7 @@ static void setup(void) {
     listener=0;receiver=0;memset(&ui,0,sizeof(ui));reply_size=sends=io_calls=short_write=short_read=0;
     write_fail_after=record_sync_fail_after=-1;fail_sync=fail_record_write=fail_read=fail_close=send_busy=find_result=begin_result=begin_count=step_count=abort_count=alloc_fail=list_result=0;
     remote=1;install_result=1;peak_bytes=0;clock_advance=1000;extract_generation=extract_written=0;
+    cancel_result=0;cancel_count=0;
     assert(!rh_connect_create(&ctx,&hooks,&receiver));assert(!rh_connect_start(receiver));assert(listener);
 }
 static void teardown(void) {
@@ -363,6 +366,18 @@ static void test_installer_busy_is_retryable(void) {
     install_result=1;ticks(1);assert(ui.phase==4 && step_count==3 && abort_count==1);
     teardown();
 }
+static void test_installer_active_is_retryable(void) {
+    /* ACTIVE describes the catalog at the previous attempt, not this session.
+     * A client that saw the refusal and re-Opened the same content must be able
+     * to retry once the reference was released, so OPEN clears it like BUSY. */
+    setup();begin_result=-9;
+    {uint32_t token=open_task(3,abc_hash,1,1);request(3,0,token,0,"abc",3);ticks(1);
+     request(5,2,token,0,0,0);ticks(4);assert(ui.phase==5 && ui.detail==9);}
+    begin_result=0;install_result=1;
+    {uint32_t token=open_task(3,abc_hash,2,3);assert(ui.phase==1 && !ui.detail);
+     request(5,4,token,0,0,0);ticks(8);assert(ui.phase==4 && !ui.detail);}
+    teardown();
+}
 static void test_token_exhaustion(void) {
     char name[512];uint8_t record[128];setup();(void)open_task(3,abc_hash,1,1);crash();
     for(unsigned slot=0;slot<2;slot++) {
@@ -408,11 +423,77 @@ static void test_work_runs_within_one_tick(void) {
     install_result=1;ticks(1);assert(ui.phase==RH_XFER_PHASE_INSTALLED && !ui.detail && step_count==3);
     teardown();
 }
+static void test_local_cancel_releases_task(void) {
+    uint32_t token;setup();
+    /* No task: a device-side cancel is a no-op success, not a protocol error. */
+    assert(!rh_connect_cancel(receiver));
+    token=open_task(100000,large_hash,1,1);
+    request(3,0,token,0,"abc",3);ticks(1);query(token,2);assert(ui.written_offset==3);
+    assert(!rh_connect_cancel(receiver));
+    assert(ui.phase==RH_XFER_PHASE_CANCELED && !ui.detail && cancel_count==1);
+    assert(fs_exists(&ctx,"/data/canopus/m.corona/incoming/archive.zip")==0);
+    /* The revocation is announced to the peer before anything else is sent. */
+    ticks(1);assert(reply[0]==0x83 && reply[18]==RH_XFER_PHASE_CANCELED);
+    /* The BUSY deadlock is gone: different content opens a fresh task. */
+    token=open_task(3,abc_hash,2,3);assert(ui.phase==RH_XFER_PHASE_RECEIVING && ui.written_offset==0);
+    request(3,0,token,0,"abc",3);ticks(1);request(5,4,token,0,0,0);ticks(8);
+    assert(ui.phase==RH_XFER_PHASE_INSTALLED);
+    /* The terminal survives a restart without blocking anything. */
+    restart_receiver();assert(ui.phase==RH_XFER_PHASE_INSTALLED);
+    teardown();
+}
+static void test_local_cancel_latched_error(void) {
+    uint8_t body[40]={0};uint32_t token;setup();
+    /* A latched error keeps the task active: exactly the stuck-BUSY state a
+       failed upload leaves behind on the device. */
+    token=open_task(3,abc_hash,1,1);request(3,0,token,0,"abd",3);ticks(1);
+    request(5,2,token,0,0,0);ticks(8);assert(ui.detail==6 && ui.phase==RH_XFER_PHASE_ERROR);
+    memcpy(body,large_hash,32);body[32]=2;
+    request(2,3,0,100000,body,40);ticks(1);assert(reply_size==12 && reply[1]==2);
+    /* The device-side cancel clears the latch where no token exists to CANCEL. */
+    assert(!rh_connect_cancel(receiver));assert(ui.phase==RH_XFER_PHASE_CANCELED && !ui.detail);
+    token=open_task(100000,large_hash,3,4);assert(ui.phase==RH_XFER_PHASE_RECEIVING && !ui.detail);
+    teardown();
+}
+static void test_local_cancel_hook_paths(void) {
+    uint32_t token;setup();
+    /* A registry that already committed cannot be undone: the cancel reports
+       INSTALLED and retains the peer's ability to QUERY the terminal. */
+    token=open_task(3,abc_hash,1,1);request(3,0,token,0,"abc",3);ticks(1);
+    request(5,2,token,0,0,0);ticks(4);assert(ui.phase==RH_XFER_PHASE_INSTALLING && begin_count==1);
+    cancel_result=1;assert(!rh_connect_cancel(receiver));
+    assert(ui.phase==RH_XFER_PHASE_INSTALLED && !ui.detail && cancel_count==1);
+    assert(fs_exists(&ctx,"/data/canopus/m.corona/incoming/archive.zip")==0);
+    assert(!rh_connect_cancel(receiver));assert(cancel_count==1);
+    teardown();
+    /* A failed revocation leaves the task untouched and retryable. */
+    setup();token=open_task(3,abc_hash,1,1);request(3,0,token,0,"abc",3);ticks(1);
+    request(5,2,token,0,0,0);ticks(4);assert(ui.phase==RH_XFER_PHASE_INSTALLING);
+    cancel_result=-9;assert(rh_connect_cancel(receiver)==-9);
+    assert(ui.phase==RH_XFER_PHASE_INSTALLING && !ui.detail);
+    cancel_result=0;assert(!rh_connect_cancel(receiver));
+    assert(ui.phase==RH_XFER_PHASE_CANCELED && abort_count>=1);
+    teardown();
+}
+static void test_local_cancel_checkpoint_failure(void) {
+    uint32_t token;setup();token=open_task(3,abc_hash,1,1);request(3,0,token,0,"abc",3);ticks(1);
+    /* A failed record write latches IO without moving progress back; the task
+       stays retryable until the revocation is durable. */
+    fail_record_write=1;assert(rh_connect_cancel(receiver)==-5);
+    assert(ui.phase==RH_XFER_PHASE_ERROR && ui.detail==5 && ui.written_offset==3);
+    fail_record_write=0;assert(!rh_connect_cancel(receiver));
+    assert(ui.phase==RH_XFER_PHASE_CANCELED && !ui.detail);
+    assert(fs_exists(&ctx,"/data/canopus/m.corona/incoming/archive.zip")==0);
+    teardown();
+}
 int main(void) {
     test_roundtrip();test_retry_and_barriers();test_backpressure_and_ack();test_short_write_failure();test_reboot_checkpoint();
     test_hash_and_install_recovery();test_active_refusal_is_retryable();test_corruption_and_high_water();test_failed_open_and_limits();test_failed_open_shutdown();test_token_exhaustion();
     test_committed_install_checkpoint_failure();test_deleted_package_reinstall();test_cached_open_repairs_high_water();
     test_oversized_controls();test_ack_survives_control_reply();test_installer_busy_is_retryable();
+    test_installer_active_is_retryable();
     test_work_runs_within_one_tick();test_extraction_shares_descriptor();
+    test_local_cancel_releases_task();test_local_cancel_latched_error();
+    test_local_cancel_hook_paths();test_local_cancel_checkpoint_failure();
     puts("corona_connect: production receiver, persistence and fault checks passed");return 0;
 }

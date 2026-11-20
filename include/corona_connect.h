@@ -43,12 +43,17 @@ struct rh_connect_hooks {
  * A caller requiring a successful durable shutdown must check pause first.
  * The receiver owns only incoming/archive.zip and fixed-size state records.
  * CANCEL revokes the task and unlinks the ZIP; staging cleanup belongs to hooks.
- * No directory deletion or background timer capability is assumed here. */
+ * No directory deletion or background timer capability is assumed here.
+ * rh_connect_cancel is the device-side form of the remote CANCEL op: 0 means
+ * the task is revoked (or nothing was active), and a registry that already
+ * committed is reported as INSTALLED instead of being undone. A negative
+ * protocol code leaves the task untouched so the attempt can be retried. */
 int rh_connect_create(const struct canopus_context_v1 *,
                       const struct rh_connect_hooks *, struct rh_connect **);
 int rh_connect_start(struct rh_connect *);
 void rh_connect_poll(struct rh_connect *);
 int rh_connect_pause(struct rh_connect *);
 void rh_connect_destroy(struct rh_connect *);
+int rh_connect_cancel(struct rh_connect *);
 
 #endif
