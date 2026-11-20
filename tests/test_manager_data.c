@@ -475,6 +475,151 @@ static void test_connect_cleanup_and_sync(void) {
         rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);}
 }
 static int install_budget_step(struct rh_manager_data *d,char id[65]);
+static void pause_at_install_journal(struct rh_manager_data *d,const char *stage,uint32_t generation,const uint8_t hash[32]) {
+    char id[65];uint32_t i;
+    assert(!rh_manager_data_install_begin(d,stage,generation,hash));
+    for(i=0;i<40u;i++) {
+        assert(!install_budget_step(d,id));
+        if(fs_exists(&ctx,"registry-install.pending"))break;
+    }
+    assert(i<40u);rh_manager_data_install_abort(d);
+}
+static void legacy_install_journal(void) {
+    char *text=read_fixture("registry-install.pending"),*prior=strstr(text,",\"previousGeneration\":");
+    assert(prior);strcpy(prior,"}");fixture("registry-install.pending",text);free(text);
+}
+static void test_dangling_reference_install_recovery(void) {
+    /* Fresh accepted installs, failed rename (including its empty parent), and
+     * post-rename restart must all publish despite preexisting dangling refs. */
+    for(unsigned scenario=0;scenario<5u;scenario++) {
+        struct rh_manager_data *d=0;uint8_t hash[32]={32};char id[65],*text;
+        setup();
+        if(scenario==4u)fixture("interconnect-themes.json","[\"alpha\",\"beta\",\"gamma\"]");
+        assert(!rh_manager_data_create(&ctx,0,&d));
+        fixture("resource-active-generations.json","{\"version\":1,\"generations\":[],\"protectedThemes\":[\"gamma\"]}");
+        fixture("mappings.tsv","/resource/g.bin\tthemes/gamma/g.bin\n");
+        make_staging("dangling",gamma);
+        if(scenario==1u)fail_rename_path="themes/gamma/7";
+        else if(scenario==2u||scenario==3u)fail_write_path="interconnect-themes.json.manager-tmp";
+        assert(rh_manager_data_install(d,"staging/dangling",7u,hash,id)==(scenario>=1u&&scenario<=3u ? -EIO:0));
+        fail_rename_path=fail_write_path=0;
+        if(scenario>=1u&&scenario<=3u) {
+            assert(fs_exists(&ctx,"registry-install.pending")==1);
+            assert(fs_exists(&ctx,"staging/dangling")== (scenario==1u));
+            text=read_fixture("registry-install.pending");assert(strstr(text,"\"previousGeneration\":null"));free(text);
+            if(scenario==3u)legacy_install_journal();
+            rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);
+            assert(!rh_manager_data_create(&ctx,0,&d));
+        }
+        assert(rh_manager_data_revision(d)==2u);
+        assert(fs_exists(&ctx,"themes/gamma/7/g.bin")==1&&!fs_exists(&ctx,"staging/dangling"));
+        assert(!fs_exists(&ctx,"registry-install.pending"));
+        assert(rh_manager_data_find_hash(d,hash,id)==1&&!strcmp(id,"gamma"));
+        /* Once published, the very same references protect the live package. */
+        make_staging("protected",gamma);hash[0]++;
+        assert(rh_manager_data_install(d,"staging/protected",8u,hash,id)==RH_MANAGER_ERR_ACTIVE);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+    }
+}
+static void test_journal_revision_already_consumed(void) {
+    for(unsigned formatting=0;formatting<2u;formatting++) {
+        struct rh_manager_data *d=0;uint8_t hash[32]={33};char id[65],*registry,*rewritten;
+        setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("consumed",gamma);
+        if(formatting)fail_remove_path="registry-install.pending";
+        else fail_rename_path="themes/gamma/7";
+        assert(rh_manager_data_install(d,"staging/consumed",7u,hash,id)==(formatting ? 0:-EIO));
+        fail_remove_path=fail_rename_path=0;assert(fs_exists(&ctx,"registry-install.pending")==1);
+        if(formatting) {
+            registry=read_fixture("interconnect-themes.json");rewritten=malloc(strlen(registry)+4u);assert(rewritten);
+            sprintf(rewritten," \n%s\n",registry);free(registry);fixture("interconnect-themes.json",rewritten);
+        } else {
+            const char *other="{\"version\":2,\"revision\":2,\"themes\":[{\"id\":\"alpha\",\"generation\":0}]}";
+            rewritten=strdup(other);assert(rewritten);fixture("interconnect-themes.json",rewritten);
+        }
+        assert(!rh_manager_data_refresh(d)&&rh_manager_data_revision(d)==2u);
+        assert(!fs_exists(&ctx,"registry-install.pending"));
+        registry=read_fixture("interconnect-themes.json");assert(!strcmp(registry,rewritten));free(registry);free(rewritten);
+        assert(fs_exists(&ctx,"staging/consumed")==!formatting);
+        assert(fs_exists(&ctx,"themes/gamma/7/g.bin")== (int)formatting);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);
+        assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_find_hash(d,hash,id)==(int)formatting);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+    }
+}
+static void test_recovery_old_generation_and_probe_errors(void) {
+    /* The current registry names generation 5, not its parent or candidate 7.
+     * Test both old and new journal schemas with an empty Manager catalog. */
+    for(unsigned scenario=0;scenario<4u;scenario++) {
+        struct rh_manager_data *d=0;uint8_t old[32]={34},hash[32]={35};char id[65];
+        setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("old",gamma);
+        assert(!rh_manager_data_install(d,"staging/old",5u,old,id));
+        make_staging("replacement",gamma);pause_at_install_journal(d,"staging/replacement",7u,hash);
+        if(scenario&1u)legacy_install_journal();
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);
+        fixture("resource-active-generations.json","{\"version\":1,\"generations\":[],\"protectedThemes\":[\"gamma\"]}");
+        if(scenario>=2u) {
+            assert(!fs_remove(&ctx,"themes/gamma/5/corona.json"));assert(!fs_remove(&ctx,"themes/gamma/5/g.bin"));fixture_rmdir("themes/gamma/5");
+        }
+        fail_stat_path="themes/gamma/5";
+        assert(rh_manager_data_create(&ctx,0,&d)==-EIO&&!d);fail_stat_path=0;
+        assert(!blocks&&!live_bytes&&fs_exists(&ctx,"registry-install.pending")==1);
+        if(scenario<2u) {
+            assert(rh_manager_data_create(&ctx,0,&d)==RH_MANAGER_ERR_ACTIVE&&!d);
+            assert(!blocks&&!live_bytes&&fs_exists(&ctx,"themes/gamma/5/g.bin")==1);
+            assert(fs_exists(&ctx,"staging/replacement/g.bin")==1&&!fs_exists(&ctx,"themes/gamma/7"));
+            assert(!fs_remove(&ctx,"resource-active-generations.json"));
+        }
+        assert(!rh_manager_data_create(&ctx,0,&d));assert(!fs_exists(&ctx,"registry-install.pending"));
+        if(scenario>=2u) {
+            /* Parent still exists, but NOTFOUND on the published generation
+             * proves deletion. Discard the old intent; a new install can repair. */
+            assert(rh_manager_data_revision(d)==2u&&!fs_exists(&ctx,"themes/gamma/7"));
+            assert(fs_exists(&ctx,"staging/replacement/g.bin")==1);
+            assert(!rh_manager_data_install(d,"staging/replacement",7u,hash,id));
+        }
+        assert(rh_manager_data_revision(d)==3u&&rh_manager_data_find_hash(d,hash,id)==1);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes&&!open_directories);cleanup_dir(sandbox);
+    }
+}
+static void test_recovery_payload_probe_errors(void) {
+    const char *paths[]={"staging/probe","themes/gamma/7"};
+    for(unsigned i=0;i<2u;i++) {
+        struct rh_manager_data *d=0;uint8_t hash[32]={36};char id[65];
+        setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("probe",gamma);
+        pause_at_install_journal(d,"staging/probe",7u,hash);rh_manager_data_destroy(d);
+        fixture("resource-active-generations.json","{\"version\":1,\"generations\":[],\"protectedThemes\":[\"gamma\"]}");
+        fail_stat_path=paths[i];assert(rh_manager_data_create(&ctx,0,&d)==-EIO&&!d);fail_stat_path=0;
+        assert(!blocks&&!live_bytes&&fs_exists(&ctx,"registry-install.pending")==1);
+        assert(!rh_manager_data_create(&ctx,0,&d));assert(rh_manager_data_find_hash(d,hash,id)==1);
+        rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+    }
+}
+static void test_journal_prior_state_validation(void) {
+    struct rh_manager_data *d=0;uint8_t hash[32]={37};char id[65],*text,*prefix_text,*value,*invalid;
+    const char *values[]={"false","-1","4294967296","\"null\""};int rc=0;
+    setup();assert(!rh_manager_data_create(&ctx,0,&d));make_staging("snapshot",gamma);
+    assert(!rh_manager_data_install_begin(d,"staging/snapshot",7u,hash));
+    /* A probe failure at journal creation must not certify prior absence. */
+    fail_stat_path="themes/gamma";
+    for(unsigned i=0;i<40u;i++){rc=install_budget_step(d,id);if(rc)break;}
+    fail_stat_path=0;assert(rc==-EIO&&!fs_exists(&ctx,"registry-install.pending"));
+    pause_at_install_journal(d,"staging/snapshot",7u,hash);rh_manager_data_destroy(d);
+    text=read_fixture("registry-install.pending");prefix_text=strdup(text);assert(prefix_text);
+    value=strstr(prefix_text,"null}");assert(value);*value=0;
+    invalid=malloc(strlen(prefix_text)+64u);assert(invalid);
+    for(unsigned i=0;i<sizeof(values)/sizeof(values[0]);i++) {
+        sprintf(invalid,"%s%s}",prefix_text,values[i]);fixture("registry-install.pending",invalid);
+        assert(rh_manager_data_create(&ctx,0,&d)==-22&&!d);
+        assert(!blocks&&!live_bytes&&fs_exists(&ctx,"registry-install.pending")==1);
+    }
+    fixture("registry-install.pending",text);free(invalid);free(prefix_text);free(text);
+    fixture("resource-active-generations.json","broken");
+    assert(rh_manager_data_create(&ctx,0,&d)==-22&&!d);
+    assert(!blocks&&!live_bytes&&fs_exists(&ctx,"registry-install.pending")==1);
+    assert(!fs_remove(&ctx,"resource-active-generations.json"));assert(!rh_manager_data_create(&ctx,0,&d));
+    assert(rh_manager_data_find_hash(d,hash,id)==1);
+    rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
+}
 static void test_stale_journal_and_deleted_package(void) {
     /* Reproduces the reported deadlock: a validated replacement writes its
      * journal, then the active package is deleted before registry publication.
@@ -710,4 +855,4 @@ static void test_empty_install_and_read_failures(void) {
     assert(!rh_manager_data_mix_get(d,5,&item)&&!strcmp(item.choice,"@default"));
     rh_manager_data_destroy(d);assert(!blocks&&!live_bytes);cleanup_dir(sandbox);
 }
-int main(void) {test_empty_install_and_read_failures();test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_stale_journal_and_deleted_package();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
+int main(void) {test_dangling_reference_install_recovery();test_journal_revision_already_consumed();test_recovery_old_generation_and_probe_errors();test_recovery_payload_probe_errors();test_journal_prior_state_validation();test_empty_install_and_read_failures();test_versioned_directory_cleanup();test_v2_config_and_overlay_cleanup();test_install_cancel_and_terminal_commit();test_damaged_hash_reinstall();test_incremental_install();test_incremental_abort_and_fault();test_incremental_recovery_budget();test_connect_cleanup_and_sync();test_connect_install_and_list();test_connect_install_recovery();test_connect_install_update_and_validation();test_stale_journal_and_deleted_package();test_connect_empty_list();test_core();test_apply_overlap();test_faults();test_installed_metadata();test_overlay();test_migration();test_migration_merge();test_migration_empty_native();test_migration_retry();test_migration_fresh_retry();test_migration_invalid_registry();test_256_rules();test_pointer_and_config_gc();test_overlong_concrete_path();test_failed_close_buffer_ownership();printf("native manager data: all checks passed (service cap128 blocks/256KiB; peak %u blocks, %u bytes)\n",peak_blocks,peak_bytes);return 0;}
